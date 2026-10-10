@@ -1,8 +1,9 @@
 ## HTTP request and response values used by fastnim applications.
 
-import std/[json, jsonutils, macros, strutils, tables, uri]
+import std/[json, macros, strutils, tables, uri]
 
 import fastnim/context/state
+import fastnim/private/jsonconversion
 
 export tables
 
@@ -177,23 +178,23 @@ proc json*[T](body: T, status = 200): Response =
     when typeof(body[0][0]) is string:
       var node = newJObject()
       for (key, value) in body:
-        node[key] = toJson(value)
+        node[key] = toJsonValue(value)
       json(node, status)
     else:
-      json(toJson(body), status)
+      json(toJsonValue(body), status)
   else:
-    json(toJson(body), status)
+    json(toJsonValue(body), status)
 
 proc json*[V](body: Table[string, V], status = 200): Response =
   ## Creates a JSON object response from a string-keyed table.
   var node = newJObject()
   for key, value in body:
-    node[key] = toJson(value)
+    node[key] = toJsonValue(value)
   json(node, status)
 
 proc response*[T](status: int, model: T): Response =
   ## Serializes a typed response model as JSON with ``status``.
-  json(toJson(model), status)
+  json(toJsonValue(model), status)
 
 proc response*(status: int, model: JsonNode): Response {.raises: [].} =
   ## Creates a JSON response from an already-encoded JSON value.

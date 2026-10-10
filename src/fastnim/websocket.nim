@@ -1,8 +1,9 @@
 ## WebSocket connection helpers for fastnim applications.
 
-import std/[json, jsonutils]
+import std/json
 
 import chronos/[asyncloop, futures]
+import fastnim/private/jsonconversion
 import stew/byteutils
 import websock/websock as rawWs
 
@@ -124,7 +125,7 @@ proc sendJson*[T](
     )
 .} =
   ## Serializes and sends a JSON text message.
-  await websocket.sendText($toJson(value))
+  await websocket.sendText($toJsonValue(value))
 
 proc receiveBytes*(
     websocket: WebSocket
@@ -165,7 +166,7 @@ proc receiveJson*[T](
     )
 .} =
   ## Receives and decodes the next JSON text message.
-  result = jsonTo(parseJson(await websocket.receiveText()), T)
+  result = jsonToValue(parseJson(await websocket.receiveText()), T)
 
 proc close*(
     websocket: WebSocket, code = 1000, reason = ""

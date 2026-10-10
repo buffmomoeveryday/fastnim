@@ -1,4 +1,4 @@
-import std/assertions
+import std/[assertions, json]
 
 import fastnim
 
@@ -11,6 +11,13 @@ type
 
   CreateItem = object
     name: string
+
+  RenamedProfile = object
+    displayName {.jsonName: "display_name".}: string
+    age: int
+
+  RenamedEnvelope = object
+    profiles: seq[RenamedProfile]
 
 let app = initFastNim()
 app.get("/items", responses = @[(200, Success), (400, Failure)]):
@@ -52,6 +59,47 @@ block invalidJsonBody:
     app.handle(initRequest(HttpMethod.Post, "/items/from-body", body = "not json"))
   doAssert response.status == 400
   doAssert response.body == "{\"detail\":\"invalid JSON request body\"}"
+
+block jsonNameEncodesAndDecodesRequestBodies:
+  let helper = initFastNim(logs = false)
+  helper.post(
+    "/profiles", body = RenamedEnvelope, responses = @[(200, RenamedEnvelope)]
+  ):
+    ok body
+
+  let response = helper.handle(
+    initRequest(
+      HttpMethod.Post,
+      "/profiles",
+      body = """{"profiles":[{"display_name":"Ada","age":36}]}""",
+    )
+  )
+  let payload = parseJson(response.body)
+  doAssert response.status == 200, response.body
+  doAssert payload["profiles"][0]["display_name"].getStr == "Ada"
+  doAssert "displayName" notin payload["profiles"][0]
+
+block jsonNameAppliesToTypedResponses:
+  let response = respondOk(RenamedProfile(displayName: "Lin", age: 28))
+  let payload = parseJson(response.body)
+  doAssert payload["display_name"].getStr == "Lin"
+  doAssert "displayName" notin payload
+
+block jsonNameRejectsAmbiguousInput:
+  let helper = initFastNim(logs = false)
+  helper.post(
+    "/profile", body = RenamedProfile, responses = @[(200, RenamedProfile)]
+  ):
+    ok body
+
+  let response = helper.handle(
+    initRequest(
+      HttpMethod.Post,
+      "/profile",
+      body = """{"displayName":"Ada","display_name":"Lin","age":36}""",
+    )
+  )
+  doAssert response.status == 400
 
 type
   Member = object

@@ -7,11 +7,11 @@ import fastnim
 
 type
   CreateItem = object
-    name: string
+    displayName {.jsonName: "display_name".}: string
 
   CreatedItem = object
     id: int
-    name: string
+    displayName {.jsonName: "display_name".}: string
 
   RequestInfo = object
     requestId: int
@@ -35,7 +35,7 @@ app.get("/request-info", responses = @[(200, RequestInfo)]):
   ok RequestInfo(requestId: 1, path: request.path)
 
 app.post("/items", body = CreateItem, responses = @[(201, CreatedItem)]):
-  created CreatedItem(id: 1, name: body.name)
+  created CreatedItem(id: 1, displayName: body.displayName)
 
 let server = app.serve(port = 8090)
 echo "Listening at http://127.0.0.1:8090"
