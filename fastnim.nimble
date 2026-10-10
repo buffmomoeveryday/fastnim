@@ -13,6 +13,7 @@ binDir = "bin"
 requires "nim >= 2.2.12"
 requires "chronos >= 4.0.0"
 requires "websock >= 0.4.2"
+requires "nimcrypto >= 0.7.0"
 
 task docs, "Generate HTML API documentation with nim doc":
   ## Renders every library module into htmldocs/ using nim doc.
@@ -34,6 +35,10 @@ task docs, "Generate HTML API documentation with nim doc":
     "src/fastnim/plugins/ratelimit.nim",
     "src/fastnim/plugins/inertia.nim",
     "src/fastnim/plugins/datastar.nim",
+    "src/fastnim/plugins/auth.nim",
+    "src/fastnim/plugins/auth/schemes.nim",
+    "src/fastnim/plugins/auth/patterns.nim",
+    "src/fastnim/plugins/auth/session.nim",
     "src/fastnim/plugins/openapi.nim",
     "src/fastnim/websocket.nim",
     "src/fastnim/logging.nim",
