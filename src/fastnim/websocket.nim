@@ -1,0 +1,177 @@
+## WebSocket connection helpers for fastnim applications.
+
+import std/[json, jsonutils]
+
+import chronos/[asyncloop, futures]
+import stew/byteutils
+import websock/websock as rawWs
+
+type
+  WebSocketState* {.pure.} = enum ## Lifecycle state of a WebSocket connection.
+    Connecting
+    Connected
+    Disconnected
+
+  WebSocketDisconnectError* = object of CatchableError
+    ## Raised when an operation requires an open WebSocket connection.
+    code*: int ## Protocol close code carried by the failure.
+
+  WebSocket* = ref object ## An accepted WebSocket connection.
+    session: rawWs.WSSession
+    state: WebSocketState
+
+  WebSocketGroup* = ref object ## A set of WebSocket clients for group broadcasts.
+    connections: seq[WebSocket]
+
+proc newWebSocket*(session: rawWs.WSSession): WebSocket =
+  ## Wraps an accepted nim-websock session.
+  WebSocket(session: session, state: WebSocketState.Connecting)
+
+proc newWebSocketGroup*(): WebSocketGroup =
+  ## Creates an empty group of WebSocket connections.
+  WebSocketGroup(connections: @[])
+
+proc ensureConnected(websocket: WebSocket) =
+  if websocket.state != WebSocketState.Connected:
+    raise newException(WebSocketDisconnectError, "WebSocket is not connected")
+
+proc addWebSocket*(group: WebSocketGroup, websocket: WebSocket) =
+  ## Adds an accepted connection to a group if it is not already present.
+  websocket.ensureConnected()
+  if websocket notin group.connections:
+    group.connections.add(websocket)
+
+proc removeWebSocket*(group: WebSocketGroup, websocket: WebSocket): bool =
+  ## Removes a connection from a group and reports whether it was present.
+  for index, candidate in group.connections:
+    if candidate == websocket:
+      group.connections.delete(index)
+      return true
+
+proc len*(group: WebSocketGroup): int {.inline.} =
+  ## Returns the number of connections currently in the group.
+  group.connections.len
+
+proc state*(websocket: WebSocket): WebSocketState {.inline.} =
+  ## Returns the connection state.
+  websocket.state
+
+proc accept*(websocket: WebSocket): Future[void] {.async: (raises: []).} =
+  ## Marks a successfully upgraded connection as ready for application traffic.
+  ##
+  ## The HTTP upgrade handshake is performed by the Chronos adapter before the
+  ## route handler starts.
+  if websocket.state == WebSocketState.Connecting:
+    websocket.state = WebSocketState.Connected
+
+proc sendText*(
+    websocket: WebSocket, data: string
+): Future[void] {.
+    async: (
+      raises: [
+        CancelledError, AsyncStreamError, rawWs.WebSocketError, WebSocketDisconnectError
+      ]
+    )
+.} =
+  ## Sends a UTF-8 text message.
+  websocket.ensureConnected()
+  await websocket.session.send(data)
+
+proc broadcastText*(
+    group: WebSocketGroup, data: string
+): Future[int] {.
+    async: (
+      raises: [
+        CancelledError, AsyncStreamError, rawWs.WebSocketError,
+        WebSocketDisconnectError,
+      ]
+    )
+.} =
+  ## Sends a text message to each current member and returns the delivery count.
+  ## Connections that fail to send are removed. Cancellation still propagates.
+  var connections = newSeqOfCap[WebSocket](group.connections.len)
+  for websocket in group.connections:
+    connections.add(websocket)
+
+  for websocket in connections:
+    try:
+      await websocket.sendText(data)
+      inc result
+    except CancelledError as exc:
+      raise exc
+    except CatchableError:
+      discard group.removeWebSocket(websocket)
+
+proc sendBytes*(
+    websocket: WebSocket, data: seq[byte]
+): Future[void] {.
+    async: (
+      raises: [
+        CancelledError, AsyncStreamError, rawWs.WebSocketError, WebSocketDisconnectError
+      ]
+    )
+.} =
+  ## Sends a binary message.
+  websocket.ensureConnected()
+  await websocket.session.send(data, rawWs.Opcode.Binary)
+
+proc sendJson*[T](
+    websocket: WebSocket, value: T
+): Future[void] {.
+    async: (
+      raises: [
+        CancelledError, AsyncStreamError, rawWs.WebSocketError, WebSocketDisconnectError
+      ]
+    )
+.} =
+  ## Serializes and sends a JSON text message.
+  await websocket.sendText($toJson(value))
+
+proc receiveBytes*(
+    websocket: WebSocket
+): Future[seq[byte]] {.
+    async: (
+      raises: [
+        CancelledError, AsyncStreamError, rawWs.WebSocketError, WebSocketDisconnectError
+      ]
+    )
+.} =
+  ## Receives the next complete message as bytes.
+  websocket.ensureConnected()
+  result = await websocket.session.recvMsg()
+
+proc receiveText*(
+    websocket: WebSocket
+): Future[string] {.
+    async: (
+      raises: [
+        CancelledError, AsyncStreamError, rawWs.WebSocketError, WebSocketDisconnectError
+      ]
+    )
+.} =
+  ## Receives the next UTF-8 text message.
+  let data = await websocket.receiveBytes()
+  if websocket.session.binary:
+    raise newException(WebSocketDisconnectError, "expected a text WebSocket message")
+  result = string.fromBytes(data)
+
+proc receiveJson*[T](
+    websocket: WebSocket
+): Future[T] {.
+    async: (
+      raises: [
+        CancelledError, AsyncStreamError, rawWs.WebSocketError,
+        WebSocketDisconnectError, JsonParsingError,
+      ]
+    )
+.} =
+  ## Receives and decodes the next JSON text message.
+  result = jsonTo(parseJson(await websocket.receiveText()), T)
+
+proc close*(
+    websocket: WebSocket, code = 1000, reason = ""
+): Future[void] {.async: (raises: [CancelledError]).} =
+  ## Closes the connection with a WebSocket close frame.
+  if websocket.state != WebSocketState.Disconnected:
+    websocket.state = WebSocketState.Disconnected
+    await websocket.session.close(rawWs.StatusCodes(code), reason)
