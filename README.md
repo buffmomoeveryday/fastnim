@@ -146,6 +146,29 @@ app.use(proc(request: Request, next: NextHandler): Response =
 )
 ```
 
+The command style (`app.use:`) and the plural alias (`app.middlewares:`) are
+equivalent alternatives. Each block takes a single middleware:
+
+```nim
+app.use:
+  proc(request: Request, next: NextHandler): Response =
+    var response = next(request)
+    response.setHeader("x-request-path", request.path)
+    response
+
+app.middlewares:
+  requestId()
+```
+
+Repeat the block — or call `app.use(...)` — for each additional middleware:
+
+```nim
+app.middlewares:
+  requestId()
+app.middlewares:
+  responseTime()
+```
+
 FastNim includes dependency-free CORS, request-ID, and response-time middleware:
 
 ```nim
@@ -323,7 +346,8 @@ let app = initFastNim()
 app.install(rateLimitPlugin(initRateLimitOptions(limit = 100, windowSeconds = 60)))
 ```
 
-OpenAPI can be installed alongside other plugins:
+The command style (`app.install:`) is an equivalent alternative. Each block
+takes a single plugin, so repeat it for additional plugins:
 
 ```nim
 import fastnim/plugins/openapi
@@ -336,6 +360,7 @@ app.install:
     version = "2.2.0",
     description = "Internal usermanagement",
   ))
+app.install:
   rateLimitPlugin(initRateLimitOptions(limit = 5, windowSeconds = 60))
 ```
 
