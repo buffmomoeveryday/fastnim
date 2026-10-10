@@ -19,7 +19,8 @@ type
     operationId*: string ## Stable operation identifier.
     deprecated*: bool ## Marks the operation deprecated when true.
 
-  OpenApiOperation* = object ## Documentation recorded for one HTTP operation.
+  OpenApiOperation* = object
+    ## Documentation recorded for one HTTP operation.
     ## ``method`` holds the lowercase HTTP method for the operation.
     `method`*: string ## Lowercase HTTP method for the operation.
     path*: string ## Route path template with ``{name}`` parameters.

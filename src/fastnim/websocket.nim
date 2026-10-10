@@ -82,8 +82,7 @@ proc broadcastText*(
 ): Future[int] {.
     async: (
       raises: [
-        CancelledError, AsyncStreamError, rawWs.WebSocketError,
-        WebSocketDisconnectError,
+        CancelledError, AsyncStreamError, rawWs.WebSocketError, WebSocketDisconnectError
       ]
     )
 .} =

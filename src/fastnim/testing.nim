@@ -42,9 +42,7 @@ proc request*(
   client.app.handle(initRequest(`method`, target, headers, body))
 
 proc get*(
-    client: TestClient,
-    target: string,
-    headers: Headers = initTable[string, string](),
+    client: TestClient, target: string, headers: Headers = initTable[string, string]()
 ): Response =
   ## Sends an in-process GET request.
   client.request(HttpMethod.Get, target, headers)
@@ -77,17 +75,13 @@ proc patch*(
   client.request(HttpMethod.Patch, target, headers, body)
 
 proc delete*(
-    client: TestClient,
-    target: string,
-    headers: Headers = initTable[string, string](),
+    client: TestClient, target: string, headers: Headers = initTable[string, string]()
 ): Response =
   ## Sends an in-process DELETE request.
   client.request(HttpMethod.Delete, target, headers)
 
 proc query*(
-    client: TestClient,
-    target: string,
-    headers: Headers = initTable[string, string](),
+    client: TestClient, target: string, headers: Headers = initTable[string, string]()
 ): Response =
   ## Sends an in-process QUERY request.
   client.request(HttpMethod.Query, target, headers)

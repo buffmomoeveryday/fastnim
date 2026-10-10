@@ -46,12 +46,10 @@ type
 
   SseSend* = proc(event: ServerSentEvent): Future[void] {.
     gcsafe, async: (raises: [CancelledError, HttpWriteError])
-  .}
-    ## Sends one event to a connected Server-Sent Events client.
+  .} ## Sends one event to a connected Server-Sent Events client.
   SseRouteHandler* = proc(request: Request, send: SseSend): Future[void] {.
     gcsafe, async: (raises: [CancelledError, HttpWriteError, ValueError])
-  .}
-    ## Handles an SSE route by sending events through ``send``.
+  .} ## Handles an SSE route by sending events through ``send``.
   WebSocketHandler* = proc(request: Request, websocket: WebSocket): Future[void] {.
     gcsafe,
     async: (
@@ -60,15 +58,15 @@ type
         JsonParsingError, ValueError,
       ]
     )
-  .}
-    ## Handles a WebSocket route after the Chronos adapter upgrades the connection.
+  .} ## Handles a WebSocket route after the Chronos adapter upgrades the connection.
 
   RouteKind* {.pure.} = enum ## Transport a registered route serves.
     Http
     Sse
     WebSocket
 
-  Route* = object ## A registered endpoint and its path template.
+  Route* = object
+    ## A registered endpoint and its path template.
     ## ``method`` holds the HTTP method the route answers.
     `method`*: HttpMethod ## HTTP method the route answers.
     path*: string ## Path template with ``{name}`` segments.
@@ -79,7 +77,8 @@ type
     openApi*: OpenApiOperation ## Generated documentation for the route.
     routerMiddleware: seq[Middleware] ## Router-scoped middleware copied at mount time.
 
-  Router* = ref object ## A mountable group of routes with a shared prefix.
+  Router* = ref object
+    ## A mountable group of routes with a shared prefix.
     ## Register routes on a router with the same ``router.get(...)`` block
     ## syntax used for applications, then mount it with ``app.addRouter``.
     ## Routes are copied into the application at mount time, so register
@@ -186,17 +185,14 @@ proc joinMountPath(prefix, path: string): string =
   if result.len == 0:
     return "/"
 
-proc mergeRouterTags(
-    callTags, routerTags, routeTags: seq[string]
-): seq[string] =
+proc mergeRouterTags(callTags, routerTags, routeTags: seq[string]): seq[string] =
   ## Merges mount tags, router defaults, and per-route tags without duplicates.
   for tag in callTags & routerTags & routeTags:
     if tag notin result:
       result.add(tag)
 
 proc insertRegistration(
-    registrations: var seq[MiddlewareRegistration],
-    registration: MiddlewareRegistration,
+    registrations: var seq[MiddlewareRegistration], registration: MiddlewareRegistration
 ) =
   ## Inserts middleware keeping phase/priority/registration order.
   var index = registrations.len
@@ -299,9 +295,12 @@ proc errorResponse*(app: Application, request: Request, status: int): Response =
     except:
       app.logError("Error handler for status " & $status & " failed")
   case status
-  of 404: notFound()
-  of 500: text("Internal Server Error", 500)
-  else: text("HTTP Error " & $status, status)
+  of 404:
+    notFound()
+  of 500:
+    text("Internal Server Error", 500)
+  else:
+    text("HTTP Error " & $status, status)
 
 proc use*(
     app: Application,
@@ -328,10 +327,7 @@ proc use*(
   ## routes only, after global application middleware. SSE and WebSocket
   ## routes bypass middleware (as on applications) and only get the prefix.
   let registration = MiddlewareRegistration(
-    phase: phase,
-    priority: priority,
-    order: router.middlewareOrder,
-    handler: middleware,
+    phase: phase, priority: priority, order: router.middlewareOrder, handler: middleware
   )
   inc router.middlewareOrder
   insertRegistration(router.middleware, registration)
@@ -461,10 +457,11 @@ proc addWebSocketRoute*(
     )
   )
 
-macro sse*(app: typed, path: typed, body: untyped): untyped =
+macro sse*(app: Application | Router, path: typed, body: untyped): untyped =
   ## Registers a Server-Sent Events endpoint.
   ##
-  ## The block can asynchronously send ``ServerSentEvent`` values using ``send``.
+  ## The block can asynchronously send ``ServerSentEvent`` values using ``send``,
+  ## either as ``send(event)`` or with method syntax as ``event.send()``.
   if body.kind != nnkStmtList:
     return quote:
       addSseRoute(`app`, `path`, `body`)
@@ -478,6 +475,13 @@ macro sse*(app: typed, path: typed, body: untyped): untyped =
       return send
     if node.kind == nnkIdent and eqIdent(node, "ctx"):
       return newDotExpr(request, ident("context"))
+    if node.kind in {nnkCall, nnkCommand} and node.len == 1 and
+        node[0].kind == nnkDotExpr and node[0].len == 2 and node[0][1].kind == nnkIdent and
+        eqIdent(node[0][1], "send"):
+      return newCall(send, bindIdentifiers(node[0][0]))
+    if node.kind == nnkDotExpr and node.len == 2 and node[1].kind == nnkIdent and
+        eqIdent(node[1], "send"):
+      return newCall(send, bindIdentifiers(node[0]))
     result = copyNimNode(node)
     for child in node:
       result.add(bindIdentifiers(child))
@@ -495,7 +499,7 @@ macro sse*(app: typed, path: typed, body: untyped): untyped =
         `boundBody`,
     )
 
-macro websocket*(app: typed, path: typed, body: untyped): untyped =
+macro websocket*(app: Application | Router, path: typed, body: untyped): untyped =
   ## Registers a WebSocket route using ``request`` and ``websocket``.
   if body.kind != nnkStmtList:
     return quote:
@@ -617,7 +621,7 @@ proc prepareRouteBody(node: NimNode): NimNode =
     else:
       result.add(child)
 
-macro get*(app: typed, path: typed, body: untyped): untyped =
+macro get*(app: Application | Router, path: typed, body: untyped): untyped =
   ## Registers a GET route using Nim's block syntax.
   ##
   ## ```nim
@@ -648,7 +652,7 @@ macro get*(app: typed, path: typed, body: untyped): untyped =
         `boundBody`,
     )
 
-macro query*(app: typed, path: typed, body: untyped): untyped =
+macro query*(app: Application | Router, path: typed, body: untyped): untyped =
   ## Registers a QUERY route using Nim's block syntax.
   if body.kind != nnkStmtList:
     return quote:
@@ -843,7 +847,9 @@ proc buildTypedRoute(
         `documentation`,
       )
 
-macro get*(app: typed, path: typed, responses: untyped, body: untyped): untyped =
+macro get*(
+    app: Application | Router, path: typed, responses: untyped, body: untyped
+): untyped =
   ## Registers a GET route with typed responses declared as ``@[(status, Model), ...]``.
   buildTypedRoute(
     app,
@@ -859,7 +865,7 @@ macro get*(app: typed, path: typed, responses: untyped, body: untyped): untyped 
     newCall(ident("initOpenApiRoute")),
   )
 
-macro get*(app: typed, path: typed, args: varargs[untyped]): untyped =
+macro get*(app: Application | Router, path: typed, args: varargs[untyped]): untyped =
   ## Registers a typed GET route with inline OpenAPI metadata.
   ##
   ## ```nim
@@ -928,7 +934,9 @@ macro get*(app: typed, path: typed, args: varargs[untyped]): untyped =
     docs,
   )
 
-macro query*(app: typed, path: typed, responses: untyped, body: untyped): untyped =
+macro query*(
+    app: Application | Router, path: typed, responses: untyped, body: untyped
+): untyped =
   ## Registers a QUERY route with typed responses.
   buildTypedRoute(
     app,
@@ -944,7 +952,7 @@ macro query*(app: typed, path: typed, responses: untyped, body: untyped): untype
     newCall(ident("initOpenApiRoute")),
   )
 
-macro post*(app: typed, path: typed, body: untyped): untyped =
+macro post*(app: Application | Router, path: typed, body: untyped): untyped =
   ## Registers a POST route with either a handler or Nim block syntax.
   if body.kind != nnkStmtList:
     return quote:
@@ -970,7 +978,9 @@ macro post*(app: typed, path: typed, body: untyped): untyped =
         `boundBody`,
     )
 
-macro post*(app: typed, path: typed, responses: untyped, body: untyped): untyped =
+macro post*(
+    app: Application | Router, path: typed, responses: untyped, body: untyped
+): untyped =
   ## Registers a POST route with typed responses declared as ``@[(status, Model), ...]``.
   buildTypedRoute(
     app,
@@ -986,43 +996,7 @@ macro post*(app: typed, path: typed, responses: untyped, body: untyped): untyped
     newCall(ident("initOpenApiRoute")),
   )
 
-macro post*(
-    app: typed, path: typed, body: typedesc, responses: untyped, routeBody: untyped
-): untyped =
-  ## Registers a POST route that decodes JSON into the implicit ``body`` model.
-  buildTypedRoute(
-    app,
-    path,
-    responses,
-    routeBody,
-    quote do:
-      HttpMethod.Post,
-    body,
-    "body",
-    ident("parseJsonBody"),
-    "invalid JSON request body",
-    newCall(ident("initOpenApiRoute")),
-  )
-
-macro post*(
-    app: typed, path: typed, form: typedesc, responses: untyped, routeBody: untyped
-): untyped =
-  ## Registers a POST route that decodes URL-encoded fields into ``form``.
-  buildTypedRoute(
-    app,
-    path,
-    responses,
-    routeBody,
-    quote do:
-      HttpMethod.Post,
-    form,
-    "form",
-    ident("parseFormBody"),
-    "invalid form request body",
-    newCall(ident("initOpenApiRoute")),
-  )
-
-macro post*(app: typed, path: typed, args: varargs[untyped]): untyped =
+macro post*(app: Application | Router, path: typed, args: varargs[untyped]): untyped =
   ## Registers a typed POST route with inline OpenAPI metadata.
   var responses = newEmptyNode()
   var routeBody = newEmptyNode()
@@ -1116,7 +1090,7 @@ proc patch*(router: Router, path: string, handler: RouteHandler) =
   ## Registers a PATCH route on a router.
   router.addRoute(HttpMethod.Patch, path, handler)
 
-macro delete*(app: typed, path: typed, args: varargs[untyped]): untyped =
+macro delete*(app: Application | Router, path: typed, args: varargs[untyped]): untyped =
   ## Registers a DELETE route with typed responses and inline OpenAPI metadata.
   var responses = newEmptyNode()
   var routeBody = newEmptyNode()
@@ -1203,8 +1177,7 @@ proc addRouter*(
   if router.isNil:
     raise newException(ValueError, "router cannot be nil")
   if app.lifecycleLoaded:
-    raise
-      newException(ValueError, "routers must be added before app.load or app.serve")
+    raise newException(ValueError, "routers must be added before app.load or app.serve")
   if prefix.len > 0 and prefix[0] != '/':
     raise newException(ValueError, "router mount prefixes must start with '/'")
   let basePrefix = joinMountPath(prefix, router.prefix)
@@ -1290,6 +1263,7 @@ proc runRouteMiddleware(route: Route, request: Request): Response =
     let current = scoped[index]
     inc index
     current(nextRequest, next)
+
   next(request)
 
 proc dispatch(app: Application, request: Request): Response =

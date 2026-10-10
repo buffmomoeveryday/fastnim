@@ -35,7 +35,8 @@ proc defaultInertiaRootTemplate*(pageJson: string): string =
     <script type="module" src="/assets/app.js"></script>
   </head>
   <body>
-    <script data-page="app" type="application/json">""" & pageJson & """</script>
+    <script data-page="app" type="application/json">""" &
+    pageJson & """</script>
     <div id="app"></div>
   </body>
 </html>"""
@@ -121,9 +122,7 @@ proc requestedProps(request: Request, component: string, props: JsonNode): JsonN
   if "errors" in props:
     result["errors"] = props["errors"].copy()
 
-proc pageJson(
-    request: Request, response: Response, options: InertiaOptions
-): JsonNode =
+proc pageJson(request: Request, response: Response, options: InertiaOptions): JsonNode =
   let routePage = parseJson(response.body)
   var props = options.sharedProps.copy()
   for name, value in routePage["props"]:

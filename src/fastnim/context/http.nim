@@ -19,7 +19,8 @@ type
 
   Headers* = Table[string, string] ## HTTP header mapping with lowercase names.
 
-  Request* = object ## An incoming HTTP request after route matching.
+  Request* = object
+    ## An incoming HTTP request after route matching.
     ## ``method`` holds the request method.
     `method`*: HttpMethod ## Request method.
     path*: string ## Request path without the query string.
