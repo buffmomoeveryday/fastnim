@@ -28,7 +28,6 @@ proc initDb(): DbConn =
 
   db
 
-
 api.dependencies(Dependencies):
   # database
   provide db: initDb()
@@ -37,8 +36,6 @@ api.dependencies(Dependencies):
   # const
   provide str: "hello world"
   cleanup str: discard
-
-
 
 type
   User = object
@@ -56,7 +53,6 @@ api.get("/health"):
   let db = ctx.get("db")
 
   text str
-
 
 api.get("/users", responses = @[(200, seq[User])]):
   let db = ctx.get("db")
