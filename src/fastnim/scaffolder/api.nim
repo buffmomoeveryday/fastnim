@@ -14,7 +14,8 @@ proc apiNimble(name: string): string =
 
 version = "0.1.0"
 author = "you"
-description = """" & name & """ - FastNim JSON API"
+description = """" & name &
+    """ - FastNim JSON API"
 license = "MIT"
 srcDir = "src"
 

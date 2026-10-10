@@ -15,8 +15,7 @@ import fastnim/scaffolder/karax_ssr
 const
   Templates* = ["api", "karax_ssr", "karax_csr", "inertiajs"]
     ## Project templates accepted by ``fastnim init``.
-  Frontends* = ["svelte", "react"]
-    ## Client frameworks accepted by ``--frontend``.
+  Frontends* = ["svelte", "react"] ## Client frameworks accepted by ``--frontend``.
   DefaultTemplate = "api"
 
 proc usage(): string =
@@ -33,9 +32,7 @@ Options:
   --force             scaffold into a non-empty directory
   -h, --help          show this help"""
 
-proc promptChoice(
-    label: string, options: openArray[string], defaultIx: int
-): string =
+proc promptChoice(label: string, options: openArray[string], defaultIx: int): string =
   ## Asks a numbered-menu question on a TTY. Empty input takes the default.
   echo label
   for i, opt in options:
@@ -68,8 +65,8 @@ proc promptYesNo(question: string): bool =
 
 proc validProjectName(name: string): bool =
   ## Rejects empty names and anything that escapes the target directory.
-  name.len > 0 and '/' notin name and '\\' notin name and ' ' notin name and
-    name != "." and name != ".." and not name.startsWith("-")
+  name.len > 0 and '/' notin name and '\\' notin name and ' ' notin name and name != "." and
+    name != ".." and not name.startsWith("-")
 
 proc dirIsEmpty(dir: string): bool =
   for _ in walkDir(dir):
@@ -77,12 +74,11 @@ proc dirIsEmpty(dir: string): bool =
   true
 
 proc runInertiaInit(
-    target, name, frontend, pkgManager, css: string, force, interactive: bool
+  target, name, frontend, pkgManager, css: string, force, interactive: bool
 ): int
 
 proc runInit(
-    name, dir, templateName, frontend, pkgManager, css: string,
-    force, interactive: bool,
+    name, dir, templateName, frontend, pkgManager, css: string, force, interactive: bool
 ): int =
   if templateName notin Templates:
     stderr.writeLine(
@@ -91,12 +87,9 @@ proc runInit(
     )
     return 2
   if not validProjectName(name):
-    stderr.writeLine(
-      "fastnim: error: invalid project name '" & name & "'."
-    )
+    stderr.writeLine("fastnim: error: invalid project name '" & name & "'.")
     return 2
-  if templateName != "inertiajs" and
-      (frontend.len + pkgManager.len + css.len > 0):
+  if templateName != "inertiajs" and (frontend.len + pkgManager.len + css.len > 0):
     stderr.writeLine(
       "fastnim: warning: --frontend/--pkgmanager/--css only apply to " &
         "--template:inertiajs; ignoring them."
@@ -108,8 +101,7 @@ proc runInit(
     )
     return 1
   if templateName == "inertiajs":
-    return runInertiaInit(target, name, frontend, pkgManager, css, force,
-      interactive)
+    return runInertiaInit(target, name, frontend, pkgManager, css, force, interactive)
   try:
     createDir(target)
     case templateName
@@ -139,12 +131,8 @@ proc runInertiaInit(
   if frontend.len == 0:
     if interactive and terminal.isatty(stdin):
       choices.frontend =
-        if promptChoice(
-          "Client framework:", Frontends, Frontends.find("svelte")
-        ) == "react":
-          feReact
-        else:
-          feSvelte
+        if promptChoice("Client framework:", Frontends, Frontends.find("svelte")) ==
+            "react": feReact else: feSvelte
     else:
       choices.frontend = feSvelte
   elif frontend == "svelte":
@@ -166,8 +154,8 @@ proc runInertiaInit(
       choices.pkgManager = DefaultPkgManager
   elif pkgManager notin PkgManagers:
     stderr.writeLine(
-      "fastnim: error: unknown package manager '" & pkgManager &
-        "'. Choose from: " & PkgManagers.join(", ")
+      "fastnim: error: unknown package manager '" & pkgManager & "'. Choose from: " &
+        PkgManagers.join(", ")
     )
     return 2
   else:
@@ -175,8 +163,7 @@ proc runInertiaInit(
   if css.len == 0:
     if interactive and terminal.isatty(stdin):
       choices.css =
-        if promptChoice("CSS setup:", CssOptions, CssOptions.find("tailwind")) ==
-            "none":
+        if promptChoice("CSS setup:", CssOptions, CssOptions.find("tailwind")) == "none":
           cssNone
         else:
           cssTailwind
@@ -204,8 +191,7 @@ proc runInertiaInit(
     return 1
 
   let commands = pkgCommands(choices.pkgManager)
-  echo "Created '" & target & "' (inertiajs + " & Frontends[choices.frontend.ord] &
-    ")."
+  echo "Created '" & target & "' (inertiajs + " & Frontends[choices.frontend.ord] & ")."
   echo "Next steps:"
   echo "  cd " & target / "client"
   echo "  " & commands.install
@@ -214,8 +200,10 @@ proc runInertiaInit(
 
   if interactive and terminal.isatty(stdin):
     if promptYesNo("Run '" & commands.install & "' now?"):
-      let code = execShellCmd("cd " & quoteShell(target / "client") & " && " &
-        quoteShell(commands.install.split(' ')[0]) & " install")
+      let code = execShellCmd(
+        "cd " & quoteShell(target / "client") & " && " &
+          quoteShell(commands.install.split(' ')[0]) & " install"
+      )
       if code != 0:
         echo "Install failed (exit " & $code & "). Run '" & commands.install &
           "' manually inside " & target / "client" & "."
@@ -225,14 +213,14 @@ proc normalizeParams(params: seq[string]): seq[string] =
   ## Joins space-separated option values (``--dir PATH``) into the
   ## ``--dir:PATH`` form parseopt understands.
   const ValOpts = [
-    "--template", "--frontend", "--pkgmanager", "--pkg-manager",
-    "--package-manager", "--css", "--dir",
+    "--template", "--frontend", "--pkgmanager", "--pkg-manager", "--package-manager",
+    "--css", "--dir",
   ]
   var i = 0
   while i < params.len:
     let arg = params[i]
-    if arg.toLowerAscii() in ValOpts and i + 1 < params.len and
-        params[i + 1].len > 0 and not params[i + 1].startsWith("-"):
+    if arg.toLowerAscii() in ValOpts and i + 1 < params.len and params[i + 1].len > 0 and
+        not params[i + 1].startsWith("-"):
       result.add(arg & ":" & params[i + 1])
       i += 2
     else:
@@ -291,7 +279,11 @@ proc cliMain*(params: seq[string], interactive = true): int =
     stderr.writeLine("fastnim: error: too many arguments.")
     stderr.writeLine(usage())
     return 2
-  let name = if positional.len == 2: positional[1] else: "myapp"
+  let name =
+    if positional.len == 2:
+      positional[1]
+    else:
+      "myapp"
   if dir.len == 0:
     stderr.writeLine("fastnim: error: --dir needs a value.")
     stderr.writeLine(usage())

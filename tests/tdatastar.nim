@@ -1,6 +1,7 @@
 import std/[assertions, json, strutils, tables, uri]
 
 import chronos
+import chronos/asyncsync
 from chronos/apps/http/httpserver import HttpWriteError
 
 import fastnim
@@ -215,3 +216,77 @@ block fluentSendInSseRoute:
   doAssert "datastar-patch-elements" in got[0]
   doAssert "datastar-patch-signals" in got[1]
   doAssert "datastar-patch-elements" in got[2]
+
+block liveFeedFansOutToSubscribers:
+  let feed = newLiveFeed()
+  doAssert feed.subscriberCount() == 0
+  let first = feed.subscribe()
+  let second = feed.subscribe()
+  doAssert feed.subscriberCount() == 2
+  feed.broadcast(patchElements("""<div id="a">1</div>"""))
+  doAssert first.len == 1
+  doAssert second.len == 1
+  doAssert formatSseEvent(first.getNoWait().sse) ==
+    formatSseEvent(patchElements("""<div id="a">1</div>"""))
+  doAssert formatSseEvent(second.getNoWait().sse) ==
+    formatSseEvent(patchElements("""<div id="a">1</div>"""))
+  doAssert first.len == 0
+  doAssert second.len == 0
+
+block liveFeedUnsubscribeStopsDelivery:
+  let feed = newLiveFeed()
+  let first = feed.subscribe()
+  let second = feed.subscribe()
+  feed.unsubscribe(first)
+  doAssert feed.subscriberCount() == 1
+  feed.unsubscribe(first) # unknown queues are ignored
+  doAssert feed.subscriberCount() == 1
+  feed.broadcast(patchSignals(%*{"n": 2}))
+  doAssert first.len == 0
+  doAssert second.len == 1
+  feed.unsubscribe(second)
+  doAssert feed.subscriberCount() == 0
+  feed.broadcast(patchSignals(%*{"n": 3})) # no subscribers: no-op, no raise
+  doAssert second.len == 1
+
+block liveFeedSnapshotRoundTrip:
+  let feed = newLiveFeed()
+  doAssert feed.snapshot() == ""
+  feed.setSnapshot("""<ul id="feed"><li>hi</li></ul>""")
+  doAssert feed.snapshot() == """<ul id="feed"><li>hi</li></ul>"""
+  feed.setSnapshot("""<ul id="feed"></ul>""")
+  doAssert feed.snapshot() == """<ul id="feed"></ul>"""
+
+block liveFeedRelaysThroughSseRoute:
+  let feed = newLiveFeed()
+  let app = initFastNim(logs = false)
+  app.sse("/notes/stream"):
+    var queue: AsyncQueue[DatastarEvent]
+    {.gcsafe.}:
+      queue = feed.subscribe()
+    try:
+      await send(patchElements("""<ul id="feed"></ul>"""))
+      {.gcsafe.}:
+        await feed.relay(queue, send)
+        await feed.relay(queue, send)
+    except CatchableError:
+      discard # client disconnected
+    finally:
+      {.gcsafe.}:
+        feed.unsubscribe(queue)
+  var got: seq[string] = @[]
+  let sender: SseSend = proc(
+      event: ServerSentEvent
+  ): Future[void] {.async: (raises: [CancelledError, HttpWriteError]).} =
+    {.cast(gcsafe).}:
+      got.add(formatSseEvent(event))
+  # Start the stream first so it subscribes, then broadcast into it.
+  let pending = app.handleSse(initRequest(HttpMethod.Get, "/notes/stream"), sender)
+  feed.broadcast(patchElements("""<li id="note-1">hi</li>"""))
+  feed.broadcast(patchSignals(%*{"note": ""}))
+  waitFor pending
+  doAssert got.len == 3
+  doAssert "data: elements <ul id=\"feed\"></ul>" in got[0]
+  doAssert "data: elements <li id=\"note-1\">hi</li>" in got[1]
+  doAssert "data: signals {\"note\":\"\"}" in got[2]
+  doAssert feed.subscriberCount() == 0

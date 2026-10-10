@@ -80,6 +80,15 @@ block methodAndMissingRoute:
   doAssert app.handle(initRequest(HttpMethod.Get, "/items")).status == 404
   doAssert app.handle(initRequest(HttpMethod.Post, "/missing")).status == 404
 
+block routeMacrosDoNotHijackMethodCalls:
+  var items = @["a", "b", "c"]
+  items.delete(0)
+  doAssert items == @["b", "c"]
+  let app = initFastNim()
+  app.get("/"):
+    text("ok")
+  doAssert app.handle(initRequest(HttpMethod.Get, "/")).body == "ok"
+
 block simplePostBlockBindsRequest:
   let app = initFastNim()
   app.post("/echo/{name}"):

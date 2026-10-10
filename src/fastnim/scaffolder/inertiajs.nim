@@ -11,9 +11,11 @@ type
   InertiaFrontend* = enum ## Client framework for the generated project.
     feSvelte
     feReact
+
   InertiaCss* = enum ## Styling setup for the generated client.
     cssTailwind
     cssNone
+
   InertiaChoices* = object ## Answers to the interactive init questions.
     frontend*: InertiaFrontend ## Svelte or React client.
     pkgManager*: string ## pnpm, bun, npm, or deno (validated by the CLI).
@@ -22,8 +24,7 @@ type
 const
   PkgManagers* = ["pnpm", "bun", "npm", "deno"]
     ## Package managers accepted by ``--pkgmanager``.
-  CssOptions* = ["tailwind", "none"]
-    ## CSS setups accepted by ``--css``.
+  CssOptions* = ["tailwind", "none"] ## CSS setups accepted by ``--css``.
   DefaultPkgManager* = "pnpm"
     ## Used when ``--pkgmanager`` is omitted and stdin is not a TTY.
 
@@ -50,7 +51,8 @@ proc nimbleFile(name: string): string =
 
 version = "0.1.0"
 author = "you"
-description = """" & name & """ - FastNim + Inertia application"
+description = """" & name &
+    """ - FastNim + Inertia application"
 license = "MIT"
 srcDir = "src"
 
@@ -66,34 +68,35 @@ proc devTemplateLines(vite, entry: string, react: bool): seq[string] =
   ## Nim source lines for the dev root template (Vite serves the assets).
   result = @[
     "proc devRootTemplate(pageJson: string): string =",
-    "  \"<!doctype html><html><head>\" &",
-    "    \"<meta charset='utf-8'>\" &",
+    "  \"<!doctype html><html><head>\" &", "    \"<meta charset='utf-8'>\" &",
     "    \"<meta name='viewport' content='width=device-width, initial-scale=1'>\" &",
   ]
   if react:
-    result.add([
-      "    \"<script type='module'>\" &",
-      "    \"import RefreshRuntime from '" & vite & "/@react-refresh';\" &",
-      "    \"RefreshRuntime.injectIntoGlobalHook(window);\" &",
-      "    \"window.$RefreshReg$ = () => {};\" &",
-      "    \"window.$RefreshSig$ = () => (type) => type;\" &",
-      "    \"window.__vite_plugin_react_preamble_installed__ = true;\" &",
-      "    \"</script>\" &",
-    ])
+    result.add(
+      [
+        "    \"<script type='module'>\" &",
+        "    \"import RefreshRuntime from '" & vite & "/@react-refresh';\" &",
+        "    \"RefreshRuntime.injectIntoGlobalHook(window);\" &",
+        "    \"window.$RefreshReg$ = () => {};\" &",
+        "    \"window.$RefreshSig$ = () => (type) => type;\" &",
+        "    \"window.__vite_plugin_react_preamble_installed__ = true;\" &",
+        "    \"</script>\" &",
+      ]
+    )
   result.add(
     "    \"<script type='module' src='" & vite & "/" & entry & "'></script>\" &"
   )
-  result.add([
-    "    \"</head><body>\" &",
-    "    \"<script data-page='app' type='application/json'>\" & pageJson & \"</script>\" &",
-    "    \"<div id='app'></div>\" &",
-    "    \"</body></html>\"",
-  ])
+  result.add(
+    [
+      "    \"</head><body>\" &",
+      "    \"<script data-page='app' type='application/json'>\" & pageJson & \"</script>\" &",
+      "    \"<div id='app'></div>\" &", "    \"</body></html>\"",
+    ]
+  )
 
 proc serverMain(name: string, choices: InertiaChoices): string =
   let entry = if choices.frontend == feReact: "src/main.tsx" else: "src/main.ts"
-  let framework =
-    if choices.frontend == feReact: "React" else: "Svelte"
+  let framework = if choices.frontend == feReact: "React" else: "Svelte"
   """## """ & name & """ - FastNim + Inertia + """ & framework & """.
 
 ## Development (Vite dev server feeds client assets to the Nim server):
@@ -112,8 +115,10 @@ import fastnim
 import fastnim/plugins/inertia
 import routes/pages
 
-""" & devTemplateLines("http://localhost:5173", entry,
-    choices.frontend == feReact).join("\n") & "\n" & """
+""" &
+    devTemplateLines("http://localhost:5173", entry, choices.frontend == feReact).join(
+      "\n"
+    ) & "\n" & """
 
 proc prodRootTemplate(pageJson: string): string =
   "<!doctype html><html><head>" &
@@ -145,7 +150,8 @@ api.install:
     rootTemplate =
       if isDev: devRootTemplate
       else: prodRootTemplate,
-    sharedProps = %*{"appName": """" & name & """"},
+    sharedProps = %*{"appName": """" &
+    name & """"},
   ))
 api.addRouter(pageRouter)
 if not isDev:
@@ -169,8 +175,8 @@ let pageRouter* = initRouter()
 
 pageRouter.get("/"):
   inertia("Dashboard", %*{
-    "message": "Hello from """ & name &
-    """!", "stats": {"users": 2, "projects": 12}
+    "message": "Hello from """ &
+    name & """!", "stats": {"users": 2, "projects": 12}
   })
 
 pageRouter.get("/users"):
@@ -198,7 +204,9 @@ proc clientPackageJson(name: string, choices: InertiaChoices): string =
     "typescript": "^5.6.0",
     "vite": "^7.0.0""""
   if choices.css == cssTailwind:
-    devDeps.add(",\n    \"tailwindcss\": \"^4.0.0\",\n    \"@tailwindcss/vite\": \"^4.0.0\"")
+    devDeps.add(
+      ",\n    \"tailwindcss\": \"^4.0.0\",\n    \"@tailwindcss/vite\": \"^4.0.0\""
+    )
   var managerField = ""
   if choices.pkgManager == "pnpm":
     managerField = ",\n  \"packageManager\": \"pnpm@10.0.0\""
@@ -208,14 +216,16 @@ proc clientPackageJson(name: string, choices: InertiaChoices): string =
   "name": """" & name & """-client",
   "private": true,
   "version": "0.1.0",
-  "type": "module"""" & managerField & """,
+  "type": "module"""" &
+    managerField & """,
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-""" & deps & "\n" & """
+""" &
+    deps & "\n" & """
   },
   "devDependencies": {
 """ & devDeps & "\n" & """
@@ -244,7 +254,8 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     rollupOptions: {
-      input: """" & entry & """",
+      input: """" &
+    entry & """",
       output: {
         entryFileNames: "app.js",
         chunkFileNames: "chunk-[hash].js",
@@ -252,7 +263,8 @@ export default defineConfig({
       },
     },
   },
-  plugins: [""" & plugins & """],
+  plugins: [""" &
+    plugins & """],
 });
 """
 
@@ -262,7 +274,8 @@ proc clientIndexHtml(name: string): string =
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>""" & name & """</title>
+    <title>""" &
+    name & """</title>
   </head>
   <body>
     <div id="app"></div>
@@ -281,7 +294,8 @@ proc tsConfig(choices: InertiaChoices): string =
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
-    "skipLibCheck": true""" & jsx & """,
+    "skipLibCheck": true""" &
+    jsx & """,
     "types": ["vite/client"]
   },
   "include": ["src"]
@@ -290,7 +304,9 @@ proc tsConfig(choices: InertiaChoices): string =
 
 proc clientEntry(choices: InertiaChoices): tuple[path, content: string] =
   if choices.frontend == feReact:
-    result = (path: "src/main.tsx", content: """import "./app.css";
+    result = (
+      path: "src/main.tsx",
+      content: """import "./app.css";
 import { createRoot } from "react-dom/client";
 import { createInertiaApp } from "@inertiajs/react";
 import type { ComponentType } from "react";
@@ -311,9 +327,12 @@ createInertiaApp({
     createRoot(el).render(<App {...props} />);
   },
 });
-""")
+""",
+    )
   else:
-    result = (path: "src/main.ts", content: """import "./app.css";
+    result = (
+      path: "src/main.ts",
+      content: """import "./app.css";
 import { createInertiaApp } from "@inertiajs/svelte";
 import { mount } from "svelte";
 
@@ -333,7 +352,8 @@ createInertiaApp({
     mount(App, { target: el, props });
   },
 });
-""")
+""",
+    )
 
 proc clientCss(choices: InertiaChoices): string =
   if choices.css == cssTailwind:
@@ -364,7 +384,8 @@ main {
 proc navLinks(tailwind: bool): tuple[home, users: string] =
   if tailwind:
     result = (
-      home: "<Link href=\"/\" class=\"rounded px-3 py-1 font-semibold\">Dashboard</Link>",
+      home:
+        "<Link href=\"/\" class=\"rounded px-3 py-1 font-semibold\">Dashboard</Link>",
       users: "<Link href=\"/users\" class=\"rounded px-3 py-1\">Users</Link>",
     )
   else:
@@ -387,7 +408,10 @@ proc dashboardPage(choices: InertiaChoices): tuple[path, content: string] =
     else:
       "  <main>\n"
   if choices.frontend == feReact:
-    result = (path: "src/pages/Dashboard.tsx", content: """import { useState } from "react";
+    result = (
+      path: "src/pages/Dashboard.tsx",
+      content:
+        """import { useState } from "react";
 import { Link } from "@inertiajs/react";
 
 type Stats = { users: number; projects: number };
@@ -403,10 +427,12 @@ export default function Dashboard({
 }) {
   const [count, setCount] = useState(0);
   return (
-""" & shellOpen & """    """ & links.home & """
+""" &
+        shellOpen & """    """ & links.home & """
     """ & links.users & """
   </nav>
-""" & mainOpen & """    <h1>{appName} dashboard</h1>
+""" &
+        mainOpen & """    <h1>{appName} dashboard</h1>
     <p>{message}</p>
     <p>
       {stats.users} users, {stats.projects} projects
@@ -420,9 +446,13 @@ export default function Dashboard({
 </div>
   );
 }
-""")
+""",
+    )
   else:
-    result = (path: "src/pages/Dashboard.svelte", content: """<script lang="ts">
+    result = (
+      path: "src/pages/Dashboard.svelte",
+      content:
+        """<script lang="ts">
   import { Link } from "@inertiajs/svelte";
 
   let { message = "", stats = { users: 0, projects: 0 }, appName = "FastNim" } =
@@ -430,10 +460,12 @@ export default function Dashboard({
   let count = $state(0);
 </script>
 
-""" & shellOpen & """  """ & links.home & """
+""" &
+        shellOpen & """  """ & links.home & """
   """ & links.users & """
 </nav>
-""" & mainOpen & """  <h1>{appName} dashboard</h1>
+""" &
+        mainOpen & """  <h1>{appName} dashboard</h1>
   <p>{message}</p>
   <p>{stats.users} users, {stats.projects} projects</p>
   <p>
@@ -443,7 +475,8 @@ export default function Dashboard({
   </p>
 </main>
 </div>
-""")
+""",
+    )
 
 proc usersPage(choices: InertiaChoices): tuple[path, content: string] =
   let tailwind = choices.css == cssTailwind
@@ -459,16 +492,21 @@ proc usersPage(choices: InertiaChoices): tuple[path, content: string] =
     else:
       "  <main>\n"
   if choices.frontend == feReact:
-    result = (path: "src/pages/Users.tsx", content: """import { Link } from "@inertiajs/react";
+    result = (
+      path: "src/pages/Users.tsx",
+      content:
+        """import { Link } from "@inertiajs/react";
 
 type User = { id: number; name: string; email: string };
 
 export default function Users({ users = [] }: { users?: User[] }) {
   return (
-""" & shellOpen & """    """ & links.home & """
+""" &
+        shellOpen & """    """ & links.home & """
     """ & links.users & """
   </nav>
-""" & mainOpen & """    <h1>Users ({users.length})</h1>
+""" &
+        mainOpen & """    <h1>Users ({users.length})</h1>
     <ul>
       {users.map((user) => (
         <li key={user.id}>
@@ -480,18 +518,24 @@ export default function Users({ users = [] }: { users?: User[] }) {
 </div>
   );
 }
-""")
+""",
+    )
   else:
-    result = (path: "src/pages/Users.svelte", content: """<script lang="ts">
+    result = (
+      path: "src/pages/Users.svelte",
+      content:
+        """<script lang="ts">
   import { Link } from "@inertiajs/svelte";
 
   let { users = [] } = $props();
 </script>
 
-""" & shellOpen & """  """ & links.home & """
+""" &
+        shellOpen & """  """ & links.home & """
   """ & links.users & """
 </nav>
-""" & mainOpen & """  <h1>Users ({users.length})</h1>
+""" &
+        mainOpen & """  <h1>Users ({users.length})</h1>
   <ul>
     {#each users as user (user.id)}
       <li>{user.name} ({user.email})</li>
@@ -499,31 +543,34 @@ export default function Users({ users = [] }: { users?: User[] }) {
   </ul>
 </main>
 </div>
-""")
+""",
+    )
 
 proc projectReadme(
-    name: string, choices: InertiaChoices,
-    commands: tuple[install, dev, build: string],
+    name: string, choices: InertiaChoices, commands: tuple[install, dev, build: string]
 ): string =
   let framework =
     if choices.frontend == feReact: "React 19 + Vite" else: "Svelte 5 + Vite"
-  let styling =
-    if choices.css == cssTailwind: "Tailwind CSS v4" else: "plain CSS"
+  let styling = if choices.css == cssTailwind: "Tailwind CSS v4" else: "plain CSS"
   """# """ & name & "\n" & """
 
-FastNim + Inertia.js application (""" & framework & """, """ & styling & """).
+FastNim + Inertia.js application (""" & framework &
+    """, """ & styling & """).
 
 ## Prerequisites
 
 - Nim >= 2.2.12 with fastnim installed
-- Node.js with `""" & choices.pkgManager & """` on your PATH
+- Node.js with `""" &
+    choices.pkgManager & """` on your PATH
 
 ## Development
 
 ```sh
 cd client
-""" & commands.install & """
-""" & commands.dev & """      # Vite dev server on http://localhost:5173
+""" &
+    commands.install & """
+""" & commands.dev &
+    """      # Vite dev server on http://localhost:5173
 ```
 
 In another terminal, from the project root:
@@ -539,7 +586,8 @@ serves Inertia JSON; Vite supplies the client bundle with hot reload.
 
 ```sh
 cd client
-""" & commands.install & """
+""" &
+    commands.install & """
 """ & commands.build & """
 cd ..
 APP_VERSION=$(date +%s) nim c -r --path:src src/main.nim
@@ -567,30 +615,12 @@ proc scaffoldInertiajs*(dir, name: string, choices: InertiaChoices) =
   writeScaffoldFile(dir / "config.nims", "switch(\"path\", \"src\")\n")
   writeScaffoldFile(dir / "src" / "main.nim", serverMain(name, choices))
   writeScaffoldFile(dir / "src" / "routes" / "pages.nim", serverPages(name))
-  writeScaffoldFile(
-    dir / "client" / "package.json", clientPackageJson(name, choices)
-  )
-  writeScaffoldFile(
-    dir / "client" / "vite.config.ts", viteConfig(choices)
-  )
-  writeScaffoldFile(
-    dir / "client" / "index.html", clientIndexHtml(name)
-  )
-  writeScaffoldFile(
-    dir / "client" / "tsconfig.json", tsConfig(choices)
-  )
-  writeScaffoldFile(
-    dir / "client" / entry.path, entry.content
-  )
-  writeScaffoldFile(
-    dir / "client" / "src" / "app.css", clientCss(choices)
-  )
-  writeScaffoldFile(
-    dir / "client" / dashboard.path, dashboard.content
-  )
-  writeScaffoldFile(
-    dir / "client" / users.path, users.content
-  )
-  writeScaffoldFile(
-    dir / "README.md", projectReadme(name, choices, commands)
-  )
+  writeScaffoldFile(dir / "client" / "package.json", clientPackageJson(name, choices))
+  writeScaffoldFile(dir / "client" / "vite.config.ts", viteConfig(choices))
+  writeScaffoldFile(dir / "client" / "index.html", clientIndexHtml(name))
+  writeScaffoldFile(dir / "client" / "tsconfig.json", tsConfig(choices))
+  writeScaffoldFile(dir / "client" / entry.path, entry.content)
+  writeScaffoldFile(dir / "client" / "src" / "app.css", clientCss(choices))
+  writeScaffoldFile(dir / "client" / dashboard.path, dashboard.content)
+  writeScaffoldFile(dir / "client" / users.path, users.content)
+  writeScaffoldFile(dir / "README.md", projectReadme(name, choices, commands))

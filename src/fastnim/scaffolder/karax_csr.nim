@@ -15,7 +15,8 @@ proc csrNimble(name: string): string =
 
 version = "0.1.0"
 author = "you"
-description = """" & name & """ - FastNim + Karax CSR"
+description = """" & name &
+    """ - FastNim + Karax CSR"
 license = "MIT"
 srcDir = "src"
 
@@ -43,7 +44,8 @@ type Greeting* = object
 let apiRouter* = initRouter(prefix = "/api", tags = @["api"])
 
 apiRouter.get("/hello", responses = @[(200, Greeting)]):
-  ok Greeting(message: "Hello from """ & name & """!")
+  ok Greeting(message: "Hello from """ &
+    name & """!")
 """
 
 proc csrMain(name: string): string =
@@ -112,7 +114,8 @@ proc csrIndex(name: string): string =
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>""" & name & """</title>
+    <title>""" &
+    name & """</title>
   </head>
   <body>
     <div id="ROOT"></div>
@@ -131,8 +134,8 @@ block helloEndpoint:
 
   let response = web.handle(initRequest(HttpMethod.Get, "/api/hello"))
   doAssert response.status == 200
-  doAssert response.body == "{\"message\":\"Hello from """ & name &
-    """!\"}"
+  doAssert response.body == "{\"message\":\"Hello from """ &
+    name & """!\"}"
 """
 
 proc csrReadme(name: string): string =

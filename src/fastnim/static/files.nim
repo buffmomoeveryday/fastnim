@@ -26,14 +26,13 @@ import std/[os, strutils, tables, times, uri]
 import fastnim/context/http
 import fastnim/routing/router
 
-type
-  EmbeddedFile* = object ## A file baked into the binary at compile time.
-    content*: string ## Raw file bytes served from memory.
-    contentType*: string ## MIME type guessed from the file extension.
-    etag*: string ## Quoted ``"<size>-<mtime>"`` validator.
-    lastModified*: string ## HTTP date of the file at compile time.
-    mtime*: int64 ## File modification time as a Unix timestamp.
-    size*: int ## File size in bytes.
+type EmbeddedFile* = object ## A file baked into the binary at compile time.
+  content*: string ## Raw file bytes served from memory.
+  contentType*: string ## MIME type guessed from the file extension.
+  etag*: string ## Quoted ``"<size>-<mtime>"`` validator.
+  lastModified*: string ## HTTP date of the file at compile time.
+  mtime*: int64 ## File modification time as a Unix timestamp.
+  size*: int ## File size in bytes.
 
 proc guessContentType*(path: string): string =
   ## Guesses the ``Content-Type`` for ``path`` from its file extension.
@@ -41,70 +40,38 @@ proc guessContentType*(path: string): string =
   ## Text types carry an explicit UTF-8 charset. Unknown extensions fall back
   ## to ``application/octet-stream``.
   case path.splitFile().ext.toLowerAscii()
-  of ".html", ".htm":
-    "text/html; charset=utf-8"
-  of ".css":
-    "text/css; charset=utf-8"
-  of ".js", ".mjs":
-    "text/javascript; charset=utf-8"
-  of ".json", ".map":
-    "application/json; charset=utf-8"
-  of ".xml":
-    "application/xml; charset=utf-8"
-  of ".svg":
-    "image/svg+xml"
-  of ".txt", ".md":
-    "text/plain; charset=utf-8"
-  of ".csv":
-    "text/csv; charset=utf-8"
-  of ".wasm":
-    "application/wasm"
-  of ".pdf":
-    "application/pdf"
-  of ".zip":
-    "application/zip"
-  of ".png":
-    "image/png"
-  of ".jpg", ".jpeg":
-    "image/jpeg"
-  of ".gif":
-    "image/gif"
-  of ".webp":
-    "image/webp"
-  of ".avif":
-    "image/avif"
-  of ".bmp":
-    "image/bmp"
-  of ".ico":
-    "image/x-icon"
-  of ".woff":
-    "font/woff"
-  of ".woff2":
-    "font/woff2"
-  of ".ttf":
-    "font/ttf"
-  of ".otf":
-    "font/otf"
-  of ".eot":
-    "application/vnd.ms-fontobject"
-  of ".mp3":
-    "audio/mpeg"
-  of ".ogg", ".oga":
-    "audio/ogg"
-  of ".wav":
-    "audio/wav"
-  of ".webm":
-    "video/webm"
-  of ".mp4":
-    "video/mp4"
-  of ".mov":
-    "video/quicktime"
-  of ".avi":
-    "video/x-msvideo"
-  of ".mkv":
-    "video/x-matroska"
-  else:
-    "application/octet-stream"
+  of ".html", ".htm": "text/html; charset=utf-8"
+  of ".css": "text/css; charset=utf-8"
+  of ".js", ".mjs": "text/javascript; charset=utf-8"
+  of ".json", ".map": "application/json; charset=utf-8"
+  of ".xml": "application/xml; charset=utf-8"
+  of ".svg": "image/svg+xml"
+  of ".txt", ".md": "text/plain; charset=utf-8"
+  of ".csv": "text/csv; charset=utf-8"
+  of ".wasm": "application/wasm"
+  of ".pdf": "application/pdf"
+  of ".zip": "application/zip"
+  of ".png": "image/png"
+  of ".jpg", ".jpeg": "image/jpeg"
+  of ".gif": "image/gif"
+  of ".webp": "image/webp"
+  of ".avif": "image/avif"
+  of ".bmp": "image/bmp"
+  of ".ico": "image/x-icon"
+  of ".woff": "font/woff"
+  of ".woff2": "font/woff2"
+  of ".ttf": "font/ttf"
+  of ".otf": "font/otf"
+  of ".eot": "application/vnd.ms-fontobject"
+  of ".mp3": "audio/mpeg"
+  of ".ogg", ".oga": "audio/ogg"
+  of ".wav": "audio/wav"
+  of ".webm": "video/webm"
+  of ".mp4": "video/mp4"
+  of ".mov": "video/quicktime"
+  of ".avi": "video/x-msvideo"
+  of ".mkv": "video/x-matroska"
+  else: "application/octet-stream"
 
 proc normalizePrefix(prefix: string): string =
   if prefix.len == 0 or prefix[0] != '/':
@@ -174,15 +141,12 @@ proc notModified(request: Request, etag: string, mtimeUnix: int64): bool =
       return true
   false
 
-type
-  RangeOutcome {.pure.} = enum
-    RangeIgnore
-    RangeOk
-    RangeUnsatisfiable
+type RangeOutcome {.pure.} = enum
+  RangeIgnore
+  RangeOk
+  RangeUnsatisfiable
 
-proc parseRange(
-    value: string, size: int64, offset, length: var int64
-): RangeOutcome =
+proc parseRange(value: string, size: int64, offset, length: var int64): RangeOutcome =
   ## Parses a single ``Range: bytes=A-B`` header.
   ##
   ## ``RangeIgnore`` means the header is absent or malformed and the full
@@ -299,8 +263,7 @@ proc serveDiskFile(
     case parseRange(getReqHeader(request, "range"), size, offset, length)
     of RangeOutcome.RangeOk:
       status = 206
-      contentRange =
-        "bytes " & $offset & "-" & $(offset + length - 1) & "/" & $size
+      contentRange = "bytes " & $offset & "-" & $(offset + length - 1) & "/" & $size
     of RangeOutcome.RangeUnsatisfiable:
       result = text("Requested Range Not Satisfiable", 416)
       result.setHeader("content-range", "bytes */" & $size)
@@ -309,9 +272,7 @@ proc serveDiskFile(
       discard
   if not headOnly and length > 0 and size >= int64(streamThreshold):
     result = initResponse("", status)
-    setStaticHeaders(
-      result, contentType, etag, lastMod, length, maxAge, contentRange
-    )
+    setStaticHeaders(result, contentType, etag, lastMod, length, maxAge, contentRange)
     result.sendFile = filePath
     result.fileOffset = offset
     result.fileLength = length
@@ -326,9 +287,7 @@ proc serveDiskFile(
     except CatchableError:
       return text("Not Found", 404)
   result = initResponse(body, status)
-  setStaticHeaders(
-    result, contentType, etag, lastMod, length, maxAge, contentRange
-  )
+  setStaticHeaders(result, contentType, etag, lastMod, length, maxAge, contentRange)
 
 proc respondEmbedded(request: Request, emb: EmbeddedFile, maxAge: int): Response =
   ## Builds a response for an embedded file with caching, Range, and
@@ -344,8 +303,7 @@ proc respondEmbedded(request: Request, emb: EmbeddedFile, maxAge: int): Response
     case parseRange(getReqHeader(request, "range"), length, offset, length)
     of RangeOutcome.RangeOk:
       status = 206
-      contentRange =
-        "bytes " & $offset & "-" & $(offset + length - 1) & "/" & $emb.size
+      contentRange = "bytes " & $offset & "-" & $(offset + length - 1) & "/" & $emb.size
     of RangeOutcome.RangeUnsatisfiable:
       result = text("Requested Range Not Satisfiable", 416)
       result.setHeader("content-range", "bytes */" & $emb.size)
@@ -361,8 +319,7 @@ proc respondEmbedded(request: Request, emb: EmbeddedFile, maxAge: int): Response
       body = emb.content[first ..< first + length.int]
   result = initResponse(body, status)
   setStaticHeaders(
-    result, emb.contentType, emb.etag, emb.lastModified, length, maxAge,
-    contentRange,
+    result, emb.contentType, emb.etag, emb.lastModified, length, maxAge, contentRange
   )
 
 proc matchPrefix(normPrefix, path: string, sub: var string): bool =
@@ -392,9 +349,7 @@ proc redirectToSlash(request: Request): Response =
   result = initResponse("", 307)
   result.setHeader("location", location)
 
-proc resolveRel(
-    decoded: string, allowDotfiles: bool, rel: var string
-): bool =
+proc resolveRel(decoded: string, allowDotfiles: bool, rel: var string): bool =
   ## Decodes and jails a URL remainder, rejecting traversal and dotfiles.
   if '\0' in decoded:
     return false
@@ -428,11 +383,9 @@ proc serveStatic*(
   checkMaxAge(maxAge)
   if not dirExists(directory):
     raise newException(ValueError, "static directory does not exist: " & directory)
-  if spaFallback.len > 0 and
-      (isAbsolute(spaFallback) or ".." in spaFallback.split('/')):
-    raise newException(
-      ValueError, "static spaFallback must be relative to the directory"
-    )
+  if spaFallback.len > 0 and (isAbsolute(spaFallback) or ".." in spaFallback.split('/')):
+    raise
+      newException(ValueError, "static spaFallback must be relative to the directory")
   let absDir = absolutePath(directory)
   app.use(
     proc(request: Request, next: NextHandler): Response =
@@ -466,8 +419,7 @@ proc serveStatic*(
   )
 
 proc serveSingleFile*(
-    app: Application, path, file: string, maxAge = 3600,
-    streamThreshold = 1_048_576,
+    app: Application, path, file: string, maxAge = 3600, streamThreshold = 1_048_576
 ) =
   ## Serves one file at the exact route ``path`` (e.g. ``"/favicon.ico"``).
   ##
@@ -538,4 +490,3 @@ proc serveSingleEmbedded*(
         return next(request)
       respondEmbedded(request, file, maxAge)
   )
-

@@ -20,8 +20,9 @@
 ## tag into HTML responses, so handlers never need to add it by hand.
 
 import chronos
+import chronos/asyncsync
 from chronos/apps/http/httpserver import HttpWriteError
-import std/[json, jsonutils, strutils, tables]
+import std/[json, jsonutils, locks, strutils, tables]
 
 import fastnim/[context/http, params/extract, plugin, routing/router]
 
@@ -34,7 +35,8 @@ const
     ## SSE event type that patches signals into the client signal store.
   DatastarDefaultRetryMs* = 1000
     ## Datastar client reconnect delay; omitted from the wire when default.
-  DatastarCdnUrl* = "https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0/bundles/datastar.js"
+  DatastarCdnUrl* =
+    "https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0/bundles/datastar.js"
     ## Default Datastar client bundle injected into HTML responses.
 
 type
@@ -59,8 +61,7 @@ type
     ## One Datastar SSE event. Converts implicitly to ``ServerSentEvent``.
     sse*: ServerSentEvent
 
-  DatastarOptions* = object
-    ## Configuration installed by ``datastarPlugin``.
+  DatastarOptions* = object ## Configuration installed by ``datastarPlugin``.
     cdnUrl*: string ## Client bundle URL injected into HTML responses.
     injectCdn*: bool ## Inject the CDN script tag when true (default).
 
@@ -79,10 +80,7 @@ proc toSseEvents*(events: openArray[DatastarEvent]): seq[ServerSentEvent] =
     result[index] = event.sse
 
 proc datastarRetry(retryMs: int): int {.inline.} =
-  if retryMs < 0 or retryMs == DatastarDefaultRetryMs:
-    -1
-  else:
-    retryMs
+  if retryMs < 0 or retryMs == DatastarDefaultRetryMs: -1 else: retryMs
 
 proc checkEventId(eventId: string) =
   if '\r' in eventId or '\n' in eventId:
@@ -125,21 +123,26 @@ proc patchElements*(
       payload.add("elements " & line)
   DatastarEvent(
     sse: sseEvent(
-      payload.join("\n"), event = DatastarPatchElements, id = eventId,
+      payload.join("\n"),
+      event = DatastarPatchElements,
+      id = eventId,
       retry = datastarRetry(retryMs),
     )
   )
 
-proc removeElements*(
-    selector: string, eventId = "", retryMs = -1
-): DatastarEvent =
+proc removeElements*(selector: string, eventId = "", retryMs = -1): DatastarEvent =
   ## Builds a ``datastar-patch-elements`` event with ``mode remove``.
   ##
   ## ``selector`` is required: it selects the elements removed from the DOM.
   if selector.len == 0:
     raise newException(ValueError, "Datastar remove selector cannot be empty")
-  patchElements("", selector = selector, mode = DatastarPatchMode.Remove,
-    eventId = eventId, retryMs = retryMs)
+  patchElements(
+    "",
+    selector = selector,
+    mode = DatastarPatchMode.Remove,
+    eventId = eventId,
+    retryMs = retryMs,
+  )
 
 proc patchSignals*(
     signals: JsonNode, onlyIfMissing = false, eventId = "", retryMs = -1
@@ -158,7 +161,9 @@ proc patchSignals*(
     payload.add("signals " & line)
   DatastarEvent(
     sse: sseEvent(
-      payload.join("\n"), event = DatastarPatchSignals, id = eventId,
+      payload.join("\n"),
+      event = DatastarPatchSignals,
+      id = eventId,
       retry = datastarRetry(retryMs),
     )
   )
@@ -174,15 +179,17 @@ proc patchSignals*(
       parseJson(signals)
     except CatchableError:
       raise newException(ValueError, "Datastar signals must be valid JSON")
-  patchSignals(node, onlyIfMissing = onlyIfMissing, eventId = eventId,
-    retryMs = retryMs)
+  patchSignals(
+    node, onlyIfMissing = onlyIfMissing, eventId = eventId, retryMs = retryMs
+  )
 
 proc marshalPatchSignals*[T](
     value: T, onlyIfMissing = false, eventId = "", retryMs = -1
 ): DatastarEvent =
   ## Builds a ``datastar-patch-signals`` event from any ``%*``-serializable value.
-  patchSignals(toJson(value), onlyIfMissing = onlyIfMissing, eventId = eventId,
-    retryMs = retryMs)
+  patchSignals(
+    toJson(value), onlyIfMissing = onlyIfMissing, eventId = eventId, retryMs = retryMs
+  )
 
 proc removeSignals*(
     paths: openArray[string], eventId = "", retryMs = -1
@@ -244,7 +251,7 @@ proc redirect*(url: string, eventId = "", retryMs = -1): DatastarEvent =
   if url.len == 0:
     raise newException(ValueError, "Datastar redirect URL cannot be empty")
   executeScript(
-    "setTimeout(() => window.location.href = " & $(%* url) & ")",
+    "setTimeout(() => window.location.href = " & $(%*url) & ")",
     eventId = eventId,
     retryMs = retryMs,
   )
@@ -296,9 +303,7 @@ proc datastarScriptTag*(cdnUrl = DatastarCdnUrl): string =
     raise newException(ValueError, "Datastar CDN URL cannot be empty")
   "<script type=\"module\" src=\"" & escapeAttribute(cdnUrl) & "\"></script>"
 
-proc datastarStream*(
-    events: openArray[DatastarEvent], status = 200
-): Response =
+proc datastarStream*(events: openArray[DatastarEvent], status = 200): Response =
   ## Creates a finite ``text/event-stream`` response from Datastar events.
   ##
   ## Useful for non-streaming handlers and tests; streaming handlers should
@@ -321,9 +326,7 @@ proc sendTo*(
   ## call forwards to that sender directly.
   await sender(event.sse)
 
-proc initDatastarOptions*(
-    cdnUrl = DatastarCdnUrl, injectCdn = true
-): DatastarOptions =
+proc initDatastarOptions*(cdnUrl = DatastarCdnUrl, injectCdn = true): DatastarOptions =
   ## Creates Datastar plugin configuration.
   ##
   ## ``injectCdn`` auto-inserts the ``cdnUrl`` script tag into HTML responses
@@ -366,3 +369,159 @@ proc datastarPlugin*(
     proc(app: Application) =
       app.use(datastarMiddleware(options)),
   )
+
+type LiveFeed* = ref object
+  ## Fan-out hub relaying one event stream to many SSE subscribers.
+  ##
+  ## Create one hub per live feed with ``newLiveFeed`` (usually next to the
+  ## application). Each ``app.sse`` handler subscribes, sends the current
+  ## snapshot, then relays ``broadcast`` events until its client disconnects:
+  ##
+  ## ```nim
+  ## let feed = newLiveFeed()
+  ##
+  ## app.sse("/notes/stream"):
+  ##   var queue: AsyncQueue[DatastarEvent]
+  ##   {.gcsafe.}:
+  ##     queue = feed.subscribe()
+  ##   try:
+  ##     var firstHtml = ""
+  ##     {.gcsafe.}:
+  ##       firstHtml = feed.snapshot()
+  ##     if firstHtml.len > 0:
+  ##       await send(patchElements(firstHtml))
+  ##     while true:
+  ##       {.gcsafe.}:
+  ##         await feed.relay(queue, send)
+  ##   except CatchableError:
+  ##     discard # client disconnected
+  ##   finally:
+  ##     {.gcsafe.}:
+  ##       feed.unsubscribe(queue)
+  ##
+  ## app.post("/notes/add"):
+  ##   let html = renderNotes() # your own pure rendering
+  ##   let event = patchElements(html)
+  ##   feed.setSnapshot(html)
+  ##   feed.broadcast(event) # every connected tab, synchronously
+  ##   datastarStream([event]) # the poster itself, via its POST response
+  ## ```
+  ##
+  ## Subscriber state is guarded by a lock (same pattern as the rate limit
+  ## plugin), so the hub stays sound however the application is served.
+  lock: Lock
+  subscribers: seq[AsyncQueue[DatastarEvent]]
+  snapshotHtml: string
+
+proc newLiveFeed*(): LiveFeed =
+  ## Creates an empty broadcast hub.
+  new(result)
+  initLock(result.lock)
+  result.subscribers = @[]
+
+proc subscribe*(feed: LiveFeed): AsyncQueue[DatastarEvent] {.gcsafe.} =
+  ## Registers a new subscriber and returns its private event queue.
+  ##
+  ## Call once at the top of an ``app.sse`` handler, then relay queue items
+  ## to the client (see ``relay``). Each subscriber only receives events
+  ## broadcast after it subscribed; send the current snapshot explicitly.
+  {.cast(gcsafe).}:
+    acquire(feed.lock)
+    try:
+      result = newAsyncQueue[DatastarEvent]()
+      feed.subscribers.add(result)
+    finally:
+      release(feed.lock)
+
+proc unsubscribe*(feed: LiveFeed, queue: AsyncQueue[DatastarEvent]) {.gcsafe.} =
+  ## Removes a subscriber; unknown queues are ignored. Always call it when an
+  ## SSE handler exits so disconnected clients stop accumulating.
+  {.cast(gcsafe).}:
+    acquire(feed.lock)
+    try:
+      var kept: seq[AsyncQueue[DatastarEvent]] = @[]
+      for candidate in feed.subscribers:
+        if candidate != queue:
+          kept.add(candidate)
+      feed.subscribers = move(kept)
+    finally:
+      release(feed.lock)
+
+proc subscriberCount*(feed: LiveFeed): int {.gcsafe.} =
+  ## Returns the current number of subscribers. Mainly useful for tests.
+  {.cast(gcsafe).}:
+    acquire(feed.lock)
+    try:
+      result = feed.subscribers.len
+    finally:
+      release(feed.lock)
+
+proc setSnapshot*(feed: LiveFeed, html: string) {.gcsafe.} =
+  ## Records ``html`` as the feed's current full rendering.
+  ##
+  ## Call it from POST handlers right after mutating feed state (next to
+  ## ``broadcast``). New subscribers receive it as their first event, so call
+  ## it once at startup too. Rendering itself stays in your own plain procs.
+  {.cast(gcsafe).}:
+    acquire(feed.lock)
+    try:
+      feed.snapshotHtml = html
+    finally:
+      release(feed.lock)
+
+proc snapshot*(feed: LiveFeed): string {.gcsafe.} =
+  ## Returns the last snapshot recorded with ``setSnapshot`` ("" if none).
+  {.cast(gcsafe).}:
+    acquire(feed.lock)
+    try:
+      result = feed.snapshotHtml
+    finally:
+      release(feed.lock)
+
+proc broadcast*(feed: LiveFeed, event: DatastarEvent) {.gcsafe.} =
+  ## Queues ``event`` for every subscriber. Never raises and never blocks:
+  ## subscribers that subscribed after the call miss the event, and a full
+  ## subscriber queue is dropped so one slow client cannot stall the rest.
+  ##
+  ## This is synchronous on purpose, so plain (non-async) POST handlers can
+  ## fan out with a single call. Subscribed SSE handlers relay queued events
+  ## with ``relay``.
+  var targets: seq[AsyncQueue[DatastarEvent]]
+  {.cast(gcsafe).}:
+    acquire(feed.lock)
+    try:
+      targets = feed.subscribers
+    finally:
+      release(feed.lock)
+  var full: seq[AsyncQueue[DatastarEvent]] = @[]
+  for queue in targets:
+    try:
+      queue.putNoWait(event)
+    except AsyncQueueFullError:
+      full.add(queue)
+  if full.len > 0:
+    {.cast(gcsafe).}:
+      acquire(feed.lock)
+      try:
+        var kept: seq[AsyncQueue[DatastarEvent]] = @[]
+        for candidate in feed.subscribers:
+          var dropped = false
+          for gone in full:
+            if candidate == gone:
+              dropped = true
+              break
+          if not dropped:
+            kept.add(candidate)
+        feed.subscribers = move(kept)
+      finally:
+        release(feed.lock)
+
+proc relay*(
+    feed: LiveFeed, queue: AsyncQueue[DatastarEvent], sender: SseSend
+): Future[void] {.async: (raises: [CancelledError, HttpWriteError]).} =
+  ## Relays the next queued event to ``sender``.
+  ##
+  ## Use it in a loop inside ``app.sse`` handlers (see ``LiveFeed``). It raises
+  ## when the client is gone, which is the signal to unsubscribe and return.
+  let event = await queue.get()
+  await event.sendTo(sender)

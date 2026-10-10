@@ -9,10 +9,8 @@ import std/[macros, os, strutils, tables]
 
 import fastnim/static/files
 
-const defaultDenyExts* = [
-  ".mp4", ".mov", ".avi", ".mkv", ".webm", ".mp3", ".wav", ".flac",
-  ".ogg", ".opus",
-]
+const defaultDenyExts* =
+  [".mp4", ".mov", ".avi", ".mkv", ".webm", ".mp3", ".wav", ".flac", ".ogg", ".opus"]
   ## Media extensions rejected by ``serveStaticEmbedded`` by default.
   ## Embed small text assets; stream media from disk with ``serveStatic``.
 
@@ -26,8 +24,9 @@ proc resolveStaticDir(directory, callDir: string): string {.compileTime.} =
       return directory
   else:
     let base = getProjectPath()
-    for candidate in [callDir / directory, base / directory,
-        parentDir(base) / directory]:
+    for candidate in [
+      callDir / directory, base / directory, parentDir(base) / directory
+    ]:
       # ``staticRead`` needs an absolute path; relative candidates cannot
       # be resolved without the process working directory.
       if isAbsolute(candidate) and dirExists(candidate):
@@ -50,8 +49,7 @@ proc resolveStaticFile(file, callDir: string): string {.compileTime.} =
         return candidate
   raise newException(
     ValueError,
-    "static file not found: " & file & " (relative to " & callDir &
-      " or the project)",
+    "static file not found: " & file & " (relative to " & callDir & " or the project)",
   )
 
 proc daysFromCivil(y, m, d: int): int64 {.compileTime.} =
@@ -61,7 +59,11 @@ proc daysFromCivil(y, m, d: int): int64 {.compileTime.} =
     year -= 1
   let era = (if year >= 0: year else: year - 399) div 400
   let yoe = year - era * 400
-  let mp = if m > 2: m - 3 else: m + 9
+  let mp =
+    if m > 2:
+      m - 3
+    else:
+      m + 9
   let doy = (153 * mp + 2) div 5 + d - 1
   let doe = yoe * 365 + yoe div 4 - yoe div 100 + doy
   era * 146097 + doe - 719468
@@ -73,10 +75,8 @@ proc buildHttpMoment(): tuple[unix: int64, httpDate: string] {.compileTime.} =
   ## Embedded files record the build moment instead of a filesystem mtime
   ## because ``stat`` and timezones are unavailable to the compile-time VM.
   const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-  const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
-    "Nov", "Dec",
-  ]
+  const months =
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
   proc two(n: int): string =
     if n < 10:
       "0" & $n
@@ -93,9 +93,9 @@ proc buildHttpMoment(): tuple[unix: int64, httpDate: string] {.compileTime.} =
     days * 86400 + tp[0].parseInt.int64 * 3600 + tp[1].parseInt.int64 * 60 +
     tp[2].parseInt.int64
   let httpDate =
-    weekDays[(days mod 7 + 7 + 4) mod 7] & ", " & two(day) & " " &
-    months[month - 1] & " " & $year & " " & two(tp[0].parseInt) & ":" &
-    two(tp[1].parseInt) & ":" & two(tp[2].parseInt) & " GMT"
+    weekDays[(days mod 7 + 7 + 4) mod 7] & ", " & two(day) & " " & months[month - 1] &
+    " " & $year & " " & two(tp[0].parseInt) & ":" & two(tp[1].parseInt) & ":" &
+    two(tp[2].parseInt) & " GMT"
   (unix, httpDate)
 
 proc embeddedFileNode(
@@ -117,9 +117,8 @@ proc embeddedFileNode(
   if size > maxEmbedBytes:
     raise newException(
       ValueError,
-      "static file " & absPath & " (" & $size &
-        " bytes) exceeds maxEmbedBytes (" & $maxEmbedBytes &
-        "); serve it from disk with serveStatic instead",
+      "static file " & absPath & " (" & $size & " bytes) exceeds maxEmbedBytes (" &
+        $maxEmbedBytes & "); serve it from disk with serveStatic instead",
     )
   let moment = buildHttpMoment()
   let mtimeUnix = moment.unix
@@ -132,7 +131,7 @@ proc embeddedFileNode(
   let lastModLit = newLit(lastMod)
   let mtimeLit = newLit(mtimeUnix)
   let sizeLit = newLit(size.int)
-  result = quote do:
+  result = quote:
     EmbeddedFile(
       content: `contentLit`,
       contentType: `contentTypeLit`,
@@ -143,7 +142,9 @@ proc embeddedFileNode(
     )
 
 macro serveStaticEmbedded*(
-    app: typed, prefix: static[string], directory: static[string],
+    app: typed,
+    prefix: static[string],
+    directory: static[string],
     args: varargs[untyped],
 ): untyped =
   ## Serves ``directory`` at ``prefix`` with every file baked into the binary.
@@ -179,8 +180,7 @@ macro serveStaticEmbedded*(
         error("maxAge must be an integer literal", argument[1])
       maxAge = newLit(argument[1].intVal.int)
     of "allowDotfiles":
-      if argument[1].kind != nnkIdent or
-          ($argument[1] notin ["true", "false"]):
+      if argument[1].kind != nnkIdent or ($argument[1] notin ["true", "false"]):
         error("allowDotfiles must be true or false", argument[1])
       allowDotfiles = newLit($argument[1] == "true")
     of "spaFallback":
@@ -209,8 +209,9 @@ macro serveStaticEmbedded*(
 
   var absDir = ""
   try:
-    absDir = resolveStaticDir(directory, parentDir(
-        instantiationInfo(fullPaths = true).filename))
+    absDir = resolveStaticDir(
+      directory, parentDir(instantiationInfo(fullPaths = true).filename)
+    )
   except ValueError as exc:
     error(exc.msg)
 
@@ -227,7 +228,7 @@ macro serveStaticEmbedded*(
     error(exc.msg)
 
   let prefixLit = newLit(prefix)
-  result = quote do:
+  result = quote:
     block:
       var `tableSym` = initTable[string, EmbeddedFile]()
       `assigns`
@@ -242,8 +243,7 @@ macro serveStaticEmbedded*(
       )
 
 macro serveSingleEmbeddedFile*(
-    app: typed, path: static[string], file: static[string],
-    args: varargs[untyped],
+    app: typed, path: static[string], file: static[string], args: varargs[untyped]
 ): untyped =
   ## Serves one compile-time file at the exact route ``path``.
   ##
@@ -282,15 +282,12 @@ macro serveSingleEmbeddedFile*(
           error("denyExts entries must be string literals", item)
         denyExts.add(item.strVal.toLowerAscii())
     else:
-      error(
-        "unsupported serveSingleEmbeddedFile option: " & $argument[0], argument
-      )
+      error("unsupported serveSingleEmbeddedFile option: " & $argument[0], argument)
 
   var absFile = ""
   try:
-    absFile = resolveStaticFile(
-      file, parentDir(instantiationInfo(fullPaths = true).filename)
-    )
+    absFile =
+      resolveStaticFile(file, parentDir(instantiationInfo(fullPaths = true).filename))
   except ValueError as exc:
     error(exc.msg)
 
@@ -301,5 +298,5 @@ macro serveSingleEmbeddedFile*(
     error(exc.msg)
 
   let pathLit = newLit(path)
-  result = quote do:
+  result = quote:
     serveSingleEmbedded(`app`, `pathLit`, `fileNode`, maxAge = `maxAge`)

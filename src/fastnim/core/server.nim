@@ -84,9 +84,7 @@ proc sendStaticFile(
   var opened: File
   if not open(opened, response.sendFile, fmRead):
     app.logError("Static file is no longer readable: " & response.sendFile)
-    return await toChronosResponse(
-      chronosRequest, fastnimHttp.text("Not Found", 404)
-    )
+    return await toChronosResponse(chronosRequest, fastnimHttp.text("Not Found", 404))
   let cresp = chronosRequest.getResponse()
   cresp.status = toChronosStatus(response.status)
   for key, value in response.headers:
@@ -132,9 +130,26 @@ proc sendSse(
   let eventSender: SseSend = proc(
       event: ServerSentEvent
   ): Future[void] {.async: (raises: [CancelledError, chronosHttp.HttpWriteError]).} =
+    if response.getResponseState() notin
+        {chronosHttp.HttpResponseState.Prepared, chronosHttp.HttpResponseState.Sending}:
+      # The peer went away after an earlier write failed. Report it as a
+      # regular write error (which callers and `process` handle by dropping
+      # the connection) instead of letting Chronos trip its internal response
+      # state assertion, which would crash the whole server.
+      raise newException(chronosHttp.HttpWriteError, "SSE connection is closed")
     await response.send(formatSseEvent(event))
-  await app.handleSse(request, eventSender)
-  await response.finish()
+  try:
+    await app.handleSse(request, eventSender)
+  except chronosHttp.HttpWriteError as exc:
+    return chronosHttp.dropResponse()
+  if response.getResponseState() in
+      {chronosHttp.HttpResponseState.Prepared, chronosHttp.HttpResponseState.Sending}:
+    await response.finish()
+  else:
+    # The handler swallowed a send error (for example to unsubscribe a dead
+    # client) and returned normally. There is nothing left to flush; dropping
+    # avoids tripping the response state assertion in `finish`.
+    return chronosHttp.dropResponse()
   response
 
 proc toWebSocketRequest(request: chronosHttp.HttpRequestRef): rawWs.HttpRequest =

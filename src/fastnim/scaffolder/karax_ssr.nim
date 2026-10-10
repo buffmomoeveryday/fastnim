@@ -14,7 +14,8 @@ proc ssrNimble(name: string): string =
 
 version = "0.1.0"
 author = "you"
-description = """" & name & """ - FastNim + Karax SSR"
+description = """" & name &
+    """ - FastNim + Karax SSR"
 license = "MIT"
 srcDir = "src"
 
@@ -50,7 +51,8 @@ proc layout(title, inner: string): string =
 pageRouter.get("/"):
   let content = buildHtml(tdiv):
     h1:
-      text "Hello from """ & name & """"
+      text "Hello from """ &
+    name & """"
     p:
       text "Rendered server-side with Karax."
     p:
@@ -97,7 +99,8 @@ block homePage:
   doAssert response.status == 200
   doAssert response.headers["content-type"] == "text/html; charset=utf-8"
   doAssert response.body.startsWith("<!doctype html>")
-  doAssert "<h1>Hello from """ & name & """</h1>" in response.body
+  doAssert "<h1>Hello from """ &
+    name & """</h1>" in response.body
 
 block userPage:
   let api = initFastNim(logs = false)
