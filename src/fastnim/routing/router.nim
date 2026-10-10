@@ -464,7 +464,8 @@ proc addWebSocketRoute*(
 macro sse*(app: typed, path: typed, body: untyped): untyped =
   ## Registers a Server-Sent Events endpoint.
   ##
-  ## The block can asynchronously send ``ServerSentEvent`` values using ``send``.
+  ## The block can asynchronously send ``ServerSentEvent`` values using ``send``,
+  ## either as ``send(event)`` or with method syntax as ``event.send()``.
   if body.kind != nnkStmtList:
     return quote:
       addSseRoute(`app`, `path`, `body`)
@@ -478,6 +479,13 @@ macro sse*(app: typed, path: typed, body: untyped): untyped =
       return send
     if node.kind == nnkIdent and eqIdent(node, "ctx"):
       return newDotExpr(request, ident("context"))
+    if node.kind in {nnkCall, nnkCommand} and node.len == 1 and
+        node[0].kind == nnkDotExpr and node[0].len == 2 and
+        node[0][1].kind == nnkIdent and eqIdent(node[0][1], "send"):
+      return newCall(send, bindIdentifiers(node[0][0]))
+    if node.kind == nnkDotExpr and node.len == 2 and node[1].kind == nnkIdent and
+        eqIdent(node[1], "send"):
+      return newCall(send, bindIdentifiers(node[0]))
     result = copyNimNode(node)
     for child in node:
       result.add(bindIdentifiers(child))
@@ -983,42 +991,6 @@ macro post*(app: typed, path: typed, responses: untyped, body: untyped): untyped
     "",
     newEmptyNode(),
     "",
-    newCall(ident("initOpenApiRoute")),
-  )
-
-macro post*(
-    app: typed, path: typed, body: typedesc, responses: untyped, routeBody: untyped
-): untyped =
-  ## Registers a POST route that decodes JSON into the implicit ``body`` model.
-  buildTypedRoute(
-    app,
-    path,
-    responses,
-    routeBody,
-    quote do:
-      HttpMethod.Post,
-    body,
-    "body",
-    ident("parseJsonBody"),
-    "invalid JSON request body",
-    newCall(ident("initOpenApiRoute")),
-  )
-
-macro post*(
-    app: typed, path: typed, form: typedesc, responses: untyped, routeBody: untyped
-): untyped =
-  ## Registers a POST route that decodes URL-encoded fields into ``form``.
-  buildTypedRoute(
-    app,
-    path,
-    responses,
-    routeBody,
-    quote do:
-      HttpMethod.Post,
-    form,
-    "form",
-    ident("parseFormBody"),
-    "invalid form request body",
     newCall(ident("initOpenApiRoute")),
   )
 

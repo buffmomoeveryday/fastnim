@@ -33,6 +33,7 @@ task docs, "Generate HTML API documentation with nim doc":
     "src/fastnim/plugins.nim",
     "src/fastnim/plugins/ratelimit.nim",
     "src/fastnim/plugins/inertia.nim",
+    "src/fastnim/plugins/datastar.nim",
     "src/fastnim/plugins/openapi.nim",
     "src/fastnim/websocket.nim",
     "src/fastnim/logging.nim",

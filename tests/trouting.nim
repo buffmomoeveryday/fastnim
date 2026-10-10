@@ -80,6 +80,44 @@ block methodAndMissingRoute:
   doAssert app.handle(initRequest(HttpMethod.Get, "/items")).status == 404
   doAssert app.handle(initRequest(HttpMethod.Post, "/missing")).status == 404
 
+block simplePostBlockBindsRequest:
+  let app = initFastNim()
+  app.post("/echo/{name}"):
+    text(
+      request.pathParam("name") & ":" & request.queryParam("q", "none") & ":" &
+        request.body
+    )
+  var headers = initTable[string, string]()
+  let response =
+    app.handle(initRequest(HttpMethod.Post, "/echo/ada?q=1", headers, "payload"))
+  doAssert response.status == 200
+  doAssert response.body == "ada:1:payload"
+
+block simplePostBlockBindsCtx:
+  type Greeting = ref object of RootObj
+    message: string
+  let app = initFastNim()
+  app.context.setContext("greeting", Greeting(message: "hi"))
+  app.post("/greet"):
+    text(get[Greeting](ctx, "greeting").message)
+  doAssert app.handle(initRequest(HttpMethod.Post, "/greet")).body == "hi"
+
+block namedTypedPostBody:
+  type PItem = object
+    name: string
+  type PCreated = object
+    id: int
+    name: string
+  let app = initFastNim()
+  app.post("/items", body = PItem, responses = @[(201, PCreated)]):
+    created PCreated(id: 1, name: body.name)
+  var headers = initTable[string, string]()
+  let response = app.handle(
+    initRequest(HttpMethod.Post, "/items", headers, """{"name":"Widget"}""")
+  )
+  doAssert response.status == 201
+  doAssert response.body == "{\"id\":1,\"name\":\"Widget\"}"
+
 block customNotFoundHandler:
   let app = initFastNim()
   app.onError(404, proc(request: Request): Response = text("Route not found: " & request.path, 404))
