@@ -5,7 +5,7 @@ import fastnim
 block handlesCorsPreflight:
   let app = initFastNim(logs = false)
   app.use(cors(initCorsOptions(allowOrigins = @["https://app.example.com"])))
-  let response = app.handle(
+  let response = app.handleSync(
     initRequest(
       HttpMethod.Options,
       "/items",
@@ -21,7 +21,7 @@ block appliesCorsToMatchingOrigins:
   app.use(cors(initCorsOptions(allowOrigins = @["https://app.example.com"])))
   app.get("/"):
     text("ok")
-  let response = app.handle(
+  let response = app.handleSync(
     initRequest(HttpMethod.Get, "/", {"origin": "https://app.example.com"}.toTable)
   )
   doAssert response.headers["access-control-allow-origin"] == "https://app.example.com"
@@ -32,7 +32,7 @@ block propagatesRequestIdsAndAddsResponseTime:
   app.use(responseTime())
   app.get("/"):
     text(request.header("x-request-id"))
-  let response = app.handle(
+  let response = app.handleSync(
     initRequest(HttpMethod.Get, "/", {"x-request-id": "trace-42"}.toTable)
   )
   doAssert response.body == "trace-42"

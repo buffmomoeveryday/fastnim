@@ -13,7 +13,7 @@ block pathAndQueryParameters:
       ),
   )
 
-  let response = app.handle(initRequest(HttpMethod.Get, "/users/ada?page=2"))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/users/ada?page=2"))
   doAssert response.status == 200
   doAssert response.body == "{\"id\":\"ada\",\"page\":\"2\"}"
   doAssert response.headers["content-type"] == "application/json; charset=utf-8"
@@ -22,7 +22,7 @@ block blockRouteRegistration:
   let app = initFastNim()
   app.get("/"):
     %*{"message": "Hello, world!"}
-  let response = app.handle(initRequest(HttpMethod.Get, "/"))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/"))
   doAssert response.body == "{\"message\":\"Hello, world!\"}"
   doAssert response.headers["content-type"] == "application/json; charset=utf-8"
 
@@ -35,11 +35,11 @@ block responseReturnSyntax:
       "itemId": request.pathParam("itemId"), "page": request.queryParam("page", "1"),
     })
 
-  let found = app.handle(initRequest(HttpMethod.Get, "/items/42?page=3"))
+  let found = app.handleSync(initRequest(HttpMethod.Get, "/items/42?page=3"))
   doAssert found.status == 200
   doAssert found.body == "{\"itemId\":\"42\",\"page\":\"3\"}"
 
-  let missing = app.handle(initRequest(HttpMethod.Get, "/items/missing"))
+  let missing = app.handleSync(initRequest(HttpMethod.Get, "/items/missing"))
   doAssert missing.status == 404
   doAssert missing.body == "{\"detail\":\"item not found\"}"
 
@@ -49,7 +49,7 @@ block implicitStatusTuple:
     let itemId = request.pathParam("itemId")
     (200, %*{"itemId": itemId, "page": request.queryParam("page", "1")})
 
-  let response = app.handle(initRequest(HttpMethod.Get, "/items/7?page=2"))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/items/7?page=2"))
   doAssert response.status == 200
   doAssert response.body == "{\"itemId\":\"7\",\"page\":\"2\"}"
 
@@ -61,7 +61,7 @@ block requestAndResponseHelpers:
     var response = text(request.header("X-Request-Id"))
     response.setHeader("X-Frame-Options", "DENY")
     response
-  let response = app.handle(initRequest(HttpMethod.Get, "/headers", headers))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/headers", headers))
   doAssert response.body == "abc-123"
   doAssert response.headers["x-frame-options"] == "DENY"
 
@@ -77,8 +77,8 @@ block methodAndMissingRoute:
     proc(request: Request): Response {.raises: [].} =
       text("created", 201),
   )
-  doAssert app.handle(initRequest(HttpMethod.Get, "/items")).status == 404
-  doAssert app.handle(initRequest(HttpMethod.Post, "/missing")).status == 404
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/items")).status == 404
+  doAssert app.handleSync(initRequest(HttpMethod.Post, "/missing")).status == 404
 
 block routeMacrosDoNotHijackMethodCalls:
   var items = @["a", "b", "c"]
@@ -87,7 +87,7 @@ block routeMacrosDoNotHijackMethodCalls:
   let app = initFastNim()
   app.get("/"):
     text("ok")
-  doAssert app.handle(initRequest(HttpMethod.Get, "/")).body == "ok"
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/")).body == "ok"
 
 block simplePostBlockBindsRequest:
   let app = initFastNim()
@@ -98,7 +98,7 @@ block simplePostBlockBindsRequest:
     )
   var headers = initTable[string, string]()
   let response =
-    app.handle(initRequest(HttpMethod.Post, "/echo/ada?q=1", headers, "payload"))
+    app.handleSync(initRequest(HttpMethod.Post, "/echo/ada?q=1", headers, "payload"))
   doAssert response.status == 200
   doAssert response.body == "ada:1:payload"
 
@@ -109,7 +109,7 @@ block simplePostBlockBindsCtx:
   app.context.setContext("greeting", Greeting(message: "hi"))
   app.post("/greet"):
     text(get[Greeting](ctx, "greeting").message)
-  doAssert app.handle(initRequest(HttpMethod.Post, "/greet")).body == "hi"
+  doAssert app.handleSync(initRequest(HttpMethod.Post, "/greet")).body == "hi"
 
 block namedTypedPostBody:
   type PItem = object
@@ -121,7 +121,7 @@ block namedTypedPostBody:
   app.post("/items", body = PItem, responses = @[(201, PCreated)]):
     created PCreated(id: 1, name: body.name)
   var headers = initTable[string, string]()
-  let response = app.handle(
+  let response = app.handleSync(
     initRequest(HttpMethod.Post, "/items", headers, """{"name":"Widget"}""")
   )
   doAssert response.status == 201
@@ -130,7 +130,7 @@ block namedTypedPostBody:
 block customNotFoundHandler:
   let app = initFastNim()
   app.onError(404, proc(request: Request): Response = text("Route not found: " & request.path, 404))
-  let response = app.handle(initRequest(HttpMethod.Get, "/missing"))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/missing"))
   doAssert response.status == 404
   doAssert response.body == "Route not found: /missing"
 
@@ -140,7 +140,7 @@ block customInternalServerErrorHandler:
   app.get("/fail", proc(request: Request): Response =
     raise newException(ValueError, "test error")
   )
-  let response = app.handle(initRequest(HttpMethod.Get, "/fail"))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/fail"))
   doAssert response.status == 500
   doAssert response.body == "Oops"
 
@@ -148,7 +148,7 @@ block queryMethod:
   let app = initFastNim()
   app.query("/search"):
     json(%*{"query": request.queryParam("q")})
-  let response = app.handle(initRequest(HttpMethod.Query, "/search?q=nim"))
+  let response = app.handleSync(initRequest(HttpMethod.Query, "/search?q=nim"))
   doAssert response.status == 200
   doAssert response.body == "{\"query\":\"nim\"}"
 

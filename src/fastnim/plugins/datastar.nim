@@ -336,8 +336,10 @@ proc initDatastarOptions*(cdnUrl = DatastarCdnUrl, injectCdn = true): DatastarOp
   DatastarOptions(cdnUrl: cdnUrl, injectCdn: injectCdn)
 
 proc datastarMiddleware(options: DatastarOptions): Middleware =
-  result = proc(request: Request, next: NextHandler): Response =
-    result = next(request)
+  result = proc(
+      request: Request, next: NextHandler
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
+    result = await next(request)
     if not options.injectCdn or options.cdnUrl.len == 0:
       return
     if result.sendFile.len > 0:

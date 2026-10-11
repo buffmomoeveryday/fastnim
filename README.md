@@ -35,6 +35,23 @@ The current foundation includes route registration for `GET`, `POST`, `PUT`,
 parameters, request bodies and headers, text/JSON/HTML responses, 404 handling, and
 the Chronos HTTP server adapter.
 
+## Async handlers
+
+Route blocks run asynchronously on the Chronos event loop, so they can await
+Chronos futures directly:
+
+```nim
+app.get("/inventory"):
+  await sleepAsync(10.milliseconds)
+  %*{"available": true}
+```
+
+Use Chronos-native asynchronous operations such as `sleepAsync` in handlers
+and middleware. Do not use `os.sleep`, blocking sockets, or
+`std/asyncdispatch`; blocking work stalls every request sharing the event-loop
+thread. Existing synchronous handler procedures remain supported through a
+registration adapter.
+
 `app.query` supports in-process routing and testing. The installed Chronos HTTP
 parser does not recognize the `QUERY` method yet, so serving `QUERY` requests
 requires a Chronos version with `MethodQuery` support.
@@ -139,8 +156,10 @@ Run the complete authorization and response-header example with
 `nim c -r --path:src examples/middleware.nim`.
 
 ```nim
-app.use(proc(request: Request, next: NextHandler): Response =
-  var response = next(request)
+app.use(proc(
+    request: Request, next: NextHandler
+): Future[Response] {.async: (raises: [CatchableError]).} =
+  var response = await next(request)
   response.setHeader("x-request-path", request.path)
   response
 )
@@ -151,8 +170,10 @@ equivalent alternatives. Each block takes a single middleware:
 
 ```nim
 app.use:
-  proc(request: Request, next: NextHandler): Response =
-    var response = next(request)
+  proc(
+      request: Request, next: NextHandler
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
+    var response = await next(request)
     response.setHeader("x-request-path", request.path)
     response
 

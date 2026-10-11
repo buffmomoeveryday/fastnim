@@ -65,14 +65,14 @@ block generatedDocument:
   doAssert tagged["operationId"].getStr == "getTaggedItem"
 
 block builtInEndpoints:
-  let schema = app.handle(initRequest(HttpMethod.Get, "/openapi.json"))
+  let schema = app.handleSync(initRequest(HttpMethod.Get, "/openapi.json"))
   doAssert schema.status == 200
   doAssert schema.headers["content-type"] == "application/json; charset=utf-8"
-  let docs = app.handle(initRequest(HttpMethod.Get, "/docs"))
+  let docs = app.handleSync(initRequest(HttpMethod.Get, "/docs"))
   doAssert docs.status == 200
   doAssert docs.headers["content-type"] == "text/html; charset=utf-8"
   doAssert "swagger-ui" in docs.body
 
 block disabledEndpoints:
   let disabled = initFastNim(logs = false, openApi = initOpenApiSettings(enabled = false))
-  doAssert disabled.handle(initRequest(HttpMethod.Get, "/openapi.json")).status == 404
+  doAssert disabled.handleSync(initRequest(HttpMethod.Get, "/openapi.json")).status == 404

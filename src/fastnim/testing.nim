@@ -19,6 +19,8 @@
 
 import std/[json, tables]
 
+import chronos
+
 import fastnim/context/http
 import fastnim/routing/router
 
@@ -31,6 +33,10 @@ proc initTestClient*(app: Application): TestClient =
   ## Creates a client bound to ``app``.
   TestClient(app: app)
 
+proc handleSync*(app: Application, request: Request): Response =
+  ## Waits for one in-process request. Intended only for synchronous test code.
+  waitFor app.handle(request)
+
 proc request*(
     client: TestClient,
     `method`: HttpMethod,
@@ -39,7 +45,7 @@ proc request*(
     body = "",
 ): Response =
   ## Sends one in-process request. ``target`` may include a query string.
-  client.app.handle(initRequest(`method`, target, headers, body))
+  waitFor client.app.handle(initRequest(`method`, target, headers, body))
 
 proc get*(
     client: TestClient, target: string, headers: Headers = initTable[string, string]()

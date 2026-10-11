@@ -4,8 +4,10 @@ import tables
 
 import fastnim/plugins/ratelimit
 
-proc addResponseHeadersMiddleware(request: Request, next: NextHandler): Response =
-  var response = next request
+proc addResponseHeadersMiddleware(
+    request: Request, next: NextHandler
+): Future[Response] {.async: (raises: [CatchableError]).} =
+  var response = await next(request)
   response.setHeader("x-powered-by", "fastnim")
   response
 

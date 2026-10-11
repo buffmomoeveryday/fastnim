@@ -64,7 +64,7 @@ block bearerAcceptsKnownTokens:
   )
   app.get("/me"):
     json(%*{"user": request.authSubject(), "scheme": request.authScheme()})
-  let response = app.handle(initRequest(HttpMethod.Get, "/me", bearerHeaders("tok-1")))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/me", bearerHeaders("tok-1")))
   doAssert response.status == 200
   doAssert response.body == "{\"user\":\"ada\",\"scheme\":\"bearer\"}"
 
@@ -79,11 +79,11 @@ block bearerRejectsUnknownAndMissing:
   )
   app.get("/me"):
     text("unreachable")
-  let wrong = app.handle(initRequest(HttpMethod.Get, "/me", bearerHeaders("nope")))
+  let wrong = app.handleSync(initRequest(HttpMethod.Get, "/me", bearerHeaders("nope")))
   doAssert wrong.status == 401
   doAssert "Bearer" in wrong.headers.getOrDefault("www-authenticate", "")
   doAssert wrong.headers["content-type"] == "application/json; charset=utf-8"
-  let missing = app.handle(initRequest(HttpMethod.Get, "/me"))
+  let missing = app.handleSync(initRequest(HttpMethod.Get, "/me"))
   doAssert missing.status == 401
   doAssert parseJson(missing.body)["detail"].getStr() == "authentication required"
   doAssert parseJson(wrong.body)["detail"].getStr() == "invalid credentials"
@@ -101,7 +101,7 @@ block identityHeadersCannotBeSpoofed:
     text(request.authSubject())
   var headers = bearerHeaders("nope")
   headers["x-auth-subject"] = "root"
-  let response = app.handle(initRequest(HttpMethod.Get, "/me", headers))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/me", headers))
   doAssert response.status == 401
 
 block basicAcceptsUsers:
@@ -109,7 +109,7 @@ block basicAcceptsUsers:
   app.install(authPlugin(basicOptions()))
   app.get("/me"):
     text(request.authSubject())
-  let response = app.handle(
+  let response = app.handleSync(
     initRequest(HttpMethod.Get, "/me", basicHeaders("ada", "correct horse"))
   )
   doAssert response.status == 200
@@ -120,24 +120,24 @@ block basicRejectsWrongPassword:
   app.install(authPlugin(basicOptions()))
   app.get("/me"):
     text("unreachable")
-  let wrong = app.handle(
+  let wrong = app.handleSync(
     initRequest(HttpMethod.Get, "/me", basicHeaders("ada", "wrong"))
   )
   doAssert wrong.status == 401
   doAssert "Basic" in wrong.headers.getOrDefault("www-authenticate", "")
   var malformed = initTable[string, string]()
   malformed["authorization"] = "Basic !!!not-base64!!!"
-  doAssert app.handle(initRequest(HttpMethod.Get, "/me", malformed)).status == 401
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/me", malformed)).status == 401
   var missingColon = initTable[string, string]()
   missingColon["authorization"] = "Basic " & encode("nocolonhere")
-  doAssert app.handle(initRequest(HttpMethod.Get, "/me", missingColon)).status == 401
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/me", missingColon)).status == 401
 
 block basicSkipsExcludedPaths:
   let app = initFastNim(logs = false)
   app.install(authPlugin(basicOptions()))
   app.get("/health"):
     text("ok")
-  let response = app.handle(initRequest(HttpMethod.Get, "/health"))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/health"))
   doAssert response.status == 200
   doAssert response.body == "ok"
 
@@ -154,11 +154,11 @@ block apiKeyHeaderAndQuery:
   )
   app.get("/me"):
     text(request.authSubject())
-  doAssert app.handle(initRequest(HttpMethod.Get, "/me", apiKeyHeaders("key-1"))).body ==
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/me", apiKeyHeaders("key-1"))).body ==
     "service-a"
-  doAssert app.handle(initRequest(HttpMethod.Get, "/me?api_key=key-1")).body ==
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/me?api_key=key-1")).body ==
     "service-a"
-  doAssert app.handle(initRequest(HttpMethod.Get, "/me", apiKeyHeaders("bad"))).status ==
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/me", apiKeyHeaders("bad"))).status ==
     401
 
 block apiKeyQueryDisabledByDefault:
@@ -172,7 +172,7 @@ block apiKeyQueryDisabledByDefault:
   )
   app.get("/me"):
     text("unreachable")
-  doAssert app.handle(initRequest(HttpMethod.Get, "/me?api_key=key-1")).status == 401
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/me?api_key=key-1")).status == 401
 
 block jwtRoundTrip:
   let secret = "test-secret-please-rotate"
@@ -227,10 +227,10 @@ block jwtMiddlewareAcceptsBearerJwt:
   app.get("/me"):
     json(%*{"user": request.authSubject(), "scheme": request.authScheme()})
   let token = issueJwtHs256("ada", secret)
-  let response = app.handle(initRequest(HttpMethod.Get, "/me", bearerHeaders(token)))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/me", bearerHeaders(token)))
   doAssert response.status == 200
   doAssert response.body == "{\"user\":\"ada\",\"scheme\":\"jwt\"}"
-  doAssert app.handle(initRequest(HttpMethod.Get, "/me")).status == 401
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/me")).status == 401
 
 block sessionLoginRoundTrip:
   let store = newSessionStore()
@@ -284,16 +284,16 @@ block sessionMiddlewareFlow:
     response
   app.get("/me"):
     text(request.authSubject())
-  let login = app.handle(initRequest(HttpMethod.Post, "/login"))
+  let login = app.handleSync(initRequest(HttpMethod.Post, "/login"))
   doAssert login.status == 200
   doAssert "session_id=" in login.headers["set-cookie"]
   let cookie = login.headers["set-cookie"].split(';')[0]
   var headers = initTable[string, string]()
   headers["cookie"] = cookie
-  let me = app.handle(initRequest(HttpMethod.Get, "/me", headers))
+  let me = app.handleSync(initRequest(HttpMethod.Get, "/me", headers))
   doAssert me.status == 200
   doAssert me.body == "ada"
-  doAssert app.handle(initRequest(HttpMethod.Get, "/me")).status == 401
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/me")).status == 401
 
 block sseHelperAcceptsAndRejects:
   let options = initAuthOptions(
@@ -345,5 +345,5 @@ block corsPreflightPassesThrough:
   var headers = initTable[string, string]()
   headers["origin"] = "https://app.example.com"
   headers["access-control-request-method"] = "GET"
-  let response = app.handle(initRequest(HttpMethod.Options, "/items", headers))
+  let response = app.handleSync(initRequest(HttpMethod.Options, "/items", headers))
   doAssert response.status != 401

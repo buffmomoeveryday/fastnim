@@ -173,7 +173,7 @@ block pluginInjectsCdnIntoHtml:
   app.install(datastarPlugin())
   app.get("/"):
     html("<html><head></head><body><div>hi</div></body></html>")
-  let response = app.handle(initRequest(HttpMethod.Get, "/"))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/"))
   doAssert DatastarCdnUrl in response.body
   doAssert "<script type=\"module\"" in response.body
   doAssert response.body.count(DatastarCdnUrl) == 1
@@ -185,9 +185,9 @@ block pluginSkipsNonHtmlAndExistingTag:
     json(%*{"a": 1})
   app.get("/manual"):
     html("<html><head>" & datastarScriptTag() & "</head><body></body></html>")
-  let jsonResponse = app.handle(initRequest(HttpMethod.Get, "/data"))
+  let jsonResponse = app.handleSync(initRequest(HttpMethod.Get, "/data"))
   doAssert DatastarCdnUrl notin jsonResponse.body
-  let manual = app.handle(initRequest(HttpMethod.Get, "/manual"))
+  let manual = app.handleSync(initRequest(HttpMethod.Get, "/manual"))
   doAssert manual.body.count(DatastarCdnUrl) == 1
 
 block pluginInstallTrackedOnce:

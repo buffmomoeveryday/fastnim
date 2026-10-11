@@ -35,6 +35,8 @@
 
 import std/[json, strutils, tables]
 
+import chronos
+
 import fastnim/[context/http, params/extract, plugin, routing/router]
 import fastnim/plugins/auth/[patterns, schemes, session]
 
@@ -251,20 +253,22 @@ proc isPreflight(request: Request): bool {.inline.} =
     request.header("access-control-request-method").len > 0
 
 proc authMiddleware(options: AuthOptions): Middleware =
-  result = proc(request: Request, next: NextHandler): Response =
+  result = proc(
+      request: Request, next: NextHandler
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
     var clean = request
     clean.headers.del(AuthSubjectHeader)
     clean.headers.del(AuthSchemeHeader)
     if isPreflight(clean) or
         not isProtected(clean.path, options.includePaths, options.excludePaths):
-      return next(clean)
+      return await next(clean)
     let missing = not hasCredentials(clean, options)
     let identity = authenticate(clean, options)
     if identity.isNil:
       return unauthorized(missing, options)
     clean.headers[AuthSubjectHeader] = identity.subject
     clean.headers[AuthSchemeHeader] = $identity.scheme
-    next(clean)
+    return await next(clean)
 
 proc contributeAuth(document: var JsonNode) =
   if "paths" notin document:

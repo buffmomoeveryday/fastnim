@@ -23,6 +23,8 @@
 
 import std/[os, strutils, tables, times, uri]
 
+import chronos
+
 import fastnim/context/http
 import fastnim/routing/router
 
@@ -388,15 +390,17 @@ proc serveStatic*(
       newException(ValueError, "static spaFallback must be relative to the directory")
   let absDir = absolutePath(directory)
   app.use(
-    proc(request: Request, next: NextHandler): Response =
+    proc(request: Request, next: NextHandler): Future[Response] {.
+        async: (raises: [CatchableError])
+    .} =
       if request.method != HttpMethod.Get and request.method != HttpMethod.Head:
-        return next(request)
+        return await next(request)
       var sub: string
       if not matchPrefix(normPrefix, request.path, sub):
-        return next(request)
+        return await next(request)
       var rel: string
       if not resolveRel(decodeUrl(sub, false), allowDotfiles, rel):
-        return next(request)
+        return await next(request)
       var filePath = ""
       if rel.len == 0:
         if indexFile.len > 0 and fileExists(absDir / indexFile):
@@ -414,7 +418,7 @@ proc serveStatic*(
         if spaFallback.len > 0 and fileExists(absDir / spaFallback):
           filePath = absDir / spaFallback
         else:
-          return next(request)
+          return await next(request)
       serveDiskFile(request, filePath, maxAge, streamThreshold)
   )
 
@@ -432,11 +436,13 @@ proc serveSingleFile*(
     raise newException(ValueError, "static file does not exist: " & file)
   let absFile = absolutePath(file)
   app.use(
-    proc(request: Request, next: NextHandler): Response =
+    proc(request: Request, next: NextHandler): Future[Response] {.
+        async: (raises: [CatchableError])
+    .} =
       if request.method != HttpMethod.Get and request.method != HttpMethod.Head:
-        return next(request)
+        return await next(request)
       if request.path != path:
-        return next(request)
+        return await next(request)
       serveDiskFile(request, absFile, maxAge, streamThreshold)
   )
 
@@ -454,15 +460,17 @@ proc serveEmbeddedFiles*(
   let normPrefix = normalizePrefix(prefix)
   checkMaxAge(maxAge)
   app.use(
-    proc(request: Request, next: NextHandler): Response =
+    proc(request: Request, next: NextHandler): Future[Response] {.
+        async: (raises: [CatchableError])
+    .} =
       if request.method != HttpMethod.Get and request.method != HttpMethod.Head:
-        return next(request)
+        return await next(request)
       var sub: string
       if not matchPrefix(normPrefix, request.path, sub):
-        return next(request)
+        return await next(request)
       var rel: string
       if not resolveRel(decodeUrl(sub, false), allowDotfiles, rel):
-        return next(request)
+        return await next(request)
       var key = rel
       if key.len == 0:
         if indexFile.len > 0 and indexFile in files:
@@ -471,7 +479,7 @@ proc serveEmbeddedFiles*(
         if spaFallback.len > 0 and spaFallback in files:
           key = spaFallback
         else:
-          return next(request)
+          return await next(request)
       respondEmbedded(request, files[key], maxAge)
   )
 
@@ -483,10 +491,12 @@ proc serveSingleEmbedded*(
     raise newException(ValueError, "static file path must start with '/'")
   checkMaxAge(maxAge)
   app.use(
-    proc(request: Request, next: NextHandler): Response =
+    proc(request: Request, next: NextHandler): Future[Response] {.
+        async: (raises: [CatchableError])
+    .} =
       if request.method != HttpMethod.Get and request.method != HttpMethod.Head:
-        return next(request)
+        return await next(request)
       if request.path != path:
-        return next(request)
+        return await next(request)
       respondEmbedded(request, file, maxAge)
   )

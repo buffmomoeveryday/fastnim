@@ -13,10 +13,12 @@ type
     id: int
     name: string
 
-proc requireAuth(request: Request, next: NextHandler): Response =
+proc requireAuth(
+    request: Request, next: NextHandler
+): Future[Response] {.async: (raises: [CatchableError]).} =
   if request.header("authorization") == "":
     return json("""{"detail":"missing credentials"}""", 401)
-  next(request)
+  return await next(request)
 
 let userRouter = initRouter(prefix = "/users", tags = @["users"])
 

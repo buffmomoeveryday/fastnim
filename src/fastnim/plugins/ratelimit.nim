@@ -4,6 +4,8 @@
 
 import std/[json, locks, math, strutils, tables, times]
 
+import chronos
+
 import fastnim/[context/http, context/state, params/extract, plugin, routing/router]
 
 type
@@ -42,12 +44,15 @@ proc newRateLimitState(): RateLimitState =
   result.buckets = initTable[string, RateLimitBucket]()
 
 proc rateLimitMiddleware(options: RateLimitOptions, state: RateLimitState): Middleware =
-  result = proc(request: Request, next: NextHandler): Response =
+  result = proc(
+      request: Request, next: NextHandler
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
     let key =
       if options.key.isNil:
         defaultKey(request)
       else:
-        options.key(request)
+        {.cast(gcsafe), cast(raises: [CatchableError]).}:
+          options.key(request)
     let now = epochTime()
     var remaining: int
     var retryAfter = 0
@@ -74,7 +79,7 @@ proc rateLimitMiddleware(options: RateLimitOptions, state: RateLimitState): Midd
       result.setHeader("x-ratelimit-limit", $options.limit)
       result.setHeader("x-ratelimit-remaining", "0")
       return
-    result = next(request)
+    result = await next(request)
     result.setHeader("x-ratelimit-limit", $options.limit)
     result.setHeader("x-ratelimit-remaining", $remaining)
 

@@ -13,15 +13,25 @@ import fastnim/openapi/spec
 import fastnim/websocket
 
 type
-  RouteHandler* = proc(request: Request): Response {.nimcall.}
-    ## Handles a regular HTTP request. Handlers may capture application state.
+  RouteHandler* = proc(request: Request): Future[Response] {.
+    closure, async: (raises: [CatchableError])
+  .}
+    ## Handles a regular HTTP request asynchronously on the Chronos event loop.
+  SyncRouteHandler* = proc(request: Request): Response {.
+    nimcall, raises: [CatchableError]
+  .}
+    ## Legacy synchronous route handler adapted to ``RouteHandler`` at registration.
   ErrorHandler* = proc(request: Request): Response {.closure, gcsafe.}
     ## Creates a response for a framework-generated HTTP error status.
-  NextHandler* = proc(request: Request): Response {.closure.}
+  NextHandler* = proc(request: Request): Future[Response] {.
+    closure, async: (raises: [CatchableError])
+  .}
     ## Continues an HTTP request through the remaining middleware and route.
-  Middleware* = proc(request: Request, next: NextHandler): Response {.closure.}
-    ## Runs around an HTTP request. It may return without calling ``next`` to
-    ## short-circuit the request.
+  Middleware* = proc(request: Request, next: NextHandler): Future[Response] {.
+    closure, async: (raises: [CatchableError])
+  .}
+    ## Runs around an HTTP request. It may await ``next(request)`` or return
+    ## without calling ``next`` to short-circuit the request.
   MiddlewarePhase* {.pure.} = enum ## When middleware runs relative to routing.
     BeforeRouting
     AfterRouting
@@ -486,7 +496,7 @@ proc errorResponse*(app: Application, request: Request, status: int): Response =
   of 404:
     notFound()
   of 500:
-    text("Internal Server Error", 500)
+    json(%*{"detail": "Internal Server Error"}, 500)
   else:
     text("HTTP Error " & $status, status)
 
@@ -579,6 +589,21 @@ proc addRoute*(
   )
 
 proc addRoute*(
+    app: Application,
+    `method`: HttpMethod,
+    path: string,
+    handler: SyncRouteHandler,
+    openApi = OpenApiOperation(),
+) =
+  ## Registers a legacy synchronous route through an asynchronous adapter.
+  let asyncHandler: RouteHandler = proc(
+      request: Request
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
+    {.cast(gcsafe).}:
+      return handler(request)
+  app.addRoute(`method`, path, asyncHandler, openApi)
+
+proc addRoute*(
     router: Router,
     `method`: HttpMethod,
     path: string,
@@ -594,6 +619,21 @@ proc addRoute*(
   router.routes.add(
     Route(`method`: `method`, path: path, handler: handler, openApi: documentation)
   )
+
+proc addRoute*(
+    router: Router,
+    `method`: HttpMethod,
+    path: string,
+    handler: SyncRouteHandler,
+    openApi = OpenApiOperation(),
+) =
+  ## Registers a legacy synchronous router route through an asynchronous adapter.
+  let asyncHandler: RouteHandler = proc(
+      request: Request
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
+    {.cast(gcsafe).}:
+      return handler(request)
+  router.addRoute(`method`, path, asyncHandler, openApi)
 
 proc addSseRoute*(app: Application, path: string, handler: SseRouteHandler) =
   ## Registers a GET Server-Sent Events endpoint.
@@ -819,8 +859,9 @@ macro get*(app: Application | Router, path: typed, body: untyped): untyped =
       `app`,
       HttpMethod.Get,
       `path`,
-      proc(`request`: Request): Response {.nimcall.} =
-        `boundBody`,
+      proc(`request`: Request): Future[Response] {.async: (raises: [CatchableError]).} =
+        {.cast(gcsafe).}:
+          `boundBody`,
     )
 
 macro query*(app: Application | Router, path: typed, body: untyped): untyped =
@@ -836,8 +877,9 @@ macro query*(app: Application | Router, path: typed, body: untyped): untyped =
       `app`,
       HttpMethod.Query,
       `path`,
-      proc(`request`: Request): Response {.nimcall.} =
-        `boundBody`,
+      proc(`request`: Request): Future[Response] {.async: (raises: [CatchableError]).} =
+        {.cast(gcsafe).}:
+          `boundBody`,
     )
 
 proc typedOpenApiOperation(
@@ -979,8 +1021,9 @@ proc buildTypedRoute(
         `app`,
         `method`,
         `path`,
-        proc(`request`: Request): Response {.nimcall.} =
-          `boundBody`,
+        proc(`request`: Request): Future[Response] {.async: (raises: [CatchableError]).} =
+          {.cast(gcsafe).}:
+            `boundBody`,
         `documentation`,
       )
   else:
@@ -989,11 +1032,12 @@ proc buildTypedRoute(
         `app`,
         `method`,
         `path`,
-        proc(`request`: Request): Response {.nimcall.} =
+        proc(`request`: Request): Future[Response] {.async: (raises: [CatchableError]).} =
           var `parsedBody`: `bodyType`
           if not `parser`(`request`, `parsedBody`):
             return json("{\"detail\":\"" & `invalidInputMessage` & "\"}", 400)
-          `boundBody`,
+          {.cast(gcsafe).}:
+            `boundBody`,
         `documentation`,
       )
 
@@ -1115,8 +1159,9 @@ macro post*(app: Application | Router, path: typed, body: untyped): untyped =
       `app`,
       HttpMethod.Post,
       `path`,
-      proc(`request`: Request): Response {.nimcall.} =
-        `boundBody`,
+      proc(`request`: Request): Future[Response] {.async: (raises: [CatchableError]).} =
+        {.cast(gcsafe).}:
+          `boundBody`,
     )
 
 macro post*(
@@ -1219,16 +1264,32 @@ proc put*(app: Application, path: string, handler: RouteHandler) =
   ## Registers a PUT route.
   app.addRoute(HttpMethod.Put, path, handler)
 
+proc put*(app: Application, path: string, handler: SyncRouteHandler) =
+  ## Registers a legacy synchronous PUT route.
+  app.addRoute(HttpMethod.Put, path, handler)
+
 proc put*(router: Router, path: string, handler: RouteHandler) =
   ## Registers a PUT route on a router.
+  router.addRoute(HttpMethod.Put, path, handler)
+
+proc put*(router: Router, path: string, handler: SyncRouteHandler) =
+  ## Registers a legacy synchronous PUT route on a router.
   router.addRoute(HttpMethod.Put, path, handler)
 
 proc patch*(app: Application, path: string, handler: RouteHandler) =
   ## Registers a PATCH route.
   app.addRoute(HttpMethod.Patch, path, handler)
 
+proc patch*(app: Application, path: string, handler: SyncRouteHandler) =
+  ## Registers a legacy synchronous PATCH route.
+  app.addRoute(HttpMethod.Patch, path, handler)
+
 proc patch*(router: Router, path: string, handler: RouteHandler) =
   ## Registers a PATCH route on a router.
+  router.addRoute(HttpMethod.Patch, path, handler)
+
+proc patch*(router: Router, path: string, handler: SyncRouteHandler) =
+  ## Registers a legacy synchronous PATCH route on a router.
   router.addRoute(HttpMethod.Patch, path, handler)
 
 macro delete*(app: Application | Router, path: typed, args: varargs[untyped]): untyped =
@@ -1394,26 +1455,27 @@ proc match(route: Route, request: Request, params: var Table[string, string]): b
       return false
   true
 
-proc runRouteMiddleware(route: Route, request: Request): Response =
+proc runRouteMiddleware(
+    route: Route, index: int, request: Request
+): Future[Response] {.async: (raises: [CatchableError]).} =
   ## Runs router-scoped middleware around an already matched route handler.
-  var index = 0
-  let scoped = route.routerMiddleware
-  proc next(nextRequest: Request): Response {.closure.} =
-    if index >= scoped.len:
-      return route.handler(nextRequest)
-    let current = scoped[index]
-    inc index
-    current(nextRequest, next)
+  if index == route.routerMiddleware.len:
+    return await route.handler(request)
+  let next: NextHandler = proc(
+      nextRequest: Request
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
+    return await runRouteMiddleware(route, index + 1, nextRequest)
+  return await route.routerMiddleware[index](request, next)
 
-  next(request)
-
-proc dispatch(app: Application, request: Request): Response =
+proc dispatch(
+    app: Application, request: Request
+): Future[Response] {.async: (raises: [CatchableError]).} =
   ## Dispatches a request to its matching route without running middleware.
   if app.openApiSettings.enabled and request.method == HttpMethod.Get:
     if request.path == app.openApiSettings.schemaPath:
       try:
         var document: JsonNode
-        {.cast(gcsafe).}:
+        {.cast(gcsafe), cast(raises: [CatchableError]).}:
           document = app.openApiDocument()
         return json(document)
       except CatchableError:
@@ -1437,25 +1499,33 @@ proc dispatch(app: Application, request: Request): Response =
       if route.kind == RouteKind.WebSocket:
         return text("WebSocket routes require an HTTP server", 501)
       if route.routerMiddleware.len > 0:
-        return runRouteMiddleware(route, matchedRequest)
-      return route.handler(matchedRequest)
-  app.errorResponse(request, 404)
+        return await runRouteMiddleware(route, 0, matchedRequest)
+      return await route.handler(matchedRequest)
+  return app.errorResponse(request, 404)
 
-proc runMiddleware(app: Application, index: int, request: Request): Response =
+proc runMiddleware(
+    app: Application, index: int, request: Request
+): Future[Response] {.async: (raises: [CatchableError]).} =
   if index == app.middleware.len:
-    return app.dispatch(request)
+    return await app.dispatch(request)
 
-  let next: NextHandler = proc(nextRequest: Request): Response {.closure.} =
-    result = app.runMiddleware(index + 1, nextRequest)
-  result = app.middleware[index].handler(request, next)
+  let next: NextHandler = proc(
+      nextRequest: Request
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
+    return await app.runMiddleware(index + 1, nextRequest)
+  return await app.middleware[index].handler(request, next)
 
-proc handle*(app: Application, request: Request): Response =
-  ## Runs HTTP middleware, then dispatches a request to its route or a 404 response.
+proc handle*(
+    app: Application, request: Request
+): Future[Response] {.async: (raises: [CancelledError]).} =
+  ## Asynchronously runs middleware and dispatches a request to its route.
   let startedAt = getMonoTime()
   var contextualRequest = request
   contextualRequest.context = app.context
   try:
-    result = app.runMiddleware(0, contextualRequest)
+    result = await app.runMiddleware(0, contextualRequest)
+  except CancelledError as exc:
+    raise exc
   except CatchableError as exc:
     app.logError("Unhandled request error: " & exc.msg)
     result = app.errorResponse(contextualRequest, 500)
