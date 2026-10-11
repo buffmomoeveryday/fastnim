@@ -486,6 +486,18 @@ app.post("/items", body = CreateItem, responses = @[(201, Item)]):
   created Item(id: 1)
 ```
 
+Rename a model field in request JSON, response JSON, and generated OpenAPI with
+the `jsonName` pragma:
+
+```nim
+type User = object
+  displayName {.jsonName: "display_name".}: string
+```
+
+The Nim field remains `user.displayName`, while its JSON property is
+`display_name`. Empty names and names that collide with another field are
+rejected at compile time.
+
 ## Testing
 
 `TestClient` drives your app in-process — no ports, no server — FastAPI

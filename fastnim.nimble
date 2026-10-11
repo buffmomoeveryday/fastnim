@@ -24,6 +24,7 @@ task docs, "Generate HTML API documentation with nim doc":
     "src/fastnim/core/server.nim",
     "src/fastnim/context/http.nim",
     "src/fastnim/context/state.nim",
+    "src/fastnim/jsonfields.nim",
     "src/fastnim/params/extract.nim",
     "src/fastnim/openapi/spec.nim",
     "src/fastnim/middleware/builtin.nim",

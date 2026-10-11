@@ -4,9 +4,10 @@
 ## from ``{name}`` route segments, decoded query parameters, request
 ## headers, and typed JSON or form bodies.
 
-import std/[json, jsonutils, strutils, tables]
+import std/[json, strutils, tables]
 
 import fastnim/context/http
+import fastnim/private/jsonconversion
 
 proc pathParam*(
     request: Request, name: string, default = ""
@@ -47,7 +48,7 @@ proc parseFormValue[T](raw: string, value: var T): bool {.raises: [].} =
 proc parseJsonBody*[T](request: Request, value: var T): bool {.raises: [].} =
   ## Decodes a JSON request body into ``value`` and returns whether it was valid.
   try:
-    value = jsonTo(parseJson(request.body), T)
+    value = jsonToValue(parseJson(request.body), T)
     true
   except CatchableError:
     false

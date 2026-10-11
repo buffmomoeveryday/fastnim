@@ -22,9 +22,10 @@
 import chronos
 import chronos/asyncsync
 from chronos/apps/http/httpserver import HttpWriteError
-import std/[json, jsonutils, locks, strutils, tables]
+import std/[json, locks, strutils, tables]
 
 import fastnim/[context/http, params/extract, plugin, routing/router]
+import fastnim/private/jsonconversion
 
 const
   DatastarKey* = "datastar"
@@ -188,7 +189,7 @@ proc marshalPatchSignals*[T](
 ): DatastarEvent =
   ## Builds a ``datastar-patch-signals`` event from any ``%*``-serializable value.
   patchSignals(
-    toJson(value), onlyIfMissing = onlyIfMissing, eventId = eventId, retryMs = retryMs
+    toJsonValue(value), onlyIfMissing = onlyIfMissing, eventId = eventId, retryMs = retryMs
   )
 
 proc removeSignals*(
@@ -289,7 +290,7 @@ proc parseSignals*[T](request: Request, value: var T): bool {.raises: [].} =
     let node = readSignals(request)
     if node.len == 0:
       return false
-    value = jsonTo(node, T)
+    value = jsonToValue(node, T)
     true
   except CatchableError:
     false

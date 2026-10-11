@@ -2,6 +2,8 @@
 
 import std/[json, macros, strutils]
 
+import fastnim/private/jsonmetadata
+
 type
   OpenApiSettings* = object
     ## Controls FastNim's generated OpenAPI and Swagger UI endpoints.
@@ -114,14 +116,9 @@ proc typeSchema(node: NimNode): JsonNode {.compileTime.} =
       return result
   if current.kind == nnkObjectTy:
     result = %*{"type": "object", "properties": newJObject(), "required": newJArray()}
-    let fields = current[^1]
-    for field in fields:
-      if field.kind == nnkIdentDefs:
-        let fieldType = field[^2]
-        for index in 0 ..< field.len - 2:
-          let fieldName = $field[index]
-          result["properties"][fieldName] = typeSchema(fieldType)
-          result["required"].add(newJString(fieldName))
+    for field in jsonFields(current):
+      result["properties"][field.jsonName] = typeSchema(field.fieldType)
+      result["required"].add(newJString(field.jsonName))
     return result
   if current.kind == nnkEnumTy:
     result = %*{"type": "string", "enum": newJArray()}

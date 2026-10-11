@@ -5,7 +5,7 @@ import fastnim
 type
   Item = object
     id: int
-    name: string
+    name {.jsonName: "display_name".}: string
 
   CreateItem = object
     name: string
@@ -53,6 +53,8 @@ block generatedDocument:
   doAssert document["paths"]["/items/{itemId}"]["get"]["parameters"][0]["name"].getStr == "itemId"
   let itemSchema = document["paths"]["/items/{itemId}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
   doAssert itemSchema["properties"]["id"]["type"].getStr == "integer"
+  doAssert itemSchema["properties"]["display_name"]["type"].getStr == "string"
+  doAssert "name" notin itemSchema["properties"]
   let requestSchema = document["paths"]["/items"]["post"]["requestBody"]["content"]["application/json"]["schema"]
   doAssert requestSchema["properties"]["name"]["type"].getStr == "string"
   doAssert document["paths"]["/items"]["post"]["tags"][0].getStr == "items"

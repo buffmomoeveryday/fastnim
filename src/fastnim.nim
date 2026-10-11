@@ -5,6 +5,7 @@ import
     context/http,
     context/state,
     core/server,
+    jsonfields,
     logging,
     middleware/builtin,
     openapi/spec,
@@ -19,8 +20,8 @@ import
   ]
 
 export
-  http, state, server, logging, builtin, spec, extract, plugin, plugins, router, embed,
-  files, testing, websocket, chronos
+  http, state, server, jsonfields, logging, builtin, spec, extract, plugin, plugins,
+  router, embed, files, testing, websocket, chronos
 
 when isMainModule:
   import std/os
