@@ -6,6 +6,8 @@
 
 import std/[json, strutils, tables, uri]
 
+import chronos
+
 import fastnim/[context/http, params/extract, plugin, routing/router]
 
 const
@@ -143,7 +145,9 @@ proc scriptSafeJson(page: JsonNode): string =
   ($page).replace("/", "\\/")
 
 proc inertiaMiddleware(options: InertiaOptions): Middleware =
-  result = proc(request: Request, next: NextHandler): Response =
+  result = proc(
+      request: Request, next: NextHandler
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
     let isInertia = request.header(InertiaHeader).toLowerAscii() == "true"
     let clientVersion = request.header(InertiaVersionHeader)
     if isInertia and request.method == HttpMethod.Get and clientVersion.len > 0 and
@@ -152,7 +156,7 @@ proc inertiaMiddleware(options: InertiaOptions): Middleware =
       result.setHeader(InertiaVersionHeader, options.version)
       return
 
-    result = next(request)
+    result = await next(request)
     if isInertia and request.method != HttpMethod.Get and result.status == 302:
       result.status = 303
 
@@ -167,7 +171,8 @@ proc inertiaMiddleware(options: InertiaOptions): Middleware =
       result.setHeader(InertiaHeader, "true")
       result.addVary("X-Inertia")
     else:
-      result.body = options.rootTemplate(scriptSafeJson(page))
+      {.cast(gcsafe), cast(raises: [CatchableError]).}:
+        result.body = options.rootTemplate(scriptSafeJson(page))
       result.setHeader("content-type", "text/html; charset=utf-8")
       result.addVary("X-Inertia")
 

@@ -21,7 +21,7 @@ app.delete(
     notFound ApiError(detail: "User not found")
 
 block deletesWithNoContent:
-  let response = app.handle(initRequest(HttpMethod.Delete, "/users/1"))
+  let response = app.handleSync(initRequest(HttpMethod.Delete, "/users/1"))
   doAssert response.status == 204
   doAssert response.body.len == 0
 

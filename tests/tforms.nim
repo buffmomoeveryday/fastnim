@@ -29,7 +29,7 @@ block bindsTypedFormsInPostRoutes:
   app.post("/login", form = LoginForm, responses = @[(200, LoginForm)]):
     respondOk(form)
 
-  let response = app.handle(
+  let response = app.handleSync(
     initRequest(
       HttpMethod.Post,
       "/login",

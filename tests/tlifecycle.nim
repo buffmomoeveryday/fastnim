@@ -40,7 +40,7 @@ suite "application lifecycle":
     app.get("/health"):
       if ctx.get("db", Database) != nil: "ready" else: "missing"
 
-    check app.handle(initRequest(HttpMethod.Get, "/health")).body == "ready"
+    check app.handleSync(initRequest(HttpMethod.Get, "/health")).body == "ready"
     app.unload()
     app.unload()
     check events == @["load", "unload"]
@@ -72,7 +72,7 @@ suite "application lifecycle":
       database.value & ":" & $settings.retries
 
     app.load()
-    check app.handle(initRequest(HttpMethod.Get, "/dependency")).body == "declarative:4"
+    check app.handleSync(initRequest(HttpMethod.Get, "/dependency")).body == "declarative:4"
     app.unload()
     check events == @["provide", "cleanup:declarative"]
 

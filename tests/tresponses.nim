@@ -33,22 +33,22 @@ app.post("/items/from-body", body = CreateItem, responses = @[(201, Success)]):
   created Success(id: body.name.len)
 
 block declaredSuccessResponse:
-  let response = app.handle(initRequest(HttpMethod.Get, "/items"))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/items"))
   doAssert response.status == 200
   doAssert response.body == "{\"id\":1}"
 
 block returnedSuccessResponse:
-  let response = app.handle(initRequest(HttpMethod.Get, "/items/return"))
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/items/return"))
   doAssert response.status == 200
   doAssert response.body == "{\"id\":2}"
 
 block declaredErrorResponse:
-  let response = app.handle(initRequest(HttpMethod.Post, "/items"))
+  let response = app.handleSync(initRequest(HttpMethod.Post, "/items"))
   doAssert response.status == 400
   doAssert response.body == "{\"detail\":\"name is required\"}"
 
 block decodedJsonBody:
-  let response = app.handle(
+  let response = app.handleSync(
     initRequest(HttpMethod.Post, "/items/from-body", body = "{\"name\":\"Ada\"}")
   )
   doAssert response.status == 201
@@ -56,7 +56,7 @@ block decodedJsonBody:
 
 block invalidJsonBody:
   let response =
-    app.handle(initRequest(HttpMethod.Post, "/items/from-body", body = "not json"))
+    app.handleSync(initRequest(HttpMethod.Post, "/items/from-body", body = "not json"))
   doAssert response.status == 400
   doAssert response.body == "{\"detail\":\"invalid JSON request body\"}"
 
@@ -67,7 +67,7 @@ block jsonNameEncodesAndDecodesRequestBodies:
   ):
     ok body
 
-  let response = helper.handle(
+  let response = helper.handleSync(
     initRequest(
       HttpMethod.Post,
       "/profiles",
@@ -92,7 +92,7 @@ block jsonNameRejectsAmbiguousInput:
   ):
     ok body
 
-  let response = helper.handle(
+  let response = helper.handleSync(
     initRequest(
       HttpMethod.Post,
       "/profile",
@@ -112,7 +112,7 @@ block jsonHelperSerializesValues:
     let users = @[Member(name: "Alice", age: 30), Member(name: "Bob", age: 25)]
     json users
 
-  let response = helper.handle(initRequest(HttpMethod.Get, "/members"))
+  let response = helper.handleSync(initRequest(HttpMethod.Get, "/members"))
   doAssert response.status == 200
   doAssert response.body == """[{"name":"Alice","age":30},{"name":"Bob","age":25}]"""
   doAssert response.headers["content-type"] == "application/json; charset=utf-8"
@@ -123,7 +123,7 @@ block jsonHelperInTypedRoute:
     let users = @[Member(name: "Alice", age: 30)]
     json users
 
-  let response = helper.handle(initRequest(HttpMethod.Get, "/members"))
+  let response = helper.handleSync(initRequest(HttpMethod.Get, "/members"))
   doAssert response.status == 200
   doAssert response.body == """[{"name":"Alice","age":30}]"""
 
@@ -132,7 +132,7 @@ block jsonHelperCustomStatus:
   helper.get("/created"):
     json(Member(name: "Ada", age: 36), 201)
 
-  let response = helper.handle(initRequest(HttpMethod.Get, "/created"))
+  let response = helper.handleSync(initRequest(HttpMethod.Get, "/created"))
   doAssert response.status == 201
   doAssert response.body == """{"name":"Ada","age":36}"""
 
@@ -143,7 +143,7 @@ block jsonHelperPairsBecomeObject:
     let page = request.queryParam("page", "1")
     json {"itemId": itemId, "page": page}
 
-  let response = helper.handle(initRequest(HttpMethod.Get, "/items/42?page=3"))
+  let response = helper.handleSync(initRequest(HttpMethod.Get, "/items/42?page=3"))
   doAssert response.status == 200
   doAssert response.body == """{"itemId":"42","page":"3"}"""
   doAssert response.headers["content-type"] == "application/json; charset=utf-8"
@@ -153,7 +153,7 @@ block jsonHelperIntPairsBecomeObject:
   helper.get("/count"):
     json {"total": 3}
 
-  let response = helper.handle(initRequest(HttpMethod.Get, "/count"))
+  let response = helper.handleSync(initRequest(HttpMethod.Get, "/count"))
   doAssert response.body == """{"total":3}"""
 
 block jsonHelperTableBecomesObject:
@@ -161,7 +161,7 @@ block jsonHelperTableBecomesObject:
   helper.get("/tbl"):
     json {"a": "x"}.toTable
 
-  let response = helper.handle(initRequest(HttpMethod.Get, "/tbl"))
+  let response = helper.handleSync(initRequest(HttpMethod.Get, "/tbl"))
   doAssert response.body == """{"a":"x"}"""
 
 block jsonHelperLeavesArraysAlone:
@@ -170,5 +170,5 @@ block jsonHelperLeavesArraysAlone:
     let users = @[Member(name: "Alice", age: 30)]
     json users
 
-  let response = helper.handle(initRequest(HttpMethod.Get, "/members"))
+  let response = helper.handleSync(initRequest(HttpMethod.Get, "/members"))
   doAssert response.body == """[{"name":"Alice","age":30}]"""

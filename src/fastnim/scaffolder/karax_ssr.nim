@@ -95,7 +95,7 @@ block homePage:
   let api = initFastNim(logs = false)
   api.addRouter(pageRouter)
 
-  let response = api.handle(initRequest(HttpMethod.Get, "/"))
+  let response = api.handleSync(initRequest(HttpMethod.Get, "/"))
   doAssert response.status == 200
   doAssert response.headers["content-type"] == "text/html; charset=utf-8"
   doAssert response.body.startsWith("<!doctype html>")
@@ -106,7 +106,7 @@ block userPage:
   let api = initFastNim(logs = false)
   api.addRouter(pageRouter)
 
-  let response = api.handle(initRequest(HttpMethod.Get, "/users/Ada"))
+  let response = api.handleSync(initRequest(HttpMethod.Get, "/users/Ada"))
   doAssert response.status == 200
   doAssert "<h1>Hello, Ada</h1>" in response.body
 """

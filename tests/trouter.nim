@@ -20,15 +20,15 @@ block routerPrefixJoining:
   let app = initFastNim(logs = false)
   app.addRouter(router)
 
-  let index = app.handle(initRequest(HttpMethod.Get, "/users/"))
+  let index = app.handleSync(initRequest(HttpMethod.Get, "/users/"))
   doAssert index.status == 200
   doAssert index.body == "{\"ok\":true}"
 
-  let item = app.handle(initRequest(HttpMethod.Get, "/users/42"))
+  let item = app.handleSync(initRequest(HttpMethod.Get, "/users/42"))
   doAssert item.status == 200
   doAssert item.body == "{\"id\":\"42\"}"
 
-  let unprefixed = app.handle(initRequest(HttpMethod.Get, "/"))
+  let unprefixed = app.handleSync(initRequest(HttpMethod.Get, "/"))
   doAssert unprefixed.status == 404
 
 block routerMountPrefix:
@@ -39,10 +39,10 @@ block routerMountPrefix:
   let app = initFastNim(logs = false)
   app.addRouter(router, prefix = "/v1")
 
-  let versioned = app.handle(initRequest(HttpMethod.Get, "/v1/users/"))
+  let versioned = app.handleSync(initRequest(HttpMethod.Get, "/v1/users/"))
   doAssert versioned.status == 200
 
-  let bare = app.handle(initRequest(HttpMethod.Get, "/users/"))
+  let bare = app.handleSync(initRequest(HttpMethod.Get, "/users/"))
   doAssert bare.status == 404
 
 block routerTypedRoutes:
@@ -56,17 +56,19 @@ block routerTypedRoutes:
   var headers = initTable[string, string]()
   headers["content-type"] = "application/json"
   let created =
-    app.handle(initRequest(HttpMethod.Post, "/items/", headers, """{"name":"Widget"}"""))
+    app.handleSync(initRequest(HttpMethod.Post, "/items/", headers, """{"name":"Widget"}"""))
   doAssert created.status == 201
   doAssert created.body == "{\"id\":1,\"name\":\"Widget\"}"
 
   let invalid =
-    app.handle(initRequest(HttpMethod.Post, "/items/", headers, "not json"))
+    app.handleSync(initRequest(HttpMethod.Post, "/items/", headers, "not json"))
   doAssert invalid.status == 400
 
 block routerMiddlewareIsolation:
-  proc tagUsers(request: Request, next: NextHandler): Response =
-    var response = next(request)
+  proc tagUsers(
+      request: Request, next: NextHandler
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
+    var response = await next(request)
     response.setHeader("x-router", "users")
     response
 
@@ -85,13 +87,13 @@ block routerMiddlewareIsolation:
   app.addRouter(userRouter)
   app.addRouter(plainRouter)
 
-  let scoped = app.handle(initRequest(HttpMethod.Get, "/users/"))
+  let scoped = app.handleSync(initRequest(HttpMethod.Get, "/users/"))
   doAssert scoped.headers.getOrDefault("x-router") == "users"
 
-  let unscoped = app.handle(initRequest(HttpMethod.Get, "/plain/"))
+  let unscoped = app.handleSync(initRequest(HttpMethod.Get, "/plain/"))
   doAssert unscoped.headers.getOrDefault("x-router") == ""
 
-  let appRoute = app.handle(initRequest(HttpMethod.Get, "/app"))
+  let appRoute = app.handleSync(initRequest(HttpMethod.Get, "/app"))
   doAssert appRoute.headers.getOrDefault("x-router") == ""
 
 block routerTagsMerge:

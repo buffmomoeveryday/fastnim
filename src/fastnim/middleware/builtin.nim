@@ -2,6 +2,8 @@
 
 import std/[monotimes, sequtils, strutils, tables, times]
 
+import chronos
+
 import fastnim/[context/http, params/extract, routing/router]
 
 type
@@ -73,10 +75,12 @@ proc applyCors(response: var Response, options: CorsOptions, origin: string) =
 proc cors*(options = initCorsOptions()): Middleware =
   ## Creates CORS middleware. It handles valid preflight requests with ``204``
   ## and applies CORS headers to matching cross-origin responses.
-  result = proc(request: Request, next: NextHandler): Response =
+  result = proc(
+      request: Request, next: NextHandler
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
     let origin = request.header("origin")
     if origin.len == 0 or not options.allowsOrigin(origin):
-      return next(request)
+      return await next(request)
 
     let requestedMethod = request.header("access-control-request-method")
     if request.method == HttpMethod.Options and requestedMethod.len > 0:
@@ -101,14 +105,16 @@ proc cors*(options = initCorsOptions()): Middleware =
         result.setHeader("access-control-max-age", $options.maxAge)
       return
 
-    result = next(request)
+    result = await next(request)
     result.applyCors(options, origin)
 
 proc requestId*(
     headerName = "x-request-id", factory: RequestIdFactory = nil
 ): Middleware =
   ## Creates middleware that propagates or generates a request ID response header.
-  result = proc(request: Request, next: NextHandler): Response =
+  result = proc(
+      request: Request, next: NextHandler
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
     var forwardedRequest = request
     let requestId =
       if request.header(headerName).len > 0:
@@ -116,14 +122,17 @@ proc requestId*(
       elif factory.isNil:
         "fastnim-" & $getMonoTime().ticks
       else:
-        factory()
+        {.cast(gcsafe), cast(raises: [CatchableError]).}:
+          factory()
     forwardedRequest.headers[headerName.toLowerAscii()] = requestId
-    result = next(forwardedRequest)
+    result = await next(forwardedRequest)
     result.setHeader(headerName, requestId)
 
 proc responseTime*(headerName = "x-response-time-us"): Middleware =
   ## Creates middleware that adds the downstream elapsed time in microseconds.
-  result = proc(request: Request, next: NextHandler): Response =
+  result = proc(
+      request: Request, next: NextHandler
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
     let startedAt = getMonoTime()
-    result = next(request)
+    result = await next(request)
     result.setHeader(headerName, $(getMonoTime() - startedAt).inMicroseconds)

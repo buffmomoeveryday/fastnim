@@ -132,7 +132,7 @@ block helloEndpoint:
   let web = initFastNim(logs = false)
   web.addRouter(apiRouter)
 
-  let response = web.handle(initRequest(HttpMethod.Get, "/api/hello"))
+  let response = web.handleSync(initRequest(HttpMethod.Get, "/api/hello"))
   doAssert response.status == 200
   doAssert response.body == "{\"message\":\"Hello from """ &
     name & """!\"}"

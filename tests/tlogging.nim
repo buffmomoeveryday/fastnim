@@ -18,7 +18,7 @@ block sendsRequestEventsToCustomHandler:
   app.get("/"):
     "ok"
 
-  discard app.handle(initRequest(HttpMethod.Get, "/"))
+  discard app.handleSync(initRequest(HttpMethod.Get, "/"))
   doAssert handlerCalls == 1
   doAssert receivedLevel == lvlInfo
   doAssert receivedResponseTime
@@ -27,9 +27,9 @@ block canDisableLogs:
   handlerCalls = 0
   let app = initFastNim(logs = false, logHandler = countingHandler)
 
-  discard app.handle(initRequest(HttpMethod.Get, "/missing"))
+  discard app.handleSync(initRequest(HttpMethod.Get, "/missing"))
   doAssert handlerCalls == 0
 
 block settingsCanDisableLogs:
   let app = initFastNim(initApplicationSettings(logs = false))
-  doAssert app.handle(initRequest(HttpMethod.Get, "/missing")).status == 404
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/missing")).status == 404

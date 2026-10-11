@@ -38,24 +38,30 @@ block configuresOpenApiAsPlugin:
     openApiPlugin(initOpenApiSettings(title = "Users API", version = "2.2.0"))
   let document = app.openApiDocument()
   doAssert document["info"]["title"].getStr == "Users API"
-  doAssert app.handle(initRequest(HttpMethod.Get, "/openapi.json")).status == 200
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/openapi.json")).status == 200
 
 block ordersMiddlewareByPhaseAndPriority:
   let app = initFastNim(logs = false)
   var order: seq[string] = @[]
-  app.use(proc(request: Request, next: NextHandler): Response =
-    order.add("default")
-    next(request)
+  app.use(proc(request: Request, next: NextHandler): Future[Response] {.
+      async: (raises: [CatchableError])
+  .} =
+    {.cast(gcsafe).}:
+      order.add("default")
+    return await next(request)
   )
   app.use(
-    proc(request: Request, next: NextHandler): Response =
-      order.add("first")
-      next(request),
+    proc(request: Request, next: NextHandler): Future[Response] {.
+        async: (raises: [CatchableError])
+    .} =
+      {.cast(gcsafe).}:
+        order.add("first")
+      return await next(request),
     priority = -10,
   )
   app.get("/"):
     text("ok")
-  discard app.handle(initRequest(HttpMethod.Get, "/"))
+  discard app.handleSync(initRequest(HttpMethod.Get, "/"))
   doAssert order == @["first", "default"]
 
 block rateLimitPluginBlocksAndDocuments:
@@ -63,8 +69,8 @@ block rateLimitPluginBlocksAndDocuments:
   app.install(rateLimitPlugin(initRateLimitOptions(limit = 1, windowSeconds = 60)))
   app.get("/items", responses = @[(200, string)]):
     "ok"
-  let first = app.handle(initRequest(HttpMethod.Get, "/items"))
-  let second = app.handle(initRequest(HttpMethod.Get, "/items"))
+  let first = app.handleSync(initRequest(HttpMethod.Get, "/items"))
+  let second = app.handleSync(initRequest(HttpMethod.Get, "/items"))
   doAssert first.status == 200
   doAssert first.headers["x-ratelimit-remaining"] == "0"
   doAssert second.status == 429

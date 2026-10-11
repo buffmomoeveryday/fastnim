@@ -17,14 +17,18 @@ type
     requestId: int
     path: string
 
-let app = initFastNim()
+let app = initFastNim(logs=false)
 
-app.middlewares:
-  requestId()
+# app.middlewares:
+#   requestId()
 
 
 app.get("/"):
   %*{"message": "Hello from FastNim"}
+
+app.get("/async"):
+  await sleepAsync(10.milliseconds)
+  %*{"message": "Completed without blocking the Chronos event loop"}
 
 app.get("/items/{itemId}"):
   let itemId = request.pathParam("itemId")
