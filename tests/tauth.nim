@@ -234,21 +234,21 @@ block jwtMiddlewareAcceptsBearerJwt:
 
 block sessionLoginRoundTrip:
   let store = newSessionStore()
-  doAssert sessionCount(store) == 0
-  let id = createSession(store, "ada")
+  doAssert waitFor(sessionCount(store)) == 0
+  let id = waitFor createSession(store, "ada")
   doAssert id.len > 20
-  doAssert sessionSubject(store, id) == "ada"
-  doAssert sessionCount(store) == 1
-  doAssert sessionSubject(store, "bogus") == ""
-  destroySession(store, id)
-  doAssert sessionSubject(store, id) == ""
-  doAssert sessionCount(store) == 0
+  doAssert waitFor(sessionSubject(store, id)) == "ada"
+  doAssert waitFor(sessionCount(store)) == 1
+  doAssert waitFor(sessionSubject(store, "bogus")) == ""
+  waitFor destroySession(store, id)
+  doAssert waitFor(sessionSubject(store, id)) == ""
+  doAssert waitFor(sessionCount(store)) == 0
 
 block sessionExpiry:
   let store = newSessionStore()
-  let id = createSession(store, "ada", ttlSeconds = -1)
-  doAssert sessionSubject(store, id) == ""
-  doAssert sessionCount(store) == 0
+  let id = waitFor createSession(store, "ada", ttlSeconds = -1)
+  doAssert waitFor(sessionSubject(store, id)) == ""
+  doAssert waitFor(sessionCount(store)) == 0
 
 block sessionCookieHelpers:
   var response = initResponse()
@@ -280,7 +280,7 @@ block sessionMiddlewareFlow:
   )
   app.post("/login"):
     var response = json(%*{"ok": true})
-    discard loginSession(store, response, "ada")
+    discard await loginSession(store, response, "ada")
     response
   app.get("/me"):
     text(request.authSubject())
@@ -299,13 +299,17 @@ block sseHelperAcceptsAndRejects:
   let options = initAuthOptions(
     schemes = {AuthScheme.Bearer}, bearerTokens = {"tok-1": "ada"}.toTable
   )
-  let good = authenticate(initRequest(HttpMethod.Get, "/live", bearerHeaders("tok-1")), options)
+  let good = waitFor authenticate(
+    initRequest(HttpMethod.Get, "/live", bearerHeaders("tok-1")), options
+  )
   doAssert not good.isNil
   doAssert good.subject == "ada"
   doAssert good.scheme == AuthScheme.Bearer
-  let bad = authenticate(initRequest(HttpMethod.Get, "/live", bearerHeaders("nope")), options)
+  let bad = waitFor authenticate(
+    initRequest(HttpMethod.Get, "/live", bearerHeaders("nope")), options
+  )
   doAssert bad.isNil
-  let missing = authenticate(initRequest(HttpMethod.Get, "/live"), options)
+  let missing = waitFor authenticate(initRequest(HttpMethod.Get, "/live"), options)
   doAssert missing.isNil
 
 block authDocumentsUnauthorized:

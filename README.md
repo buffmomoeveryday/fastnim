@@ -390,8 +390,11 @@ The plugin is available independently as `fastnim/plugins/ratelimit`; the
 
 The built-in reference rate limiter uses in-memory fixed windows keyed by
 `x-forwarded-for`, returns `429` with `Retry-After` and `X-RateLimit-*` headers,
-and adds `429` to generated OpenAPI operations. Use a shared store-backed
-plugin for limits across multiple processes. See
+and adds `429` to generated OpenAPI operations. Session and rate-limit stores
+are async, replaceable interfaces; use a shared Redis/database driver for
+limits and sessions across multiple processes. The driver contract, atomic
+Redis integration pattern, and session cookie/key-rotation guidance are in
+[`docs/stores.md`](docs/stores.md). See
 [`examples/ratelimit.nim`](examples/ratelimit.nim).
 
 Third-party packages can define a plugin with `initPlugin(name, version,

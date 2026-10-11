@@ -23,7 +23,14 @@ block installsPluginsAndKeepsStateScoped:
     app.install(plugin)
   app.load()
   doAssertRaises ValueError:
-    app.install(initPlugin("late", "1.0.0", proc(app: Application) = discard))
+    app.install(
+      initPlugin(
+        "late",
+        "1.0.0",
+        proc(app: Application) =
+          discard,
+      )
+    )
 
 block installsPluginsWithCommandSyntax:
   let app = initFastNim(logs = false)
@@ -43,18 +50,19 @@ block configuresOpenApiAsPlugin:
 block ordersMiddlewareByPhaseAndPriority:
   let app = initFastNim(logs = false)
   var order: seq[string] = @[]
-  app.use(proc(request: Request, next: NextHandler): Future[Response] {.
-      async: (raises: [CatchableError])
-  .} =
-    {.cast(gcsafe).}:
-      order.add("default")
-    return await next(request)
+  app.use(
+    proc(
+        request: Request, next: NextHandler
+    ): Future[Response] {.async: (raises: [CatchableError]).} =
+      {.gcsafe.}:
+        order.add("default")
+      return await next(request)
   )
   app.use(
-    proc(request: Request, next: NextHandler): Future[Response] {.
-        async: (raises: [CatchableError])
-    .} =
-      {.cast(gcsafe).}:
+    proc(
+        request: Request, next: NextHandler
+    ): Future[Response] {.async: (raises: [CatchableError]).} =
+      {.gcsafe.}:
         order.add("first")
       return await next(request),
     priority = -10,

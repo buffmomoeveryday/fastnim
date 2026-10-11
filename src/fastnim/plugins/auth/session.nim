@@ -1,11 +1,13 @@
-## Cookie session store for the FastNim auth plugin.
+## Async, replaceable cookie session stores for the FastNim auth plugin.
 ##
-## Sessions are opaque random ids kept server-side in memory; only the id
-## travels in a cookie, so nothing sensitive ever leaves the server. Entries
-## expire lazily on read, with an opportunistic sweep on creation to bound
-## growth. Like the rate limit plugin, the table is guarded by a lock.
+## ``newSessionStore()`` uses a process-local in-memory backend. Distributed
+## deployments can pass async load/save/delete callbacks to the other
+## ``newSessionStore`` overload; callbacks must use a non-blocking Chronos-
+## compatible database client.
 
-import std/[json, locks, strutils, sysrand, tables, times]
+import std/[locks, strutils, sysrand, tables, times]
+
+import chronos
 
 import fastnim/[context/http, params/extract]
 
@@ -18,20 +20,178 @@ type
     createdAt*: float ## Unix time the session was created.
     expiresAt*: float ## Unix time the session stops being valid.
 
+  SessionLoad* = proc(id: string): Future[SessionData] {.
+    closure, async: (raises: [CatchableError]).}
+    ## Async backend operation that returns nil for missing or expired ids.
+  SessionSave* = proc(id: string, data: SessionData, ttlSeconds: int): Future[void] {.
+    closure, async: (raises: [CatchableError]).}
+    ## Async backend operation that saves data with the supplied TTL.
+  SessionDelete* = proc(id: string): Future[void] {.
+    closure, async: (raises: [CatchableError]).}
+    ## Async backend operation that deletes an id if it exists.
+  SessionClock* = proc(): float {.closure, gcsafe, raises: [].}
+    ## Clock used by the in-memory store, primarily for deterministic tests.
+
   SessionStore* = ref object of RootObj
-    ## In-memory session table shared by an application's handlers.
+    ## Async session-store interface used by authentication middleware.
+    ##
+    ## Custom callbacks must be safe to call concurrently from multiple
+    ## requests. The load callback must treat expired records as missing.
+    defaultTtlSeconds*: int ## Lifetime used when no per-session TTL is given.
+    loadImpl: SessionLoad
+    saveImpl: SessionSave
+    deleteImpl: SessionDelete
+    countImpl: proc(): Future[int] {.
+      closure, async: (raises: [CatchableError]).}
+    sweepImpl: proc(): Future[void] {.
+      closure, async: (raises: [CatchableError]).}
+
+  InMemorySessionState = ref object
     lock: Lock
     sessions: Table[string, SessionData]
-    defaultTtlSeconds*: int ## Lifetime applied when creating without a ttl.
+    clock: SessionClock
 
-proc newSessionStore*(defaultTtlSeconds = 86400): SessionStore =
-  ## Creates an empty session store. ``defaultTtlSeconds`` must be positive.
+proc validateTtl(defaultTtlSeconds: int) =
   if defaultTtlSeconds <= 0:
     raise newException(ValueError, "session ttl must be positive")
-  new(result)
-  initLock(result.lock)
-  result.sessions = initTable[string, SessionData]()
-  result.defaultTtlSeconds = defaultTtlSeconds
+
+proc newSessionStore*(
+    load: SessionLoad,
+    save: SessionSave,
+    delete: SessionDelete,
+    defaultTtlSeconds = 86400,
+): SessionStore =
+  ## Creates a session store backed by async driver callbacks.
+  ##
+  ## ``save`` must apply ``ttlSeconds`` in the database, and ``load`` must not
+  ## return expired data. None of the callbacks may perform blocking I/O.
+  validateTtl(defaultTtlSeconds)
+  if load.isNil or save.isNil or delete.isNil:
+    raise newException(ValueError, "session store callbacks cannot be nil")
+  SessionStore(
+    defaultTtlSeconds: defaultTtlSeconds,
+    loadImpl: load,
+    saveImpl: save,
+    deleteImpl: delete,
+  )
+
+proc newInMemorySessionStore*(
+    defaultTtlSeconds = 86400,
+    clock: SessionClock = nil,
+): SessionStore =
+  ## Creates a process-local session store for development or one instance.
+  validateTtl(defaultTtlSeconds)
+  var selectedClock: SessionClock = clock
+  if selectedClock.isNil:
+    selectedClock = proc(): float {.gcsafe, raises: [].} = epochTime()
+  let state = InMemorySessionState(
+    sessions: initTable[string, SessionData](),
+    clock: selectedClock,
+  )
+  initLock(state.lock)
+
+  let load: SessionLoad = proc(id: string): Future[SessionData] {.
+      async: (raises: [CatchableError])
+  .} =
+    if id.len == 0:
+      return nil
+    acquire(state.lock)
+    try:
+      let data = state.sessions.getOrDefault(id)
+      if data.isNil:
+        return nil
+      if state.clock() >= data.expiresAt:
+        state.sessions.del(id)
+        return nil
+      return SessionData(
+        subject: data.subject,
+        createdAt: data.createdAt,
+        expiresAt: data.expiresAt,
+      )
+    finally:
+      release(state.lock)
+
+  let save: SessionSave = proc(
+      id: string, data: SessionData, ttlSeconds: int
+  ): Future[void] {.async: (raises: [CatchableError]).} =
+    acquire(state.lock)
+    try:
+      state.sessions[id] = SessionData(
+        subject: data.subject,
+        createdAt: data.createdAt,
+        expiresAt: state.clock() + float(ttlSeconds),
+      )
+    finally:
+      release(state.lock)
+
+  let delete: SessionDelete = proc(id: string): Future[void] {.
+      async: (raises: [CatchableError])
+  .} =
+    acquire(state.lock)
+    try:
+      state.sessions.del(id)
+    finally:
+      release(state.lock)
+
+  result = newSessionStore(load, save, delete, defaultTtlSeconds)
+  result.countImpl = proc(): Future[int] {.
+      async: (raises: [CatchableError])
+  .} =
+    acquire(state.lock)
+    try:
+      return state.sessions.len
+    finally:
+      release(state.lock)
+  result.sweepImpl = proc(): Future[void] {.
+      async: (raises: [CatchableError])
+  .} =
+    acquire(state.lock)
+    try:
+      let now = state.clock()
+      var expired: seq[string] = @[]
+      for id, data in state.sessions:
+        if now >= data.expiresAt:
+          expired.add(id)
+      for id in expired:
+        state.sessions.del(id)
+    finally:
+      release(state.lock)
+
+proc newSessionStore*(defaultTtlSeconds = 86400): SessionStore =
+  ## Creates the default process-local in-memory session store.
+  newInMemorySessionStore(defaultTtlSeconds)
+
+proc loadSession*(store: SessionStore, id: string): Future[SessionData] {.
+    async: (raises: [CatchableError]).} =
+  ## Loads an unexpired session, or nil when the id is absent or expired.
+  if id.len == 0:
+    return nil
+  return await store.loadImpl(id)
+
+proc saveSession*(
+    store: SessionStore, id: string, data: SessionData, ttlSeconds = 0
+): Future[void] {.async: (raises: [CatchableError, ValueError]).} =
+  ## Saves a session and applies its expiry in the backend.
+  ##
+  ## A zero TTL uses ``defaultTtlSeconds``. Negative TTLs are allowed for
+  ## immediate expiry, matching cookie ``Max-Age`` semantics.
+  if id.len == 0 or data.isNil or data.subject.len == 0:
+    raise newException(ValueError, "session id, data, and subject cannot be empty")
+  let ttl =
+    if ttlSeconds == 0:
+      store.defaultTtlSeconds
+    else:
+      ttlSeconds
+  if ttl < 0:
+    await store.deleteImpl(id)
+    return
+  await store.saveImpl(id, data, ttl)
+
+proc deleteSession*(store: SessionStore, id: string): Future[void] {.
+    async: (raises: [CatchableError]).} =
+  ## Deletes a session if it exists.
+  if id.len > 0:
+    await store.deleteImpl(id)
 
 proc newSessionId*(): string {.raises: [ValueError].} =
   ## Generates an unguessable 32-byte session id as unpadded base64url.
@@ -46,30 +206,10 @@ proc newSessionId*(): string {.raises: [ValueError].} =
   copyMem(addr text[0], addr raw[0], 32)
   base64UrlEncode(text)
 
-proc sweepExpiredSessions*(store: SessionStore) =
-  ## Drops expired entries. Called opportunistically on creation; call it
-  ## directly as well if logins are rare but reads are frequent.
-  acquire(store.lock)
-  try:
-    let now = epochTime()
-    var expired: seq[string] = @[]
-    for id, session in store.sessions:
-      if now >= session.expiresAt:
-        expired.add(id)
-    for id in expired:
-      store.sessions.del(id)
-  finally:
-    release(store.lock)
-
 proc createSession*(
     store: SessionStore, subject: string, ttlSeconds = 0
-): string {.raises: [ValueError].} =
-  ## Creates a session for ``subject`` and returns its id.
-  ##
-  ## A zero ``ttlSeconds`` falls back to the store default; a negative one is
-  ## already expired (mirroring cookie ``Max-Age`` semantics). Always creates
-  ## a fresh id (never adopt a client-supplied one) so logins are not
-  ## vulnerable to session fixation.
+): Future[string] {.async: (raises: [CatchableError, ValueError]).} =
+  ## Creates a session for ``subject`` and returns its fresh random id.
   if subject.len == 0:
     raise newException(ValueError, "session subject cannot be empty")
   let ttl =
@@ -79,76 +219,54 @@ proc createSession*(
       ttlSeconds
   let id = newSessionId()
   let now = epochTime()
-  acquire(store.lock)
-  try:
-    store.sessions[id] =
-      SessionData(subject: subject, createdAt: now, expiresAt: now + float(ttl))
-    if store.sessions.len mod 64 == 0:
-      var expired: seq[string] = @[]
-      for candidate, session in store.sessions:
-        if now >= session.expiresAt:
-          expired.add(candidate)
-      for candidate in expired:
-        store.sessions.del(candidate)
-  finally:
-    release(store.lock)
-  id
+  let data = SessionData(
+    subject: subject, createdAt: now, expiresAt: now + float(ttl)
+  )
+  await store.saveSession(id, data, ttl)
+  return id
 
-proc sessionSubject*(store: SessionStore, id: string): string {.raises: [].} =
-  ## Returns the owner of ``id``, or "" when unknown or expired.
-  ##
-  ## Expired entries are removed on read. Comparison is exact: ids are
-  ## unguessable random values, not secrets to compare in constant time.
-  if id.len == 0:
+proc sessionSubject*(store: SessionStore, id: string): Future[string] {.
+    async: (raises: [CatchableError]).} =
+  ## Returns the owner of an unexpired session, or "" when absent.
+  let data = await store.loadSession(id)
+  if data.isNil:
     return ""
-  acquire(store.lock)
-  try:
-    let session = store.sessions.getOrDefault(id)
-    if session.isNil:
-      return ""
-    if epochTime() >= session.expiresAt:
-      store.sessions.del(id)
-      return ""
-    result = session.subject
-  finally:
-    release(store.lock)
+  return data.subject
 
-proc destroySession*(store: SessionStore, id: string) {.raises: [].} =
+proc destroySession*(store: SessionStore, id: string): Future[void] {.
+    async: (raises: [CatchableError]).} =
   ## Deletes ``id`` if present. Logging out must always call this.
-  if id.len == 0:
-    return
-  acquire(store.lock)
-  try:
-    store.sessions.del(id)
-  finally:
-    release(store.lock)
+  await store.deleteSession(id)
 
-proc sessionCount*(store: SessionStore): int {.raises: [].} =
-  ## Returns the number of stored sessions, including expired ones.
-  acquire(store.lock)
-  try:
-    result = store.sessions.len
-  finally:
-    release(store.lock)
+proc sweepExpiredSessions*(store: SessionStore): Future[void] {.
+    async: (raises: [CatchableError]).} =
+  ## Drops expired entries from the in-memory store.
+  ##
+  ## External stores should enforce TTL themselves, so this is a no-op for a
+  ## custom driver.
+  if not store.sweepImpl.isNil:
+    await store.sweepImpl()
+
+proc sessionCount*(store: SessionStore): Future[int] {.
+    async: (raises: [CatchableError]).} =
+  ## Returns the in-memory entry count, or -1 for a custom driver.
+  if store.countImpl.isNil:
+    return -1
+  return await store.countImpl()
 
 proc parseCookies*(request: Request): Table[string, string] {.raises: [].} =
   ## Splits the ``Cookie`` header into name/value pairs.
-  ##
-  ## Malformed entries are skipped; surrounding quotes and whitespace are
-  ## stripped from values.
   result = initTable[string, string]()
   try:
     for chunk in request.header("cookie").split(';'):
       let pair = chunk.strip()
-      if pair.len == 0:
-        continue
-      let separator = pair.find('=')
-      if separator <= 0:
-        continue
-      var value = pair[separator + 1 ..^ 1].strip()
-      if value.len >= 2 and value[0] == '"' and value[^1] == '"':
-        value = value[1 ..^ 2]
-      result[pair[0 ..< separator].strip()] = value
+      if pair.len > 0:
+        let separator = pair.find('=')
+        if separator > 0:
+          var value = pair[separator + 1 ..^ 1].strip()
+          if value.len >= 2 and value[0] == '"' and value[^1] == '"':
+            value = value[1 ..^ 2]
+          result[pair[0 ..< separator].strip()] = value
   except CatchableError:
     discard
 
@@ -166,12 +284,7 @@ proc setSessionCookie*(
     sameSite = "Lax",
     secure = false,
 ) {.raises: [ValueError].} =
-  ## Sets the session cookie on ``response``.
-  ##
-  ## The cookie is always ``HttpOnly`` unless disabled, scoped to ``path``,
-  ## and defaults to ``SameSite=Lax``. Pass a positive ``maxAge`` for
-  ## persistent logins (matching the session ttl) and ``secure = true`` in
-  ## production so browsers only send it over HTTPS.
+  ## Sets a session cookie with explicit browser security controls.
   if name.len == 0 or id.len == 0:
     raise newException(ValueError, "session cookie name and id cannot be empty")
   var cookie = name & "=" & id & "; Path=" & path
@@ -187,13 +300,18 @@ proc setSessionCookie*(
 
 proc clearSessionCookie*(response: var Response, name: string, path = "/") {.
     raises: [ValueError].} =
-  ## Expires the session cookie immediately. Call it together with
-  ## ``destroySession`` when logging out.
+  ## Expires the session cookie immediately.
   if name.len == 0:
     raise newException(ValueError, "session cookie name cannot be empty")
   response.setHeader(
     "set-cookie", name & "=; Path=" & path & "; Max-Age=0; HttpOnly; SameSite=Lax"
   )
+
+proc saveLogin(
+    store: SessionStore, id: string, data: SessionData, ttl: int
+): Future[string] {.async: (raises: [CatchableError, ValueError]).} =
+  await store.saveSession(id, data, ttl)
+  return id
 
 proc loginSession*(
     store: SessionStore,
@@ -202,24 +320,37 @@ proc loginSession*(
     ttlSeconds = 0,
     cookieName = "session_id",
     secure = false,
-): string {.raises: [ValueError].} =
-  ## Creates a session for ``subject`` and sets its cookie. Returns the id.
-  ##
-  ## ``ttlSeconds`` falls back to the store default when non-positive; pass
-  ## the same ttl as ``Max-Age`` so the cookie and the entry agree.
-  let id = createSession(store, subject, ttlSeconds)
+): Future[string].Raising([CatchableError, ValueError]) =
+  ## Creates a fresh session and sets its cookie, returning the new id.
+  if subject.len == 0:
+    raise newException(ValueError, "session subject cannot be empty")
+  let ttl =
+    if ttlSeconds == 0:
+      store.defaultTtlSeconds
+    else:
+      ttlSeconds
+  let id = newSessionId()
   let maxAge =
     if ttlSeconds > 0:
       ttlSeconds
     else:
       store.defaultTtlSeconds
   setSessionCookie(response, cookieName, id, maxAge = maxAge, secure = secure)
-  id
+  let now = epochTime()
+  let data = SessionData(
+    subject: subject, createdAt: now, expiresAt: now + float(ttl)
+  )
+  saveLogin(store, id, data, ttl)
+
+proc finishLogout(store: SessionStore, id: string): Future[void] {.
+    async: (raises: [CatchableError, ValueError]).} =
+  await destroySession(store, id)
 
 proc logoutSession*(
     store: SessionStore, request: Request, response: var Response,
     cookieName = "session_id",
-) =
-  ## Destroys the request's session (if any) and clears its cookie.
-  destroySession(store, sessionIdCookie(request, cookieName))
+): Future[void].Raising([CatchableError, ValueError]) =
+  ## Destroys the request's session, if any, and clears its cookie.
+  let id = sessionIdCookie(request, cookieName)
   clearSessionCookie(response, cookieName)
+  finishLogout(store, id)

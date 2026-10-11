@@ -186,12 +186,10 @@ proc serveWebSocket(
 
 proc safeHandle(
     app: Application, request: fastnimHttp.Request
-): Future[fastnimHttp.Response] {.
-    async: (raises: [CancelledError])
-.} =
+): Future[fastnimHttp.Response] {.async: (raises: [CancelledError]).} =
   let startedAt = getMonoTime()
   try:
-    {.cast(gcsafe).}:
+    {.gcsafe.}:
       result = await app.handle(request)
   except CancelledError as exc:
     raise exc
@@ -249,12 +247,14 @@ proc serve*(
       app.logError("Unhandled server error: " & exc.msg)
       return chronosHttp.defaultResponse(exc)
 
-  result = chronosHttp.HttpServerRef.new(
-    initTAddress(address, Port(port)),
-    process,
-    serverFlags = {chronosHttp.HttpServerFlags.Http11Pipeline},
-    socketFlags = {chronosHttp.ReuseAddr, chronosHttp.TcpNoDelay},
-  ).get()
+  result = chronosHttp.HttpServerRef
+    .new(
+      initTAddress(address, Port(port)),
+      process,
+      serverFlags = {chronosHttp.HttpServerFlags.Http11Pipeline},
+      socketFlags = {chronosHttp.ReuseAddr, chronosHttp.TcpNoDelay},
+    )
+    .get()
   result.start()
   app.log(lvlInfo, "Listening at http://" & address & ":" & $port)
 

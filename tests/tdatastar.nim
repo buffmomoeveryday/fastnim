@@ -125,9 +125,7 @@ block readSignalsFromDeleteQuery:
 
 block readSignalsFromPostBody:
   var headers = initTable[string, string]()
-  let node = readSignals(
-    initRequest(HttpMethod.Post, "/c", headers, """{"count":9}""")
-  )
+  let node = readSignals(initRequest(HttpMethod.Post, "/c", headers, """{"count":9}"""))
   doAssert node["count"].getInt() == 9
 
 block readSignalsAbsentIsEmptyObject:
@@ -142,9 +140,8 @@ block readSignalsInvalidRaises:
   doAssertRaises ValueError:
     discard readSignals(initRequest(HttpMethod.Post, "/c", headers, "nope"))
   doAssertRaises ValueError:
-    discard readSignals(
-      initRequest(HttpMethod.Get, "/c?datastar=" & encodeUrl("[1,2]"))
-    )
+    discard
+      readSignals(initRequest(HttpMethod.Get, "/c?datastar=" & encodeUrl("[1,2]")))
 
 block parseSignalsTyped:
   let raw = encodeUrl("""{"count":5}""")
@@ -159,9 +156,8 @@ block parseSignalsTyped:
   )
 
 block datastarStreamResponse:
-  let response = datastarStream(
-    [patchElements("""<div id="a">1</div>"""), patchSignals(%*{"n": 1})]
-  )
+  let response =
+    datastarStream([patchElements("""<div id="a">1</div>"""), patchSignals(%*{"n": 1})])
   doAssert response.status == 200
   doAssert response.headers["content-type"] == "text/event-stream; charset=utf-8"
   doAssert response.headers["cache-control"] == "no-cache"
@@ -209,7 +205,7 @@ block fluentSendInSseRoute:
   let sender: SseSend = proc(
       event: ServerSentEvent
   ): Future[void] {.async: (raises: [CancelledError, HttpWriteError]).} =
-    {.cast(gcsafe).}:
+    {.gcsafe.}:
       got.add(formatSseEvent(event))
   waitFor app.handleSse(initRequest(HttpMethod.Get, "/ticker"), sender)
   doAssert got.len == 3
@@ -278,7 +274,7 @@ block liveFeedRelaysThroughSseRoute:
   let sender: SseSend = proc(
       event: ServerSentEvent
   ): Future[void] {.async: (raises: [CancelledError, HttpWriteError]).} =
-    {.cast(gcsafe).}:
+    {.gcsafe.}:
       got.add(formatSseEvent(event))
   # Start the stream first so it subscribes, then broadcast into it.
   let pending = app.handleSse(initRequest(HttpMethod.Get, "/notes/stream"), sender)
