@@ -1,6 +1,6 @@
 ## Route registration and dispatch for fastnim applications.
 
-import std/[json, logging, macros, monotimes, strutils, tables, times]
+import std/[json, logging, macrocache, macros, monotimes, strutils, tables, times]
 
 import chronos/[asyncloop, futures, transport]
 from chronos/apps/http/httpserver import HttpWriteError
@@ -225,6 +225,194 @@ proc onLoad*(app: Application, hook: LifecycleHook) =
 proc onUnload*(app: Application, hook: LifecycleHook) =
   ## Registers a hook run when ``app.unload`` is called.
   app.unloadHooks.add(hook)
+
+const DependencySchemas = CacheTable"fastnim.application.dependencies.v1"
+
+proc applicationKey(app: NimNode): string {.compileTime.} =
+  if app.kind != nnkSym:
+    error("dependencies and routes must use a named application", app)
+  app.signatureHash
+
+proc schemaFields(schema: NimNode): NimNode {.compileTime.} =
+  let typeImpl = schema.getTypeImpl
+  if typeImpl.kind != nnkBracketExpr or typeImpl.len != 2:
+    error("dependencies expects an object type", schema)
+  let objectType = typeImpl[1].getTypeImpl
+  if objectType.kind != nnkObjectTy:
+    error("dependencies expects an object type", schema)
+
+  result = newNimNode(nnkBracket)
+  let fields = objectType[2]
+  for definition in fields:
+    if definition.kind != nnkIdentDefs:
+      error("dependency schemas only support ordinary object fields", definition)
+    let fieldType = definition[^2]
+    for index in 0 ..< definition.len - 2:
+      let field = definition[index]
+      result.add(newTree(nnkTupleConstr, newLit($field), fieldType))
+
+proc dependencyType(fields: NimNode, name: string): NimNode {.compileTime.} =
+  for field in fields:
+    if field[0].strVal == name:
+      return field[1]
+
+proc dependencyNames(fields: NimNode): string {.compileTime.} =
+  for field in fields:
+    if result.len > 0:
+      result.add(", ")
+    result.add(field[0].strVal)
+
+proc dependencyFields(app: NimNode): NimNode {.compileTime.} =
+  let key = applicationKey(app)
+  if key in DependencySchemas:
+    DependencySchemas[key]
+  else:
+    newEmptyNode()
+
+proc rewriteDependencyGet(
+    node, app, context: NimNode
+): NimNode {.compileTime.} =
+  let isMethodCall =
+    node.kind in {nnkCall, nnkCommand} and node.len == 2 and
+    node[0].kind == nnkDotExpr and node[0].len == 2 and
+    node[0][0].kind == nnkIdent and eqIdent(node[0][0], "ctx") and
+    node[0][1].kind == nnkIdent and eqIdent(node[0][1], "get")
+  if not isMethodCall:
+    return nil
+
+  let fields = dependencyFields(app)
+  if fields.kind == nnkEmpty:
+    error(
+      "ctx.get(name) requires app.dependencies(DependencyType) before this route",
+      node,
+    )
+  if node[1].kind notin {nnkStrLit, nnkRStrLit, nnkTripleStrLit}:
+    error("dependency names in ctx.get(name) must be string literals", node[1])
+
+  let name = node[1].strVal
+  let fieldType = dependencyType(fields, name)
+  if fieldType.isNil:
+    error(
+      "dependency '" & name & "' is not declared; available dependencies: " &
+        dependencyNames(fields),
+      node[1],
+    )
+  let getter = newTree(nnkBracketExpr, ident("get"), fieldType)
+  newCall(getter, context, newLit(name))
+
+proc bindRouteIdentifiers(
+    node, app, request: NimNode,
+    parsedBody = newEmptyNode(),
+    inputName = "",
+): NimNode {.compileTime.} =
+  let context = newDotExpr(request, ident("context"))
+  let dependencyGet = rewriteDependencyGet(node, app, context)
+  if not dependencyGet.isNil:
+    return dependencyGet
+  if node.kind == nnkIdent and eqIdent(node, "request"):
+    return request
+  if parsedBody.kind != nnkEmpty and node.kind == nnkIdent and eqIdent(node, inputName):
+    return parsedBody
+  if node.kind == nnkIdent and eqIdent(node, "ctx"):
+    return context
+  result = copyNimNode(node)
+  for child in node:
+    result.add(bindRouteIdentifiers(child, app, request, parsedBody, inputName))
+
+proc replaceDependency(
+    node: NimNode, name: string, replacement: NimNode
+): NimNode {.compileTime.} =
+  if node.kind == nnkIdent and eqIdent(node, name):
+    return replacement
+  if node.kind == nnkDotExpr:
+    result = copyNimNode(node)
+    result.add(replaceDependency(node[0], name, replacement))
+    result.add(node[1])
+    return
+  result = copyNimNode(node)
+  for child in node:
+    result.add(replaceDependency(child, name, replacement))
+
+macro dependencies*(app: Application, schema: typedesc, body: untyped): untyped =
+  ## Declares and wires typed application dependencies.
+  ##
+  ## Every field in ``schema`` needs one ``provide`` declaration. A matching
+  ## ``cleanup`` declaration is optional. Routes registered after this block
+  ## may retrieve declared values with ``ctx.get("name")``.
+  let key = applicationKey(app)
+  if key in DependencySchemas:
+    error("dependencies have already been declared for this application", app)
+
+  let fields = schemaFields(schema)
+  var providers = initTable[string, NimNode]()
+  var cleanups = initTable[string, NimNode]()
+
+  for declaration in body:
+    if declaration.kind notin {nnkCall, nnkCommand} or declaration.len != 3 or
+        declaration[0].kind != nnkIdent or declaration[1].kind != nnkIdent or
+        declaration[2].kind != nnkStmtList:
+      error("use `provide name: expression` or `cleanup name: expression`", declaration)
+    let kind = $declaration[0]
+    let name = $declaration[1]
+    if dependencyType(fields, name).isNil:
+      error("dependency '" & name & "' is not a field of " & $schema, declaration[1])
+    case kind
+    of "provide":
+      if name in providers:
+        error("duplicate provider for dependency '" & name & "'", declaration)
+      providers[name] = declaration[2]
+    of "cleanup":
+      if name in cleanups:
+        error("duplicate cleanup for dependency '" & name & "'", declaration)
+      cleanups[name] = declaration[2]
+    else:
+      error("unknown dependency declaration '" & kind & "'", declaration[0])
+
+  for field in fields:
+    let name = field[0].strVal
+    if name notin providers:
+      error("missing provider for dependency '" & name & "'", schema)
+
+  DependencySchemas[key] = fields
+  let loadContext = genSym(nskParam, "context")
+  var loadBody = newStmtList()
+  for field in fields:
+    let name = field[0].strVal
+    let nameLit = newLit(name)
+    let fieldType = field[1]
+    let value = genSym(nskLet, name)
+    let provider = providers[name]
+    loadBody.add quote do:
+      let `value`: `fieldType` = block:
+        `provider`
+      setContext(`loadContext`, `nameLit`, `value`)
+
+  let loadHook = quote do:
+    proc(`loadContext`: Context) {.nimcall.} =
+      `loadBody`
+  result = newStmtList(newCall(ident("onLoad"), app, loadHook))
+
+  let unloadContext = genSym(nskParam, "context")
+  var cleanupBody = newStmtList()
+  for index in countdown(fields.len - 1, 0):
+    let field = fields[index]
+    let name = field[0].strVal
+    if name in cleanups:
+      let nameLit = newLit(name)
+      let fieldType = field[1]
+      let value = genSym(nskLet, name)
+      let cleanup = replaceDependency(cleanups[name], name, value)
+      let getter = newTree(nnkBracketExpr, ident("get"), fieldType)
+      cleanupBody.add(
+        newLetStmt(value, newCall(getter, unloadContext, nameLit)),
+      )
+      cleanupBody.add(cleanup)
+
+  if cleanupBody.len > 0:
+    let unloadHook = quote do:
+      proc(`unloadContext`: Context) {.nimcall.} =
+        `cleanupBody`
+    result.add(newCall(ident("onUnload"), app, unloadHook))
 
 proc load*(app: Application) =
   ## Runs application load hooks in registration order.
@@ -468,25 +656,21 @@ macro sse*(app: Application | Router, path: typed, body: untyped): untyped =
 
   let request = genSym(nskParam, "request")
   let send = genSym(nskParam, "send")
-  proc bindIdentifiers(node: NimNode): NimNode =
-    if node.kind == nnkIdent and eqIdent(node, "request"):
-      return request
+  proc bindSend(node: NimNode): NimNode =
     if node.kind == nnkIdent and eqIdent(node, "send"):
       return send
-    if node.kind == nnkIdent and eqIdent(node, "ctx"):
-      return newDotExpr(request, ident("context"))
     if node.kind in {nnkCall, nnkCommand} and node.len == 1 and
         node[0].kind == nnkDotExpr and node[0].len == 2 and node[0][1].kind == nnkIdent and
         eqIdent(node[0][1], "send"):
-      return newCall(send, bindIdentifiers(node[0][0]))
+      return newCall(send, bindSend(node[0][0]))
     if node.kind == nnkDotExpr and node.len == 2 and node[1].kind == nnkIdent and
         eqIdent(node[1], "send"):
-      return newCall(send, bindIdentifiers(node[0]))
+      return newCall(send, bindSend(node[0]))
     result = copyNimNode(node)
     for child in node:
-      result.add(bindIdentifiers(child))
+      result.add(bindSend(child))
 
-  let boundBody = bindIdentifiers(body)
+  let boundBody = bindSend(bindRouteIdentifiers(body, app, request))
   result = quote:
     addSseRoute(
       `app`,
@@ -507,18 +691,14 @@ macro websocket*(app: Application | Router, path: typed, body: untyped): untyped
 
   let request = genSym(nskParam, "request")
   let websocket = genSym(nskParam, "websocket")
-  proc bindIdentifiers(node: NimNode): NimNode =
-    if node.kind == nnkIdent and eqIdent(node, "request"):
-      return request
+  proc bindWebSocket(node: NimNode): NimNode =
     if node.kind == nnkIdent and eqIdent(node, "websocket"):
       return websocket
-    if node.kind == nnkIdent and eqIdent(node, "ctx"):
-      return newDotExpr(request, ident("context"))
     result = copyNimNode(node)
     for child in node:
-      result.add(bindIdentifiers(child))
+      result.add(bindWebSocket(child))
 
-  let boundBody = bindIdentifiers(body)
+  let boundBody = bindWebSocket(bindRouteIdentifiers(body, app, request))
   result = quote:
     addWebSocketRoute(
       `app`,
@@ -632,17 +812,8 @@ macro get*(app: Application | Router, path: typed, body: untyped): untyped =
     return quote:
       addRoute(`app`, HttpMethod.Get, `path`, `body`)
 
-  proc bindRequest(node: NimNode, request: NimNode): NimNode =
-    if node.kind == nnkIdent and eqIdent(node, "request"):
-      return request
-    if node.kind == nnkIdent and eqIdent(node, "ctx"):
-      return newDotExpr(request, ident("context"))
-    result = copyNimNode(node)
-    for child in node:
-      result.add(bindRequest(child, request))
-
   let request = genSym(nskParam, "request")
-  let boundBody = bindRequest(prepareRouteBody(body), request)
+  let boundBody = bindRouteIdentifiers(prepareRouteBody(body), app, request)
   result = quote:
     addRoute(
       `app`,
@@ -658,17 +829,8 @@ macro query*(app: Application | Router, path: typed, body: untyped): untyped =
     return quote:
       addRoute(`app`, HttpMethod.Query, `path`, `body`)
 
-  proc bindRequest(node: NimNode, request: NimNode): NimNode =
-    if node.kind == nnkIdent and eqIdent(node, "request"):
-      return request
-    if node.kind == nnkIdent and eqIdent(node, "ctx"):
-      return newDotExpr(request, ident("context"))
-    result = copyNimNode(node)
-    for child in node:
-      result.add(bindRequest(child, request))
-
   let request = genSym(nskParam, "request")
-  let boundBody = bindRequest(prepareRouteBody(body), request)
+  let boundBody = bindRouteIdentifiers(prepareRouteBody(body), app, request)
   result = quote:
     addRoute(
       `app`,
@@ -734,19 +896,6 @@ proc buildTypedRoute(
     if status in models:
       error("a route may declare each status only once", item)
     models[status] = item[1]
-
-  proc bindIdentifiers(node, request, parsedBody: NimNode): NimNode =
-    if node.kind == nnkIdent and eqIdent(node, "request"):
-      return request
-    if parsedBody.kind != nnkEmpty and node.kind == nnkIdent and eqIdent(
-      node, inputName
-    ):
-      return parsedBody
-    if node.kind == nnkIdent and eqIdent(node, "ctx"):
-      return newDotExpr(request, ident("context"))
-    result = copyNimNode(node)
-    for child in node:
-      result.add(bindIdentifiers(child, request, parsedBody))
 
   proc checkedResponses(node: NimNode): NimNode =
     if node.kind == nnkReturnStmt and node.len == 1 and node[0].kind == nnkTupleConstr:
@@ -818,7 +967,8 @@ proc buildTypedRoute(
     else:
       genSym(nskVar, "body")
   let checkedBody = checkedResponses(returnFinalTuple(body))
-  let boundBody = bindIdentifiers(prepareRouteBody(checkedBody), request, parsedBody)
+  let boundBody =
+    bindRouteIdentifiers(prepareRouteBody(checkedBody), app, request, parsedBody, inputName)
   let contentType =
     if inputName == "form": "application/x-www-form-urlencoded" else: "application/json"
   let documentation =
@@ -959,16 +1109,7 @@ macro post*(app: Application | Router, path: typed, body: untyped): untyped =
       addRoute(`app`, HttpMethod.Post, `path`, `body`)
 
   let request = genSym(nskParam, "request")
-  proc bindRequest(node: NimNode): NimNode =
-    if node.kind == nnkIdent and eqIdent(node, "request"):
-      return request
-    if node.kind == nnkIdent and eqIdent(node, "ctx"):
-      return newDotExpr(request, ident("context"))
-    result = copyNimNode(node)
-    for child in node:
-      result.add(bindRequest(child))
-
-  let boundBody = bindRequest(prepareRouteBody(body))
+  let boundBody = bindRouteIdentifiers(prepareRouteBody(body), app, request)
   result = quote:
     addRoute(
       `app`,
