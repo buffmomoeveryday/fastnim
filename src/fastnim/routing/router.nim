@@ -15,18 +15,15 @@ import fastnim/websocket
 type
   RouteHandler* = proc(request: Request): Future[Response] {.
     closure, async: (raises: [CatchableError])
-  .}
-    ## Handles a regular HTTP request asynchronously on the Chronos event loop.
-  SyncRouteHandler* = proc(request: Request): Response {.
-    nimcall, raises: [CatchableError]
-  .}
+  .} ## Handles a regular HTTP request asynchronously on the Chronos event loop.
+  SyncRouteHandler* =
+    proc(request: Request): Response {.nimcall, raises: [CatchableError].}
     ## Legacy synchronous route handler adapted to ``RouteHandler`` at registration.
   ErrorHandler* = proc(request: Request): Response {.closure, gcsafe.}
     ## Creates a response for a framework-generated HTTP error status.
   NextHandler* = proc(request: Request): Future[Response] {.
     closure, async: (raises: [CatchableError])
-  .}
-    ## Continues an HTTP request through the remaining middleware and route.
+  .} ## Continues an HTTP request through the remaining middleware and route.
   Middleware* = proc(request: Request, next: NextHandler): Future[Response] {.
     closure, async: (raises: [CatchableError])
   .}
@@ -279,13 +276,10 @@ proc dependencyFields(app: NimNode): NimNode {.compileTime.} =
   else:
     newEmptyNode()
 
-proc rewriteDependencyGet(
-    node, app, context: NimNode
-): NimNode {.compileTime.} =
+proc rewriteDependencyGet(node, app, context: NimNode): NimNode {.compileTime.} =
   let isMethodCall =
-    node.kind in {nnkCall, nnkCommand} and node.len == 2 and
-    node[0].kind == nnkDotExpr and node[0].len == 2 and
-    node[0][0].kind == nnkIdent and eqIdent(node[0][0], "ctx") and
+    node.kind in {nnkCall, nnkCommand} and node.len == 2 and node[0].kind == nnkDotExpr and
+    node[0].len == 2 and node[0][0].kind == nnkIdent and eqIdent(node[0][0], "ctx") and
     node[0][1].kind == nnkIdent and eqIdent(node[0][1], "get")
   if not isMethodCall:
     return nil
@@ -293,8 +287,7 @@ proc rewriteDependencyGet(
   let fields = dependencyFields(app)
   if fields.kind == nnkEmpty:
     error(
-      "ctx.get(name) requires app.dependencies(DependencyType) before this route",
-      node,
+      "ctx.get(name) requires app.dependencies(DependencyType) before this route", node
     )
   if node[1].kind notin {nnkStrLit, nnkRStrLit, nnkTripleStrLit}:
     error("dependency names in ctx.get(name) must be string literals", node[1])
@@ -311,9 +304,7 @@ proc rewriteDependencyGet(
   newCall(getter, context, newLit(name))
 
 proc bindRouteIdentifiers(
-    node, app, request: NimNode,
-    parsedBody = newEmptyNode(),
-    inputName = "",
+    node, app, request: NimNode, parsedBody = newEmptyNode(), inputName = ""
 ): NimNode {.compileTime.} =
   let context = newDotExpr(request, ident("context"))
   let dependencyGet = rewriteDependencyGet(node, app, context)
@@ -397,7 +388,7 @@ macro dependencies*(app: Application, schema: typedesc, body: untyped): untyped 
         `provider`
       setContext(`loadContext`, `nameLit`, `value`)
 
-  let loadHook = quote do:
+  let loadHook = quote:
     proc(`loadContext`: Context) {.nimcall.} =
       `loadBody`
   result = newStmtList(newCall(ident("onLoad"), app, loadHook))
@@ -413,13 +404,11 @@ macro dependencies*(app: Application, schema: typedesc, body: untyped): untyped 
       let value = genSym(nskLet, name)
       let cleanup = replaceDependency(cleanups[name], name, value)
       let getter = newTree(nnkBracketExpr, ident("get"), fieldType)
-      cleanupBody.add(
-        newLetStmt(value, newCall(getter, unloadContext, nameLit)),
-      )
+      cleanupBody.add(newLetStmt(value, newCall(getter, unloadContext, nameLit)))
       cleanupBody.add(cleanup)
 
   if cleanupBody.len > 0:
-    let unloadHook = quote do:
+    let unloadHook = quote:
       proc(`unloadContext`: Context) {.nimcall.} =
         `cleanupBody`
     result.add(newCall(ident("onUnload"), app, unloadHook))
@@ -599,7 +588,7 @@ proc addRoute*(
   let asyncHandler: RouteHandler = proc(
       request: Request
   ): Future[Response] {.async: (raises: [CatchableError]).} =
-    {.cast(gcsafe).}:
+    {.gcsafe.}:
       return handler(request)
   app.addRoute(`method`, path, asyncHandler, openApi)
 
@@ -631,7 +620,7 @@ proc addRoute*(
   let asyncHandler: RouteHandler = proc(
       request: Request
   ): Future[Response] {.async: (raises: [CatchableError]).} =
-    {.cast(gcsafe).}:
+    {.gcsafe.}:
       return handler(request)
   router.addRoute(`method`, path, asyncHandler, openApi)
 
@@ -860,7 +849,7 @@ macro get*(app: Application | Router, path: typed, body: untyped): untyped =
       HttpMethod.Get,
       `path`,
       proc(`request`: Request): Future[Response] {.async: (raises: [CatchableError]).} =
-        {.cast(gcsafe).}:
+        {.gcsafe.}:
           `boundBody`,
     )
 
@@ -878,7 +867,7 @@ macro query*(app: Application | Router, path: typed, body: untyped): untyped =
       HttpMethod.Query,
       `path`,
       proc(`request`: Request): Future[Response] {.async: (raises: [CatchableError]).} =
-        {.cast(gcsafe).}:
+        {.gcsafe.}:
           `boundBody`,
     )
 
@@ -1009,8 +998,9 @@ proc buildTypedRoute(
     else:
       genSym(nskVar, "body")
   let checkedBody = checkedResponses(returnFinalTuple(body))
-  let boundBody =
-    bindRouteIdentifiers(prepareRouteBody(checkedBody), app, request, parsedBody, inputName)
+  let boundBody = bindRouteIdentifiers(
+    prepareRouteBody(checkedBody), app, request, parsedBody, inputName
+  )
   let contentType =
     if inputName == "form": "application/x-www-form-urlencoded" else: "application/json"
   let documentation =
@@ -1021,8 +1011,10 @@ proc buildTypedRoute(
         `app`,
         `method`,
         `path`,
-        proc(`request`: Request): Future[Response] {.async: (raises: [CatchableError]).} =
-          {.cast(gcsafe).}:
+        proc(
+            `request`: Request
+        ): Future[Response] {.async: (raises: [CatchableError]).} =
+          {.gcsafe.}:
             `boundBody`,
         `documentation`,
       )
@@ -1032,11 +1024,13 @@ proc buildTypedRoute(
         `app`,
         `method`,
         `path`,
-        proc(`request`: Request): Future[Response] {.async: (raises: [CatchableError]).} =
+        proc(
+            `request`: Request
+        ): Future[Response] {.async: (raises: [CatchableError]).} =
           var `parsedBody`: `bodyType`
           if not `parser`(`request`, `parsedBody`):
             return json("{\"detail\":\"" & `invalidInputMessage` & "\"}", 400)
-          {.cast(gcsafe).}:
+          {.gcsafe.}:
             `boundBody`,
         `documentation`,
       )
@@ -1160,7 +1154,7 @@ macro post*(app: Application | Router, path: typed, body: untyped): untyped =
       HttpMethod.Post,
       `path`,
       proc(`request`: Request): Future[Response] {.async: (raises: [CatchableError]).} =
-        {.cast(gcsafe).}:
+        {.gcsafe.}:
           `boundBody`,
     )
 

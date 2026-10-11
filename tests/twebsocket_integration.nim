@@ -9,10 +9,10 @@ when defined(websocketIntegration):
 
   import fastnim
 
-  proc serveForTest(app: Application, port: uint16): chronosHttp.HttpServerRef {.
-      gcsafe, raises: [Exception]
-  .} =
-    {.cast(gcsafe).}:
+  proc serveForTest(
+      app: Application, port: uint16
+  ): chronosHttp.HttpServerRef {.gcsafe, raises: [Exception].} =
+    {.gcsafe.}:
       result = app.serve(port = port)
 
   proc exerciseWebSocket() {.async: (raises: [CancelledError, Exception]).} =

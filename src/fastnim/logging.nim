@@ -18,7 +18,7 @@ proc nimLogHandler*(logger: Logger): LogHandler =
   ## The logger is used directly; it is not registered as a global handler.
   result = proc(level: Level, message: string) {.gcsafe, raises: [].} =
     try:
-      {.cast(gcsafe).}:
+      {.gcsafe.}:
         logger.log(level, message)
     except:
       discard
@@ -36,7 +36,7 @@ proc colorConsoleLogHandler*(levelThreshold = lvlInfo): LogHandler =
     if level < levelThreshold:
       return
     try:
-      {.cast(gcsafe).}:
+      {.gcsafe.}:
         stdout.write(ansiForegroundColorCode(logColor(level), bright = true))
         stdout.write(LevelNames[level] & " " & message)
         stdout.write(ansiResetCode & "\n")

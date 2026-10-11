@@ -189,7 +189,10 @@ proc marshalPatchSignals*[T](
 ): DatastarEvent =
   ## Builds a ``datastar-patch-signals`` event from any ``%*``-serializable value.
   patchSignals(
-    toJsonValue(value), onlyIfMissing = onlyIfMissing, eventId = eventId, retryMs = retryMs
+    toJsonValue(value),
+    onlyIfMissing = onlyIfMissing,
+    eventId = eventId,
+    retryMs = retryMs,
   )
 
 proc removeSignals*(
@@ -428,7 +431,7 @@ proc subscribe*(feed: LiveFeed): AsyncQueue[DatastarEvent] {.gcsafe.} =
   ## Call once at the top of an ``app.sse`` handler, then relay queue items
   ## to the client (see ``relay``). Each subscriber only receives events
   ## broadcast after it subscribed; send the current snapshot explicitly.
-  {.cast(gcsafe).}:
+  {.gcsafe.}:
     acquire(feed.lock)
     try:
       result = newAsyncQueue[DatastarEvent]()
@@ -439,7 +442,7 @@ proc subscribe*(feed: LiveFeed): AsyncQueue[DatastarEvent] {.gcsafe.} =
 proc unsubscribe*(feed: LiveFeed, queue: AsyncQueue[DatastarEvent]) {.gcsafe.} =
   ## Removes a subscriber; unknown queues are ignored. Always call it when an
   ## SSE handler exits so disconnected clients stop accumulating.
-  {.cast(gcsafe).}:
+  {.gcsafe.}:
     acquire(feed.lock)
     try:
       var kept: seq[AsyncQueue[DatastarEvent]] = @[]
@@ -452,7 +455,7 @@ proc unsubscribe*(feed: LiveFeed, queue: AsyncQueue[DatastarEvent]) {.gcsafe.} =
 
 proc subscriberCount*(feed: LiveFeed): int {.gcsafe.} =
   ## Returns the current number of subscribers. Mainly useful for tests.
-  {.cast(gcsafe).}:
+  {.gcsafe.}:
     acquire(feed.lock)
     try:
       result = feed.subscribers.len
@@ -465,7 +468,7 @@ proc setSnapshot*(feed: LiveFeed, html: string) {.gcsafe.} =
   ## Call it from POST handlers right after mutating feed state (next to
   ## ``broadcast``). New subscribers receive it as their first event, so call
   ## it once at startup too. Rendering itself stays in your own plain procs.
-  {.cast(gcsafe).}:
+  {.gcsafe.}:
     acquire(feed.lock)
     try:
       feed.snapshotHtml = html
@@ -474,7 +477,7 @@ proc setSnapshot*(feed: LiveFeed, html: string) {.gcsafe.} =
 
 proc snapshot*(feed: LiveFeed): string {.gcsafe.} =
   ## Returns the last snapshot recorded with ``setSnapshot`` ("" if none).
-  {.cast(gcsafe).}:
+  {.gcsafe.}:
     acquire(feed.lock)
     try:
       result = feed.snapshotHtml
@@ -490,7 +493,7 @@ proc broadcast*(feed: LiveFeed, event: DatastarEvent) {.gcsafe.} =
   ## fan out with a single call. Subscribed SSE handlers relay queued events
   ## with ``relay``.
   var targets: seq[AsyncQueue[DatastarEvent]]
-  {.cast(gcsafe).}:
+  {.gcsafe.}:
     acquire(feed.lock)
     try:
       targets = feed.subscribers
@@ -503,7 +506,7 @@ proc broadcast*(feed: LiveFeed, event: DatastarEvent) {.gcsafe.} =
     except AsyncQueueFullError:
       full.add(queue)
   if full.len > 0:
-    {.cast(gcsafe).}:
+    {.gcsafe.}:
       acquire(feed.lock)
       try:
         var kept: seq[AsyncQueue[DatastarEvent]] = @[]

@@ -16,10 +16,10 @@ when defined(sseIntegration):
   import fastnim
   import fastnim/plugins/datastar
 
-  proc serveForTest(app: Application, port: uint16): chronosHttp.HttpServerRef {.
-      gcsafe, raises: [Exception]
-  .} =
-    {.cast(gcsafe).}:
+  proc serveForTest(
+      app: Application, port: uint16
+  ): chronosHttp.HttpServerRef {.gcsafe, raises: [Exception].} =
+    {.gcsafe.}:
       result = app.serve(port = port)
 
   proc readAvailable(transp: StreamTransport): Future[string] {.async.} =
@@ -72,7 +72,8 @@ when defined(sseIntegration):
     let noFlags: set[SocketFlags] = {}
     try:
       # 1. Open a stream and vanish mid-stream, like a closed browser tab.
-      var stream = await connect(initTAddress("127.0.0.1", Port(18082)), flags = noFlags)
+      var stream =
+        await connect(initTAddress("127.0.0.1", Port(18082)), flags = noFlags)
       discard await stream.write(
         "GET /notes/stream HTTP/1.1\r\nHost: 127.0.0.1\r\n" &
           "Accept: text/event-stream\r\nConnection: close\r\n\r\n"
@@ -84,7 +85,8 @@ when defined(sseIntegration):
       # 2. Broadcast into the dead subscription twice: the first write may
       #    still land in kernel buffers, the second deterministically fails.
       for _ in 1 .. 2:
-        var poster = await connect(initTAddress("127.0.0.1", Port(18082)), flags = noFlags)
+        var poster =
+          await connect(initTAddress("127.0.0.1", Port(18082)), flags = noFlags)
         discard await poster.write(
           "POST /notes/add HTTP/1.1\r\nHost: 127.0.0.1\r\n" &
             "Content-Type: application/json\r\nContent-Length: 0\r\n" &

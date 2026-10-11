@@ -49,7 +49,7 @@ app.post("/login"):
   ):
     return json(%*{"detail": "invalid credentials"}, 401)
   var response = json(%*{"ok": true})
-  discard loginSession(store, response, credentials.username)
+  discard await loginSession(store, response, credentials.username)
   response
 
 app.get("/me"):
@@ -57,7 +57,7 @@ app.get("/me"):
 
 app.post("/logout"):
   var response = json(%*{"ok": true})
-  logoutSession(store, request, response)
+  await logoutSession(store, request, response)
   response
 
 let server = app.serve(port = 8104)

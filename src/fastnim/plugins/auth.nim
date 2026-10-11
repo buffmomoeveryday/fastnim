@@ -26,9 +26,7 @@
 ##
 ## ```nim
 ## app.sse("/live"):
-##   var identity: AuthIdentity
-##   {.gcsafe.}:
-##     identity = authenticate(request, authOpts)
+##   let identity = await authenticate(request, authOpts)
 ##   if identity.isNil:
 ##     return
 ## ```
@@ -140,8 +138,10 @@ proc authScheme*(request: Request): string {.inline, raises: [].} =
   ## Returns the verifying scheme name set by the auth middleware, or "".
   request.header(AuthSchemeHeader)
 
-proc authenticate*(request: Request, options: AuthOptions): AuthIdentity =
-  ## Verifies ``request`` credentials and returns the identity, or nil.
+proc authenticate*(request: Request, options: AuthOptions): Future[AuthIdentity] {.
+    async: (raises: [CatchableError]).} =
+  ## Asynchronously verifies ``request`` credentials and returns the identity,
+  ## or nil.
   ##
   ## The first recognized scheme decides, fail-closed: a present-but-invalid
   ## credential is rejected without trying weaker schemes. Bearer tokens are
@@ -198,7 +198,7 @@ proc authenticate*(request: Request, options: AuthOptions): AuthIdentity =
       return nil
 
   if AuthScheme.Session in options.schemes and not options.sessionStore.isNil:
-    let subject = sessionSubject(
+    let subject = await sessionSubject(
       options.sessionStore, sessionIdCookie(request, options.sessionCookie)
     )
     if subject.len > 0:
@@ -263,7 +263,7 @@ proc authMiddleware(options: AuthOptions): Middleware =
         not isProtected(clean.path, options.includePaths, options.excludePaths):
       return await next(clean)
     let missing = not hasCredentials(clean, options)
-    let identity = authenticate(clean, options)
+    let identity = await authenticate(clean, options)
     if identity.isNil:
       return unauthorized(missing, options)
     clean.headers[AuthSubjectHeader] = identity.subject
@@ -291,7 +291,7 @@ proc authPlugin*(
   ## Install it (after CORS middleware, if any, so preflights keep working)
   ## and protect routes with ``includePaths``/``excludePaths``. Handlers read
   ## the verified caller with ``authSubject``; SSE handlers verify with
-  ## ``authenticate`` since middleware never reaches them.
+  ## ``await authenticate`` since middleware never reaches them.
   initPlugin(
     name,
     version,
