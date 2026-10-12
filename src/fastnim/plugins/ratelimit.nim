@@ -123,7 +123,7 @@ proc rateLimitMiddleware(
     let usage = await store.increment(key, options.windowSeconds)
     let remaining = max(0, options.limit - usage.count)
     if usage.count > options.limit:
-      result = text("Too Many Requests", 429)
+      result = text(statusTooManyRequests, "Too Many Requests")
       let retryAfter = max(1, ceil(usage.resetAt - epochTime()).int)
       result.setHeader("retry-after", $retryAfter)
       result.setHeader("x-ratelimit-limit", $options.limit)

@@ -212,7 +212,7 @@ proc setStaticHeaders(
     response.setHeader("content-range", contentRange)
 
 proc notModifiedResponse(etag, lastModified: string, maxAge: int): Response =
-  result = initResponse("", 304)
+  result = initResponse(statusNotModified)
   result.headers.del("content-type")
   result.setHeader("etag", etag)
   result.setHeader("last-modified", lastModified)
@@ -246,9 +246,9 @@ proc serveDiskFile(
   try:
     info = getFileInfo(filePath)
   except OSError:
-    return text("Not Found", 404)
+    return text(statusNotFound, "Not Found")
   if info.kind != pcFile:
-    return text("Not Found", 404)
+    return text(statusNotFound, "Not Found")
   let size = info.size
   let mtimeUnix = info.lastWriteTime.toUnix()
   let etag = makeEtag(size, mtimeUnix)
@@ -267,19 +267,22 @@ proc serveDiskFile(
       status = 206
       contentRange = "bytes " & $offset & "-" & $(offset + length - 1) & "/" & $size
     of RangeOutcome.RangeUnsatisfiable:
-      result = text("Requested Range Not Satisfiable", 416)
+      result = text(statusRangeNotSatisfiable, "Requested Range Not Satisfiable")
       result.setHeader("content-range", "bytes */" & $size)
       return result
     of RangeOutcome.RangeIgnore:
       discard
   if not headOnly and length > 0 and size >= int64(streamThreshold):
-    result = initResponse("", status)
+    result = initResponse()
+    if status == 206:
+      result.status = statusCode(statusPartialContent)
     setStaticHeaders(result, contentType, etag, lastMod, length, maxAge, contentRange)
     result.sendFile = filePath
     result.fileOffset = offset
     result.fileLength = length
     return result
   var body = ""
+  result = initResponse()
   if not headOnly:
     try:
       if offset == 0 and length == size:
@@ -287,8 +290,10 @@ proc serveDiskFile(
       else:
         body = readRange(filePath, offset, length)
     except CatchableError:
-      return text("Not Found", 404)
-  result = initResponse(body, status)
+      return text(statusNotFound, "Not Found")
+    result.body = body
+  if status == 206:
+    result.status = statusCode(statusPartialContent)
   setStaticHeaders(result, contentType, etag, lastMod, length, maxAge, contentRange)
 
 proc respondEmbedded(request: Request, emb: EmbeddedFile, maxAge: int): Response =
@@ -307,7 +312,7 @@ proc respondEmbedded(request: Request, emb: EmbeddedFile, maxAge: int): Response
       status = 206
       contentRange = "bytes " & $offset & "-" & $(offset + length - 1) & "/" & $emb.size
     of RangeOutcome.RangeUnsatisfiable:
-      result = text("Requested Range Not Satisfiable", 416)
+      result = text(statusRangeNotSatisfiable, "Requested Range Not Satisfiable")
       result.setHeader("content-range", "bytes */" & $emb.size)
       return result
     of RangeOutcome.RangeIgnore:
@@ -319,7 +324,9 @@ proc respondEmbedded(request: Request, emb: EmbeddedFile, maxAge: int): Response
     else:
       let first = offset.int
       body = emb.content[first ..< first + length.int]
-  result = initResponse(body, status)
+  result = initResponse(body)
+  if status == 206:
+    result.status = statusCode(statusPartialContent)
   setStaticHeaders(
     result, emb.contentType, emb.etag, emb.lastModified, length, maxAge, contentRange
   )
@@ -348,7 +355,7 @@ proc redirectToSlash(request: Request): Response =
       location.add(if first: "?" else: "&")
       first = false
       location.add(encodeUrl(key) & "=" & encodeUrl(value))
-  result = initResponse("", 307)
+  result = initResponse(statusTemporaryRedirect, "")
   result.setHeader("location", location)
 
 proc resolveRel(decoded: string, allowDotfiles: bool, rel: var string): bool =

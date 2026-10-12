@@ -14,7 +14,6 @@ type
   ApiError = object
     detail: string
 
-
 let app = initFastNim()
 let openApiSettings = initOpenApiSettings(
   title = "FastNim Items API",
@@ -40,8 +39,7 @@ app.post("/items", body = CreateItem, responses = @[(201, Item), (400, ApiError)
   if body.name.len == 0:
     badRequest ApiError(detail: "name is required")
   else:
-    created Item(id: 1, name: body.name)
+    json (statusCreated, Item(id: 1, name: body.name))
 
 let server = app.serve(port = 8001)
-echo "Swagger UI: http://127.0.0.1:8001/docs"
 waitFor server.join()

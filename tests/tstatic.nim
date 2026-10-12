@@ -71,7 +71,7 @@ block fallthroughToAppHandlers:
   let dir = makeDiskFixtures()
   let app = initFastNim(logs = false)
   app.onError(
-    404, proc(request: Request): Response = text("custom:" & request.path, 404)
+    404, proc(request: Request): Response = text(statusNotFound, "custom:" & request.path)
   )
   app.serveStatic("/static", directory = dir)
   app.get("/hello"):

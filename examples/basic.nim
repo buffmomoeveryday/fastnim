@@ -1,7 +1,6 @@
 ## Run with: nim c -r --path:src examples/basic.nim
 
-import chronos
-import std/json
+import json
 
 import fastnim
 
@@ -17,23 +16,22 @@ type
     requestId: int
     path: string
 
-let app = initFastNim(logs=false)
+let app = initFastNim()
 
-# app.middlewares:
-#   requestId()
-
+app.middlewares:
+  requestId()
 
 app.get("/"):
-  %*{"message": "Hello from FastNim"}
+  ok %*{"message": "Hello from FastNim"}
 
 app.get("/async"):
-  await sleepAsync(10.milliseconds)
-  %*{"message": "Completed without blocking the Chronos event loop"}
+  ok %*{"message": "Completed without blocking the Chronos event loop"}
 
 app.get("/items/{itemId}"):
   let itemId = request.pathParam("itemId")
   let page = request.queryParam("page", "1")
-  %*{"itemId": itemId, "page": page}
+
+  ok %*{"itemId": itemId, "page": page}
 
 app.get("/request-info", responses = @[(200, RequestInfo)]):
   ok RequestInfo(requestId: 1, path: request.path)

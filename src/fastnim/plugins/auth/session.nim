@@ -14,8 +14,7 @@ import fastnim/[context/http, params/extract]
 import fastnim/plugins/auth/schemes
 
 type
-  SessionData* = ref object of RootObj
-    ## Server-side record for one login.
+  SessionData* = ref object of RootObj ## Server-side record for one login.
     subject*: string ## Who owns the session.
     createdAt*: float ## Unix time the session was created.
     expiresAt*: float ## Unix time the session stops being valid.
@@ -212,11 +211,7 @@ proc createSession*(
   ## Creates a session for ``subject`` and returns its fresh random id.
   if subject.len == 0:
     raise newException(ValueError, "session subject cannot be empty")
-  let ttl =
-    if ttlSeconds == 0:
-      store.defaultTtlSeconds
-    else:
-      ttlSeconds
+  let ttl = if ttlSeconds == 0: store.defaultTtlSeconds else: ttlSeconds
   let id = newSessionId()
   let now = epochTime()
   let data = SessionData(
@@ -270,8 +265,9 @@ proc parseCookies*(request: Request): Table[string, string] {.raises: [].} =
   except CatchableError:
     discard
 
-proc sessionIdCookie*(request: Request, name = "session_id"): string {.
-    inline, raises: [].} =
+proc sessionIdCookie*(
+    request: Request, name = "session_id"
+): string {.inline, raises: [].} =
   ## Returns the session id from the ``name`` cookie, or "" when absent.
   parseCookies(request).getOrDefault(name, "")
 
@@ -347,7 +343,9 @@ proc finishLogout(store: SessionStore, id: string): Future[void] {.
   await destroySession(store, id)
 
 proc logoutSession*(
-    store: SessionStore, request: Request, response: var Response,
+    store: SessionStore,
+    request: Request,
+    response: var Response,
     cookieName = "session_id",
 ): Future[void].Raising([CatchableError, ValueError]) =
   ## Destroys the request's session, if any, and clears its cookie.

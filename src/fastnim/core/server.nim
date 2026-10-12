@@ -3,6 +3,7 @@
 import std/[json, logging, monotimes, strutils, tables, times, uri]
 
 import chronos/apps/http/httpserver as chronosHttp
+import chronos/streams/asyncstream
 import websock/websock as rawWs
 
 import fastnim/routing/router
@@ -47,14 +48,43 @@ proc toFastnimRequest(
   for key, value in request.headers.stringItems():
     headers[key.toLowerAscii()] = value
 
+  let contentType = headers.getOrDefault("content-type").toLowerAscii()
+  let streamsMultipart =
+    request.hasBody() and contentType.startsWith("multipart/form-data")
   let body =
-    if request.hasBody():
+    if request.hasBody() and not streamsMultipart:
       bytesToString(await request.getBody())
     else:
       ""
   result = fastnimHttp.initRequest(
     toFastnimMethod(request.meth), request.rawPath, headers, body
   )
+  if streamsMultipart:
+    let bodyResult = request.getBodyReader()
+    if bodyResult.isErr():
+      raise newException(
+        chronosHttp.HttpProtocolError,
+        "Unable to open multipart request body: " & $bodyResult.error,
+      )
+    let reader = bodyResult.get()
+    await request.handleExpect()
+    let read: fastnimHttp.BodyReadProc = proc(
+        maxBytes: int
+    ): Future[string] {.async: (raises: [CatchableError]).} =
+      var chunk = newString(maxBytes)
+      try:
+        let count = await reader.readOnce(addr chunk[0], maxBytes)
+        chunk.setLen(count)
+        return chunk
+      except CancelledError as exc:
+        raise exc
+      except AsyncStreamError as exc:
+        raise newException(IOError, "Unable to read multipart body: " & exc.msg)
+    let close: fastnimHttp.BodyCloseProc = proc(): Future[void] {.
+        async: (raises: [])
+    .} =
+      await reader.closeWait()
+    result.attachBodySource(newRequestBodySource(read, close))
   for key, value in request.query.stringItems():
     result.queryParams[key] = value
 
@@ -84,7 +114,7 @@ proc sendStaticFile(
   var opened: File
   if not open(opened, response.sendFile, fmRead):
     app.logError("Static file is no longer readable: " & response.sendFile)
-    return await toChronosResponse(chronosRequest, fastnimHttp.text("Not Found", 404))
+    return await toChronosResponse(chronosRequest, fastnimHttp.text(statusNotFound, "Not Found"))
   let cresp = chronosRequest.getResponse()
   cresp.status = toChronosStatus(response.status)
   for key, value in response.headers:
@@ -203,9 +233,15 @@ proc safeHandle(
     app.logRequest(request, result.status, (getMonoTime() - startedAt).inMicroseconds)
 
 proc serve*(
-    app: Application, address = "127.0.0.1", port: uint16 = 8000
+    app: Application,
+    address = "127.0.0.1",
+    port: uint16 = 8000,
+    maxRequestBodySize: Positive = 32 * 1024 * 1024,
 ): chronosHttp.HttpServerRef =
   ## Creates and starts a Chronos server. Use ``waitFor server.join()`` to keep it running.
+  ##
+  ## ``maxRequestBodySize`` is the transport-wide limit applied before body
+  ## parsing. Multipart parsers may enforce a smaller per-endpoint limit.
   echo fastNimStartupBanner
   app.load()
   proc process(
@@ -227,7 +263,11 @@ proc serve*(
         return response
       when defined(fastnimTiming):
         let handlerStartedAt = getMonoTime()
-      let response = await app.safeHandle(request)
+      let response =
+        try:
+          await app.safeHandle(request)
+        finally:
+          await request.closeBodySource()
       when defined(fastnimTiming):
         echo "[fastnim timing] handler ",
           (getMonoTime() - handlerStartedAt).inMicroseconds, " us"
@@ -253,6 +293,7 @@ proc serve*(
       process,
       serverFlags = {chronosHttp.HttpServerFlags.Http11Pipeline},
       socketFlags = {chronosHttp.ReuseAddr, chronosHttp.TcpNoDelay},
+      maxRequestBodySize = maxRequestBodySize,
     )
     .get()
   result.start()
