@@ -152,6 +152,20 @@ Register HTTP middleware with `app.use`. Middleware runs in registration order;
 each layer receives the request and `next`, and can modify the downstream
 response or return early to short-circuit it.
 
+Declare a named middleware with the `middleware` macro; it supplies `request`
+and `next` and creates a `Middleware` value. Explicit status responses put the
+status first, and JSON status responses require a `JsonNode` (for example,
+`%*{...}`):
+
+```nim
+middleware requireAuth:
+  if request.header("authorization") == "":
+    return json(statusUnauthorized, %*{"detail": "missing credentials"})
+  await next(request)
+
+app.use(requireAuth)
+```
+
 Run the complete authorization and response-header example with
 `nim c -r --path:src examples/middleware.nim`.
 
@@ -224,8 +238,124 @@ app.post("/login", form = LoginForm, responses = @[(200, LoginForm)]):
 
 Fields support strings, booleans, numeric types, and enums. Malformed typed
 values return `400 {"detail":"invalid form request body"}`. Run the complete
-example with `nim c -r --path:src examples/forms.nim`. Multipart file uploads
-are not part of this URL-encoded form API yet.
+example with `nim c -r --path:src examples/forms.nim`.
+
+## Multipart uploads
+
+Multipart files stream to server-generated files by default, so file size does
+not determine parser memory usage. Parse them from an async handler:
+
+```nim
+type ProductImageForm = object
+  image* {.upload(
+    contentTypes = ["image/jpeg", "image/png"],
+    uploadDir = "product-images",
+    maxRequestSize = 6 * 1024 * 1024,
+    maxFileSize = 5 * 1024 * 1024,
+  ).}: UploadedFile
+
+app.post("/products/{id}/image"):
+  let form = await request.parseUpload(ProductImageForm)
+  let image = form.image
+  json %*{
+    "filename": image.filename,
+    "contentType": image.contentType,
+    "size": image.size,
+    "path": image.path,
+  }
+```
+
+Declare multiple file fields in the same object. A metadata-aware S3 key
+builder can route each field to a different prefix:
+
+```nim
+type ProductAssetsForm = object
+  image* {.upload(contentTypes = ["image/jpeg", "image/png"]).}: UploadedFile
+  manual* {.upload(contentTypes = ["application/pdf"]).}: UploadedFile
+
+app.post("/products/{id}/assets"):
+  let productId = request.pathParam("id")
+  let assets = await s3.upload(
+    request,
+    ProductAssetsForm,
+    key = proc(file: UploadMetadata): string =
+      case file.fieldName
+      of "image": "products/" & productId & "/images/primary"
+      of "manual": "products/" & productId & "/manuals/spec.pdf"
+      else: raise newException(ValueError, "unexpected upload field"),
+  )
+  json %*{
+    "image": assets.image.stored.location,
+    "manual": assets.manual.stored.location,
+  }
+```
+
+Single-file S3 schemas return an `UploadedFile` directly. Multi-file schemas
+return the populated typed form so each uploaded file remains addressable by
+its declared field.
+
+Successful disk uploads belong to the application; move or delete them when
+they are no longer needed. Partial files are deleted after malformed input,
+limit failures, or cancellation. Client filenames are metadata only and are
+never used as filesystem paths. Use the lower-level `parseMultipart` API when
+you need multiple files, repeated fields, or a custom validation hook.
+
+In-memory files require explicit opt-in and a mandatory aggregate cap:
+
+```nim
+let options = initMultipartOptions(
+  storage = UploadStorage.Memory,
+  memorySizeCap = 1024 * 1024,
+)
+```
+
+Malformed multipart input returns JSON `400`, size and file-count violations
+return `413`, and rejected content types return `415`. The transport also has a
+body limit configured with `app.serve(maxRequestBodySize = ...)`; keep it at
+least as large as the endpoint's multipart request limit. See
+[`examples/product_image_upload.nim`](examples/product_image_upload.nim) for a
+complete product-image endpoint and `curl -F` command.
+
+### External and S3 storage
+
+Storage integrations implement the small `UploadStore`/`UploadSink` contract.
+The multipart parser still owns request, file-count, file-size, and content-type
+limits, and aborts or rolls back the store when parsing fails or is cancelled:
+
+```nim
+let form = await request.parseUpload(ProductImageForm, objectStore)
+let imageUrl = form.image.stored.location
+```
+
+The optional [`fastnim/plugins/s3`](src/fastnim/plugins/s3.nim) module
+implements bounded S3 multipart uploads with Chronos HTTP and built-in SigV4
+signing. Configure the destination and credentials once, install the returned
+handle, then stream a configured upload directly from the request:
+
+```nim
+let s3 = s3Plugin(initS3Config(
+  bucket = "product-assets",
+  region = getEnv("AWS_REGION", "us-east-1"),
+  accessKey = getEnv("AWS_ACCESS_KEY_ID"),
+  secretKey = getEnv("AWS_SECRET_ACCESS_KEY"),
+  sessionToken = getEnv("AWS_SESSION_TOKEN"), # optional
+  endpoint = getEnv("S3_ENDPOINT"),           # optional; e.g. MinIO
+))
+app.install(s3)
+
+app.post("/products/{id}/image"):
+  let productId = request.pathParam("id")
+  let image = await s3.upload(
+    request,
+    ProductImageForm,
+    key = "products/" & productId & "/primary",
+  )
+  json %*{"location": image.stored.location}
+```
+
+See
+[`examples/product_image_upload_s3.nim`](examples/product_image_upload_s3.nim)
+for a complete product-image endpoint.
 
 ## HTML responses
 
@@ -477,8 +607,12 @@ release.
 ## Typed responses
 
 Declare every status and JSON model a route may return. Within that route,
-`ok`, `created`, `badRequest`, `notFound`, `conflict`, and
-`unprocessableEntity` are checked at compile time against the declared pair.
+status helpers such as `ok`, `created`, `accepted`, `badRequest`,
+`unauthorized`, `forbidden`, `notFound`, `conflict`, `unprocessableContent`,
+`tooManyRequests`, and `internalServerError` are checked at compile time against
+the declared status/model pair. The same helpers work in untyped routes and
+return JSON responses, including when passed a `%*` JSON node. `noContent void`
+is the special empty 204 response.
 
 ```nim
 type
@@ -508,6 +642,16 @@ type
 
 app.post("/items", body = CreateItem, responses = @[(201, Item)]):
   created Item(id: 1)
+```
+
+For an untyped route, the same helpers accept `%*` values directly:
+
+```nim
+app.post("/login"):
+  if not authenticated:
+    unauthorized %*{"detail": "invalid credentials"}
+  else:
+    ok %*{"message": "hello"}
 ```
 
 Rename a model field in request JSON, response JSON, and generated OpenAPI with

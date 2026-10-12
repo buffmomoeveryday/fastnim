@@ -2,12 +2,29 @@
 
 import std/[json, macros, strutils, tables, uri]
 
+import chronos
+
 import fastnim/context/state
 import fastnim/private/jsonconversion
 
 export tables
 
 type
+  BodyReadProc* = proc(maxBytes: int): Future[string] {.
+    closure, gcsafe, async: (raises: [CatchableError])
+  .}
+    ## Reads at most ``maxBytes`` bytes from a request body.
+    ##
+    ## This is a low-level adapter hook used by streaming body parsers.
+  BodyCloseProc* = proc(): Future[void] {.closure, gcsafe, async: (raises: []).}
+    ## Closes a streaming request body without raising.
+  RequestBodySource* = ref object
+    ## Shared, one-shot source for a request body supplied by an HTTP adapter.
+    read: BodyReadProc
+    close: BodyCloseProc
+    consumed: bool
+    closed: bool
+
   HttpMethod* {.pure.} = enum ## HTTP methods supported by fastnim routing.
     Get = "GET"
     Post = "POST"
@@ -17,6 +34,69 @@ type
     Head = "HEAD"
     Options = "OPTIONS"
     Query = "QUERY"
+
+  HttpStatus* = enum ## Standard HTTP response status codes.
+    statusContinue = 100
+    statusSwitchingProtocols = 101
+    statusProcessing = 102
+    statusEarlyHints = 103
+    statusCreated = 201
+    statusAccepted = 202
+    statusNonAuthoritativeInformation = 203
+    statusNoContent = 204
+    statusResetContent = 205
+    statusPartialContent = 206
+    statusMultiStatus = 207
+    statusAlreadyReported = 208
+    statusImUsed = 226
+    statusMultipleChoices = 300
+    statusMovedPermanently = 301
+    statusFound = 302
+    statusSeeOther = 303
+    statusNotModified = 304
+    statusUseProxy = 305
+    statusTemporaryRedirect = 307
+    statusPermanentRedirect = 308
+    statusBadRequest = 400
+    statusUnauthorized = 401
+    statusPaymentRequired = 402
+    statusForbidden = 403
+    statusNotFound = 404
+    statusMethodNotAllowed = 405
+    statusNotAcceptable = 406
+    statusProxyAuthenticationRequired = 407
+    statusRequestTimeout = 408
+    statusConflict = 409
+    statusGone = 410
+    statusLengthRequired = 411
+    statusPreconditionFailed = 412
+    statusContentTooLarge = 413
+    statusUriTooLong = 414
+    statusUnsupportedMediaType = 415
+    statusRangeNotSatisfiable = 416
+    statusExpectationFailed = 417
+    statusImATeapot = 418
+    statusMisdirectedRequest = 421
+    statusUnprocessableContent = 422
+    statusLocked = 423
+    statusFailedDependency = 424
+    statusTooEarly = 425
+    statusUpgradeRequired = 426
+    statusPreconditionRequired = 428
+    statusTooManyRequests = 429
+    statusRequestHeaderFieldsTooLarge = 431
+    statusUnavailableForLegalReasons = 451
+    statusInternalServerError = 500
+    statusNotImplemented = 501
+    statusBadGateway = 502
+    statusServiceUnavailable = 503
+    statusGatewayTimeout = 504
+    statusHttpVersionNotSupported = 505
+    statusVariantAlsoNegotiates = 506
+    statusInsufficientStorage = 507
+    statusLoopDetected = 508
+    statusNotExtended = 510
+    statusNetworkAuthenticationRequired = 511
 
   Headers* = Table[string, string] ## HTTP header mapping with lowercase names.
 
@@ -28,8 +108,9 @@ type
     pathParams*: Table[string, string] ## ``{name}`` segments matched by the route.
     queryParams*: Table[string, string] ## Decoded query parameters.
     headers*: Headers ## Request headers with lowercase names.
-    body*: string ## Raw request body.
+    body*: string ## Buffered raw body; empty for streaming multipart requests.
     context*: Context ## Application-scoped values for handlers.
+    bodySource: RequestBodySource
 
   Response* = object ## A complete HTTP response ready for the Chronos adapter to send.
     status*: int ## HTTP status code.
@@ -88,13 +169,134 @@ proc initRequest*(
     result.path = target[0 ..< separator]
     result.queryParams = parseQuery(target[separator + 1 ..^ 1])
 
+proc newRequestBodySource*(
+    read: BodyReadProc, close: BodyCloseProc
+): RequestBodySource =
+  ## Creates a one-shot streaming body source for an HTTP adapter.
+  RequestBodySource(read: read, close: close)
+
+proc attachBodySource*(
+    request: var Request, source: RequestBodySource
+) {.inline, raises: [].} =
+  ## Attaches a streaming body source. Intended for HTTP adapter implementations.
+  request.bodySource = source
+
+proc hasBodySource*(request: Request): bool {.inline, raises: [].} =
+  ## Returns whether the request body is available as an unread stream.
+  not request.bodySource.isNil and not request.bodySource.consumed
+
+proc beginBodyRead*(request: Request): RequestBodySource =
+  ## Claims and returns the request's one-shot streaming body source.
+  ##
+  ## Raises ``ValueError`` when the source was already consumed or unavailable.
+  if request.bodySource.isNil:
+    raise newException(ValueError, "request does not have a streaming body")
+  if request.bodySource.consumed:
+    raise newException(ValueError, "request body has already been consumed")
+  request.bodySource.consumed = true
+  request.bodySource
+
+proc readChunk*(
+    source: RequestBodySource, maxBytes: Positive
+): Future[string] {.async: (raises: [CatchableError]).} =
+  ## Reads the next body chunk, returning an empty string at end of input.
+  return await source.read(maxBytes)
+
+proc closeBodySource*(request: Request): Future[void] {.async: (raises: []).} =
+  ## Closes an attached request body source. Calling it more than once is safe.
+  if not request.bodySource.isNil and not request.bodySource.closed and
+      not request.bodySource.close.isNil:
+    request.bodySource.closed = true
+    await request.bodySource.close()
+
 proc initResponse*(
-    body: string = "", status = 200, headers: Headers = initTable[string, string]()
+    body = "", headers: Headers = initTable[string, string]()
 ): Response =
-  ## Creates an HTTP response. Text responses default to UTF-8 plain text.
-  result = Response(status: status, headers: headers, body: body)
+  ## Creates a 200 HTTP response. Text responses default to UTF-8 plain text.
+  result = Response(status: 200, headers: headers, body: body)
   if "content-type" notin result.headers:
     result.headers["content-type"] = "text/plain; charset=utf-8"
+
+proc statusCode*(status: HttpStatus): int {.inline, raises: [].} =
+  ## Returns the numeric wire value for a named HTTP status.
+  ord(status)
+
+macro defineStatusResponse(name: untyped, code: static[int]): untyped =
+  let exportedName = nnkPostfix.newTree(ident("*"), name)
+  result = quote do:
+    template `exportedName`(model: untyped): Response =
+      ## Creates a JSON response using the corresponding HTTP status.
+      response(`code`, model)
+
+defineStatusResponse(ok, 200)
+template ok*(responseType: typedesc[Response], model: untyped): Response =
+  ## Supports command-style ``ok %*{...}`` inside route blocks.
+  response(200, model)
+defineStatusResponse(created, 201)
+defineStatusResponse(accepted, 202)
+defineStatusResponse(switchingProtocols, 101)
+defineStatusResponse(processing, 102)
+defineStatusResponse(earlyHints, 103)
+defineStatusResponse(nonAuthoritativeInformation, 203)
+defineStatusResponse(resetContent, 205)
+defineStatusResponse(partialContent, 206)
+defineStatusResponse(multiStatus, 207)
+defineStatusResponse(alreadyReported, 208)
+defineStatusResponse(imUsed, 226)
+defineStatusResponse(multipleChoices, 300)
+defineStatusResponse(movedPermanently, 301)
+defineStatusResponse(found, 302)
+defineStatusResponse(seeOther, 303)
+defineStatusResponse(notModified, 304)
+defineStatusResponse(temporaryRedirect, 307)
+defineStatusResponse(permanentRedirect, 308)
+defineStatusResponse(badRequest, 400)
+defineStatusResponse(unauthorized, 401)
+defineStatusResponse(paymentRequired, 402)
+defineStatusResponse(forbidden, 403)
+defineStatusResponse(notFound, 404)
+defineStatusResponse(methodNotAllowed, 405)
+defineStatusResponse(notAcceptable, 406)
+defineStatusResponse(proxyAuthenticationRequired, 407)
+defineStatusResponse(requestTimeout, 408)
+defineStatusResponse(conflict, 409)
+defineStatusResponse(gone, 410)
+defineStatusResponse(lengthRequired, 411)
+defineStatusResponse(preconditionFailed, 412)
+defineStatusResponse(contentTooLarge, 413)
+defineStatusResponse(uriTooLong, 414)
+defineStatusResponse(unsupportedMediaType, 415)
+defineStatusResponse(rangeNotSatisfiable, 416)
+defineStatusResponse(expectationFailed, 417)
+defineStatusResponse(imATeapot, 418)
+defineStatusResponse(misdirectedRequest, 421)
+defineStatusResponse(unprocessableContent, 422)
+defineStatusResponse(locked, 423)
+defineStatusResponse(failedDependency, 424)
+defineStatusResponse(tooEarly, 425)
+defineStatusResponse(upgradeRequired, 426)
+defineStatusResponse(preconditionRequired, 428)
+defineStatusResponse(tooManyRequests, 429)
+defineStatusResponse(requestHeaderFieldsTooLarge, 431)
+defineStatusResponse(unavailableForLegalReasons, 451)
+defineStatusResponse(internalServerError, 500)
+defineStatusResponse(notImplemented, 501)
+defineStatusResponse(badGateway, 502)
+defineStatusResponse(serviceUnavailable, 503)
+defineStatusResponse(gatewayTimeout, 504)
+defineStatusResponse(httpVersionNotSupported, 505)
+defineStatusResponse(variantAlsoNegotiates, 506)
+defineStatusResponse(insufficientStorage, 507)
+defineStatusResponse(loopDetected, 508)
+defineStatusResponse(notExtended, 510)
+defineStatusResponse(networkAuthenticationRequired, 511)
+
+proc initResponse*(
+    status: HttpStatus, body = "", headers: Headers = initTable[string, string]()
+): Response =
+  ## Creates a response with a named HTTP status first.
+  result = initResponse(body, headers)
+  result.status = statusCode(status)
 
 proc sseEvent*(data: string, event = "", id = "", retry = -1): ServerSentEvent =
   ## Creates a Server-Sent Event. ``retry`` is omitted when it is negative.
@@ -118,24 +320,33 @@ proc formatSseEvent*(event: ServerSentEvent): string =
     result.add("data:\n")
   result.add('\n')
 
-proc eventStream*(events: openArray[ServerSentEvent], status = 200): Response =
+proc eventStream*(events: openArray[ServerSentEvent]): Response =
   ## Creates a finite Server-Sent Events response.
   for event in events:
     result.body.add(formatSseEvent(event))
-  result.status = status
+  result.status = 200
   result.headers = initTable[string, string]()
   result.headers["content-type"] = "text/event-stream; charset=utf-8"
   result.headers["cache-control"] = "no-cache"
+
+proc eventStream*(status: HttpStatus, events: openArray[ServerSentEvent]): Response =
+  ## Creates a finite SSE response with the named status first.
+  result = eventStream(events)
+  result.status = statusCode(status)
 
 proc setHeader*(response: var Response, name, value: string) {.raises: [].} =
   ## Sets a response header before the response is returned.
   response.headers[name.toLowerAscii()] = value
 
-proc text*(body: string, status = 200): Response =
+proc text*(body: string): Response =
   ## Creates a UTF-8 plain-text response.
-  initResponse(body, status)
+  initResponse(body)
 
-proc html*(body: string, status = 200): Response =
+proc text*(status: HttpStatus, body: string): Response =
+  ## Creates a plain-text response with a named HTTP status first.
+  initResponse(status, body)
+
+proc html*(body: string): Response =
   ## Creates a UTF-8 HTML response.
   ##
   ## ```nim
@@ -145,19 +356,29 @@ proc html*(body: string, status = 200): Response =
   ##
   ## Template libraries such as Karax render server-side markup to a plain
   ## string; stringify the node (for example with ``$node``) and pass it here.
-  result = initResponse(body, status)
+  result = initResponse(body)
   result.headers["content-type"] = "text/html; charset=utf-8"
 
-proc json*(body: string, status = 200): Response =
+proc html*(status: HttpStatus, body: string): Response =
+  ## Creates an HTML response with a named HTTP status first.
+  result = initResponse(status, body)
+  result.headers["content-type"] = "text/html; charset=utf-8"
+
+proc json*(body: string): Response =
   ## Creates a JSON response. ``body`` must already contain valid JSON.
-  result = initResponse(body, status)
+  result = initResponse(body)
   result.headers["content-type"] = "application/json; charset=utf-8"
 
-proc json*(body: JsonNode, status = 200): Response =
+proc json*(body: JsonNode): Response =
   ## Creates a JSON response from a value built with ``%*``.
-  json($body, status)
+  json($body)
 
-proc json*[T](body: T, status = 200): Response =
+proc json*(status: HttpStatus, body: JsonNode): Response =
+  ## Creates a JSON response from a JSON node with status first.
+  result = initResponse(status, $body)
+  result.headers["content-type"] = "application/json; charset=utf-8"
+
+proc json*[T](body: T): Response =
   ## Creates a JSON response from any ``%*``-serializable value.
   ##
   ## ```nim
@@ -179,26 +400,34 @@ proc json*[T](body: T, status = 200): Response =
       var node = newJObject()
       for (key, value) in body:
         node[key] = toJsonValue(value)
-      json(node, status)
+      json(node)
     else:
-      json(toJsonValue(body), status)
+      json(toJsonValue(body))
   else:
-    json(toJsonValue(body), status)
+    json(toJsonValue(body))
 
-proc json*[V](body: Table[string, V], status = 200): Response =
+proc json*[V](body: Table[string, V]): Response =
   ## Creates a JSON object response from a string-keyed table.
   var node = newJObject()
   for key, value in body:
     node[key] = toJsonValue(value)
-  json(node, status)
+  json(node)
 
 proc response*[T](status: int, model: T): Response =
   ## Serializes a typed response model as JSON with ``status``.
-  json(toJsonValue(model), status)
+  result = initResponse(body = $toJsonValue(model))
+  result.status = status
+  result.setHeader("content-type", "application/json; charset=utf-8")
 
 proc response*(status: int, model: JsonNode): Response {.raises: [].} =
   ## Creates a JSON response from an already-encoded JSON value.
-  json(model, status)
+  result = initResponse(body = $model)
+  result.status = status
+  result.setHeader("content-type", "application/json; charset=utf-8")
+
+proc response*[T](status: HttpStatus, model: T): Response =
+  ## Serializes a typed response model using a named HTTP status.
+  json(status, toJsonValue(model))
 
 proc respondOk*[T](model: T): Response =
   ## Creates a 200 response from a typed JSON model.
@@ -229,7 +458,7 @@ macro noContent*(value: untyped): untyped =
   if not (value.kind == nnkIdent and eqIdent(value, "void")):
     error("noContent expects `void`", value)
   quote:
-    initResponse(status = 204)
+    initResponse(statusNoContent)
 
 template checkedResponse*[T](status: static[int], model: typed): Response =
   ## Creates a response only when ``model`` has the route-declared type ``T``.
@@ -252,7 +481,7 @@ proc toResponse*(value: JsonNode): Response {.inline, raises: [].} =
 
 proc notFound*(): Response =
   ## Creates the framework's default 404 response.
-  text("Not Found", 404)
+  text(statusNotFound, "Not Found")
 
 proc isFileResponse*(response: Response): bool {.inline, raises: [].} =
   ## Returns whether the Chronos adapter should stream ``sendFile``

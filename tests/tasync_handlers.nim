@@ -17,18 +17,20 @@ proc outerMiddleware(
 ): Future[Response] {.async: (raises: [CatchableError]).} =
   events[eventCount] = 1
   inc eventCount
-  result = await next(request)
+  let response = await next(request)
   events[eventCount] = 5
   inc eventCount
+  response
 
 proc innerMiddleware(
     request: Request, next: NextHandler
 ): Future[Response] {.async: (raises: [CatchableError]).} =
   events[eventCount] = 2
   inc eventCount
-  result = await next(request)
+  let response = await next(request)
   events[eventCount] = 4
   inc eventCount
+  response
 
 proc syncEndpoint(request: Request): Response {.raises: [].} =
   syncHandlerCalled = true
@@ -62,23 +64,22 @@ block middlewareAwaitsInOrderAndCanShortCircuit:
       text("ordered")
     let response = await app.handle(initRequest(HttpMethod.Get, "/ordered"))
     doAssert response.status == 200
-    doAssert events[0..<eventCount] == [1, 2, 3, 4, 5]
-
-    var reachedHandler = false
-    let shortCircuit = initFastNim(logs = false)
-    shortCircuit.use(proc(
-        request: Request, next: NextHandler
-    ): Future[Response] {.async: (raises: [CatchableError]).} =
-      return json(%*{"detail": "denied"}, 403)
-    )
-    shortCircuit.get("/private"):
-      reachedHandler = true
-      text("private")
-    let denied = await shortCircuit.handle(initRequest(HttpMethod.Get, "/private"))
-    doAssert denied.status == 403
-    doAssert not reachedHandler
+    doAssert events[0 ..< eventCount] == [1, 2, 3, 4, 5]
 
   waitFor asyncTest()
+
+block middlewareCanShortCircuit:
+  var reachedHandler = false
+  let shortCircuit = initFastNim(logs = false)
+  middleware shortCircuitMiddleware:
+    return json(statusForbidden, %*{"detail": "denied"})
+  shortCircuit.use(shortCircuitMiddleware)
+  shortCircuit.get("/private"):
+    reachedHandler = true
+    text("private")
+  let denied = shortCircuit.handleSync(initRequest(HttpMethod.Get, "/private"))
+  doAssert denied.status == 403
+  doAssert not reachedHandler
 
 block synchronousHandlerUsesRegistrationAdapter:
   proc asyncTest() {.async.} =

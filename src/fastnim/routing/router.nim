@@ -10,6 +10,7 @@ import fastnim/context/http
 import fastnim/context/state
 import fastnim/logging
 import fastnim/openapi/spec
+import fastnim/params/multipart
 import fastnim/websocket
 
 type
@@ -485,9 +486,12 @@ proc errorResponse*(app: Application, request: Request, status: int): Response =
   of 404:
     notFound()
   of 500:
-    json(%*{"detail": "Internal Server Error"}, 500)
+    json(statusInternalServerError, %*{"detail": "Internal Server Error"})
   else:
-    text("HTTP Error " & $status, status)
+    block:
+      var response = initResponse("HTTP Error " & $status)
+      response.status = status
+      response
 
 proc use*(
     app: Application,
@@ -746,6 +750,8 @@ macro websocket*(app: Application | Router, path: typed, body: untyped): untyped
         `boundBody`,
     )
 
+proc responseAliasCode(name: string): int {.compileTime.}
+
 proc rewriteResponseReturns(node: NimNode): NimNode =
   if node.kind == nnkReturnStmt and node.len == 1 and node[0].kind == nnkTupleConstr:
     let values = node[0]
@@ -753,22 +759,8 @@ proc rewriteResponseReturns(node: NimNode): NimNode =
       error("response returns must use `return status, body`", values)
 
     let status =
-      if values[0].kind == nnkIdent:
-        case $values[0]
-        of "ok":
-          newLit(200)
-        of "created":
-          newLit(201)
-        of "badRequest":
-          newLit(400)
-        of "notFound":
-          newLit(404)
-        of "conflict":
-          newLit(409)
-        of "unprocessableEntity":
-          newLit(422)
-        else:
-          values[0]
+      if values[0].kind == nnkIdent and responseAliasCode($values[0]) >= 0:
+        newLit(responseAliasCode($values[0]))
       else:
         values[0]
     return newTree(
@@ -780,24 +772,74 @@ proc rewriteResponseReturns(node: NimNode): NimNode =
   for child in node:
     result.add(rewriteResponseReturns(child))
 
+proc responseAliasCode(name: string): int {.compileTime.} =
+  case name
+  of "ok": 200
+  of "switchingProtocols": 101
+  of "processing": 102
+  of "earlyHints": 103
+  of "created": 201
+  of "accepted": 202
+  of "nonAuthoritativeInformation": 203
+  of "resetContent": 205
+  of "partialContent": 206
+  of "multiStatus": 207
+  of "alreadyReported": 208
+  of "imUsed": 226
+  of "multipleChoices": 300
+  of "movedPermanently": 301
+  of "found": 302
+  of "seeOther": 303
+  of "notModified": 304
+  of "temporaryRedirect": 307
+  of "permanentRedirect": 308
+  of "badRequest": 400
+  of "unauthorized": 401
+  of "paymentRequired": 402
+  of "forbidden": 403
+  of "notFound": 404
+  of "methodNotAllowed": 405
+  of "notAcceptable": 406
+  of "proxyAuthenticationRequired": 407
+  of "requestTimeout": 408
+  of "conflict": 409
+  of "gone": 410
+  of "lengthRequired": 411
+  of "preconditionFailed": 412
+  of "contentTooLarge": 413
+  of "uriTooLong": 414
+  of "unsupportedMediaType": 415
+  of "rangeNotSatisfiable": 416
+  of "expectationFailed": 417
+  of "imATeapot": 418
+  of "misdirectedRequest": 421
+  of "unprocessableContent", "unprocessableEntity": 422
+  of "locked": 423
+  of "failedDependency": 424
+  of "tooEarly": 425
+  of "upgradeRequired": 426
+  of "preconditionRequired": 428
+  of "tooManyRequests": 429
+  of "requestHeaderFieldsTooLarge": 431
+  of "unavailableForLegalReasons": 451
+  of "internalServerError": 500
+  of "notImplemented": 501
+  of "badGateway": 502
+  of "serviceUnavailable": 503
+  of "gatewayTimeout": 504
+  of "httpVersionNotSupported": 505
+  of "variantAlsoNegotiates": 506
+  of "insufficientStorage": 507
+  of "loopDetected": 508
+  of "notExtended": 510
+  of "networkAuthenticationRequired": 511
+  else: -1
+
 proc responseStatus(node: NimNode): NimNode =
   if node.kind != nnkIdent:
     return node
-  case $node
-  of "ok":
-    newLit(200)
-  of "created":
-    newLit(201)
-  of "badRequest":
-    newLit(400)
-  of "notFound":
-    newLit(404)
-  of "conflict":
-    newLit(409)
-  of "unprocessableEntity":
-    newLit(422)
-  else:
-    node
+  let code = responseAliasCode($node)
+  if code < 0: node else: newLit(code)
 
 proc responseTuple(node: NimNode): NimNode =
   if node.kind == nnkTupleConstr:
@@ -937,17 +979,9 @@ proc buildTypedRoute(
         if values[0].kind in {nnkIntLit .. nnkInt64Lit}:
           values[0].intVal.int
         elif values[0].kind == nnkIdent:
-          case $values[0]
-          of "ok": 200
-          of "created": 201
-          of "badRequest": 400
-          of "notFound": 404
-          of "conflict": 409
-          of "unprocessableEntity": 422
-          of "noContent": 204
-          else: -1
-        else:
-          -1
+          if eqIdent(values[0], "noContent"): 204
+          else: responseAliasCode($values[0])
+        else: -1
       if status < 0:
         error("response returns need a literal status or status alias", values[0])
       if status notin models:
@@ -959,15 +993,7 @@ proc buildTypedRoute(
 
     if node.kind in {nnkCall, nnkCommand} and node.len >= 2 and node[0].kind == nnkIdent:
       let name = $node[0]
-      let status =
-        case name
-        of "ok": 200
-        of "created": 201
-        of "badRequest": 400
-        of "notFound": 404
-        of "conflict": 409
-        of "unprocessableEntity": 422
-        else: -1
+      let status = if name == "noContent": 204 else: responseAliasCode(name)
       if status >= 0:
         if node.len != 2:
           error(name & " expects exactly one response model", node)
@@ -1029,8 +1055,8 @@ proc buildTypedRoute(
         ): Future[Response] {.async: (raises: [CatchableError]).} =
           var `parsedBody`: `bodyType`
           if not `parser`(`request`, `parsedBody`):
-            return json("{\"detail\":\"" & `invalidInputMessage` & "\"}", 400)
-          {.gcsafe.}:
+            return json(statusBadRequest, %*{"detail": `invalidInputMessage`})
+          {.cast(gcsafe).}:
             `boundBody`,
         `documentation`,
       )
@@ -1473,7 +1499,7 @@ proc dispatch(
           document = app.openApiDocument()
         return json(document)
       except CatchableError:
-        return text("Unable to generate OpenAPI document", 500)
+        return text(statusInternalServerError, "Unable to generate OpenAPI document")
     if request.path == app.openApiSettings.docsPath:
       var docs = text(
         swaggerUiHtml(
@@ -1489,9 +1515,9 @@ proc dispatch(
       matchedRequest.pathParams = params
       matchedRequest.context = app.context
       if route.kind == RouteKind.Sse:
-        return text("SSE routes require an HTTP server", 501)
+        return text(statusNotImplemented, "SSE routes require an HTTP server")
       if route.kind == RouteKind.WebSocket:
-        return text("WebSocket routes require an HTTP server", 501)
+        return text(statusNotImplemented, "WebSocket routes require an HTTP server")
       if route.routerMiddleware.len > 0:
         return await runRouteMiddleware(route, 0, matchedRequest)
       return await route.handler(matchedRequest)
@@ -1520,6 +1546,10 @@ proc handle*(
     result = await app.runMiddleware(0, contextualRequest)
   except CancelledError as exc:
     raise exc
+  except MultipartError as exc:
+    result = initResponse($(%*{"detail": exc.msg}))
+    result.status = exc.status
+    result.setHeader("content-type", "application/json; charset=utf-8")
   except CatchableError as exc:
     app.logError("Unhandled request error: " & exc.msg)
     result = app.errorResponse(contextualRequest, 500)

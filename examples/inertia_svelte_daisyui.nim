@@ -235,7 +235,7 @@ app.install:
   )
 
 app.get("/assets/app.js"):
-  var res = initResponse(clientJs, 200)
+  var res = initResponse(clientJs)
   res.setHeader("content-type", "text/javascript; charset=utf-8")
   res.setHeader("cache-control", "no-cache")
   res

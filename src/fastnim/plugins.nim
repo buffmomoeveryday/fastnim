@@ -5,5 +5,6 @@ import fastnim/plugins/openapi
 import fastnim/plugins/inertia
 import fastnim/plugins/datastar
 import fastnim/plugins/auth
+import fastnim/plugins/s3
 
-export inertia, ratelimit, openapi, datastar, auth
+export inertia, ratelimit, openapi, datastar, auth, s3

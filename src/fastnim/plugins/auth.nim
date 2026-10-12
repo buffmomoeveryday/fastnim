@@ -227,6 +227,7 @@ proc unauthorized*(
 ): Response =
   ## Creates a 401 JSON response with the scheme challenge when applicable.
   result = json(
+    statusUnauthorized,
     %*{
       "detail":
         if missing:
@@ -234,7 +235,6 @@ proc unauthorized*(
         else:
           "invalid credentials"
     },
-    401,
   )
   let challenge = wwwAuthenticate(options)
   if challenge.len > 0:

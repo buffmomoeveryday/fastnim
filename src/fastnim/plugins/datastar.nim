@@ -307,12 +307,16 @@ proc datastarScriptTag*(cdnUrl = DatastarCdnUrl): string =
     raise newException(ValueError, "Datastar CDN URL cannot be empty")
   "<script type=\"module\" src=\"" & escapeAttribute(cdnUrl) & "\"></script>"
 
-proc datastarStream*(events: openArray[DatastarEvent], status = 200): Response =
+proc datastarStream*(events: openArray[DatastarEvent]): Response =
   ## Creates a finite ``text/event-stream`` response from Datastar events.
   ##
   ## Useful for non-streaming handlers and tests; streaming handlers should
   ## use ``app.sse`` with ``await send(...)`` instead.
-  eventStream(toSseEvents(events), status)
+  eventStream(toSseEvents(events))
+
+proc datastarStream*(status: HttpStatus, events: openArray[DatastarEvent]): Response =
+  ## Creates a finite Datastar event stream with a named status first.
+  eventStream(status, toSseEvents(events))
 
 proc sendTo*(
     event: DatastarEvent, sender: SseSend

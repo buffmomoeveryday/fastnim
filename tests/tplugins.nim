@@ -50,23 +50,16 @@ block configuresOpenApiAsPlugin:
 block ordersMiddlewareByPhaseAndPriority:
   let app = initFastNim(logs = false)
   var order: seq[string] = @[]
-  app.use(
-    proc(
-        request: Request, next: NextHandler
-    ): Future[Response] {.async: (raises: [CatchableError]).} =
-      {.gcsafe.}:
-        order.add("default")
-      return await next(request)
-  )
-  app.use(
-    proc(
-        request: Request, next: NextHandler
-    ): Future[Response] {.async: (raises: [CatchableError]).} =
-      {.gcsafe.}:
+  middleware defaultOrderMiddleware:
+    {.cast(gcsafe).}:
+      order.add("default")
+    await next(request)
+  middleware firstOrderMiddleware:
+      {.cast(gcsafe).}:
         order.add("first")
-      return await next(request),
-    priority = -10,
-  )
+      await next(request)
+  app.use(defaultOrderMiddleware)
+  app.use(firstOrderMiddleware, priority = -10)
   app.get("/"):
     text("ok")
   discard app.handleSync(initRequest(HttpMethod.Get, "/"))

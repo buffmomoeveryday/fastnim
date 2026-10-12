@@ -69,14 +69,16 @@ proc inertia*(component: string, props = newJObject(), status = 200): Response =
     raise newException(ValueError, "Inertia component cannot be empty")
   if props.kind != JObject:
     raise newException(ValueError, "Inertia props must be a JSON object")
-  result = json(%*{"component": component, "props": props}, status)
+  result = initResponse($(%*{"component": component, "props": props}))
+  result.status = status
+  result.setHeader("content-type", "application/json; charset=utf-8")
   result.setHeader("x-fastnim-inertia-page", "true")
 
 proc inertiaLocation*(url: string): Response =
   ## Creates a response that makes the Inertia client perform a full-page visit.
   if url.len == 0:
     raise newException(ValueError, "Inertia location cannot be empty")
-  result = initResponse(status = 409)
+  result = initResponse(statusConflict)
   result.setHeader(InertiaLocationHeader, url)
 
 proc requestUrl(request: Request): string =

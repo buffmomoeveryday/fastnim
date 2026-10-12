@@ -75,7 +75,7 @@ block methodAndMissingRoute:
   app.post(
     "/items",
     proc(request: Request): Response {.raises: [].} =
-      text("created", 201),
+      text(statusCreated, "created"),
   )
   doAssert app.handleSync(initRequest(HttpMethod.Get, "/items")).status == 404
   doAssert app.handleSync(initRequest(HttpMethod.Post, "/missing")).status == 404
@@ -129,14 +129,14 @@ block namedTypedPostBody:
 
 block customNotFoundHandler:
   let app = initFastNim()
-  app.onError(404, proc(request: Request): Response = text("Route not found: " & request.path, 404))
+  app.onError(404, proc(request: Request): Response = text(statusNotFound, "Route not found: " & request.path))
   let response = app.handleSync(initRequest(HttpMethod.Get, "/missing"))
   doAssert response.status == 404
   doAssert response.body == "Route not found: /missing"
 
 block customInternalServerErrorHandler:
   let app = initFastNim()
-  app.errorHandlers[500] = proc(request: Request): Response = text("Oops", 500)
+  app.errorHandlers[500] = proc(request: Request): Response = text(statusInternalServerError, "Oops")
   app.get("/fail", proc(request: Request): Response =
     raise newException(ValueError, "test error")
   )

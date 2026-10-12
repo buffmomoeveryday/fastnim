@@ -13,13 +13,12 @@ type
     id: int
     name: string
 
-proc requireAuth(
-    request: Request, next: NextHandler
-): Future[Response] {.async: (raises: [CatchableError]).} =
+middleware requireAuth:
   if request.header("authorization") == "":
-    return json("""{"detail":"missing credentials"}""", 401)
-  return await next(request)
+    return json(statusUnauthorized, %*{"detail": "missing credentials"})
+  await next(request)
 
+# user
 let userRouter = initRouter(prefix = "/users", tags = @["users"])
 
 userRouter.get("/{id}"):
@@ -28,6 +27,7 @@ userRouter.get("/{id}"):
 userRouter.post("/", body = CreateUser, responses = @[(201, User)]):
   created User(id: 1, name: body.name)
 
+# admin
 let adminRouter = initRouter(prefix = "/admin", tags = @["admin"])
 adminRouter.use(requireAuth)
 

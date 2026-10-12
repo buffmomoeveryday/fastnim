@@ -1,4 +1,4 @@
-import std/[assertions, tables]
+import std/[assertions, json, tables]
 
 import fastnim
 
@@ -6,33 +6,34 @@ var steps {.global.}: array[5, int]
 var stepCount {.global.}: int
 var endpointCalled {.global.}: bool
 
+middleware requireAuth:
+  if request.header("authorization") == "":
+    return json(statusUnauthorized, %*{"detail": "missing credentials"})
+  await next(request)
+
 proc record(step: int) {.gcsafe, raises: [].} =
   steps[stepCount] = step
   stepCount.inc
 
-proc firstMiddleware(
-    request: Request, next: NextHandler
-): Future[Response] {.async: (raises: [CatchableError]).} =
+middleware firstMiddleware:
   record(1)
-  result = await next(request)
+  var response = await next(request)
   record(4)
-  result.setHeader("x-first", "true")
+  response.setHeader("x-first", "true")
+  response
 
-proc secondMiddleware(
-    request: Request, next: NextHandler
-): Future[Response] {.async: (raises: [CatchableError]).} =
+middleware secondMiddleware:
   record(2)
-  result = await next(request)
+  let response = await next(request)
   record(3)
+  response
 
 proc endpoint(request: Request): Response {.gcsafe, raises: [].} =
   record(5)
   text("ok")
 
-proc denyMiddleware(
-    request: Request, next: NextHandler
-): Future[Response] {.async: (raises: [CatchableError]).} =
-  return text("denied", 403)
+middleware denyMiddleware:
+  return text(statusForbidden, "denied")
 
 block wrapsRoutesInRegistrationOrder:
   stepCount = 0
@@ -49,20 +50,16 @@ block wrapsRoutesInRegistrationOrder:
 block registersMiddlewareWithCommandSyntax:
   stepCount = 0
   let app = initFastNim(logs = false)
-  app.use:
-    proc(request: Request, next: NextHandler): Future[Response] {.
-        async: (raises: [CatchableError])
-    .} =
-      var response = await next(request)
-      response.setHeader("x-command-style", "use")
-      response
-  app.middlewares:
-    proc(request: Request, next: NextHandler): Future[Response] {.
-        async: (raises: [CatchableError])
-    .} =
-      var response = await next(request)
-      response.setHeader("x-command-style-plural", "true")
-      response
+  middleware commandStyleMiddleware:
+    var response = await next(request)
+    response.setHeader("x-command-style", "use")
+    response
+  middleware pluralCommandStyleMiddleware:
+    var response = await next(request)
+    response.setHeader("x-command-style-plural", "true")
+    response
+  app.use(commandStyleMiddleware)
+  app.middlewares(pluralCommandStyleMiddleware)
   app.get("/", endpoint)
 
   let response = app.handleSync(initRequest(HttpMethod.Get, "/"))
@@ -84,3 +81,19 @@ block canShortCircuitRoutes:
   doAssert response.status == 403
   doAssert response.body == "denied"
   doAssert not endpointCalled
+
+block declaresMiddlewareWithImplicitRequestAndNext:
+  let app = initFastNim(logs = false)
+  app.use(requireAuth)
+  app.get("/private"):
+    json(%*{"authorized": true})
+
+  let denied = app.handleSync(initRequest(HttpMethod.Get, "/private"))
+  doAssert denied.status == 401
+  doAssert denied.body == """{"detail":"missing credentials"}"""
+
+  var request = initRequest(HttpMethod.Get, "/private")
+  request.headers["authorization"] = "Bearer test"
+  let allowed = app.handleSync(request)
+  doAssert allowed.status == 200
+  doAssert allowed.body == """{"authorized":true}"""

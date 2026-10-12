@@ -13,7 +13,7 @@ block htmlHelper:
 block htmlCustomStatus:
   let app = initFastNim(logs = false)
   app.get("/missing-page"):
-    html("<h1>gone</h1>", 404)
+    html(statusNotFound, "<h1>gone</h1>")
 
   let response = app.handleSync(initRequest(HttpMethod.Get, "/missing-page"))
   doAssert response.status == 404

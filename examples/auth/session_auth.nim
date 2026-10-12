@@ -43,11 +43,11 @@ app.get("/health"):
 app.post("/login"):
   var credentials: LoginBody
   if not parseJsonBody(request, credentials):
-    return json(%*{"detail": "invalid JSON request body"}, 400)
+    return json(statusBadRequest, %*{"detail": "invalid JSON request body"})
   if not secureCompare(
       DemoUsers.getOrDefault(credentials.username, ""), credentials.password
   ):
-    return json(%*{"detail": "invalid credentials"}, 401)
+    return json(statusUnauthorized, %*{"detail": "invalid credentials"})
   var response = json(%*{"ok": true})
   discard await loginSession(store, response, credentials.username)
   response

@@ -92,7 +92,7 @@ block convertsPostRedirectToSeeOther:
   let app = initFastNim(logs = false)
   app.install(inertiaPlugin())
   app.post("/users"):
-    var response = initResponse(status = 302)
+    var response = initResponse(statusFound)
     response.setHeader("location", "/users")
     response
   let response = app.handleSync(initRequest(HttpMethod.Post, "/users", inertiaHeaders()))

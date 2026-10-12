@@ -2,6 +2,10 @@ import std/[assertions, json]
 
 import fastnim
 
+static:
+  doAssert not compiles(json(statusUnauthorized, "not a JSON node"))
+  doAssert not compiles(response(statusOk, %*{"detail": "bad"}))
+
 type
   Success = object
     id: int
@@ -36,6 +40,38 @@ block declaredSuccessResponse:
   let response = app.handleSync(initRequest(HttpMethod.Get, "/items"))
   doAssert response.status == 200
   doAssert response.body == "{\"id\":1}"
+
+block namedHttpStatusCodes:
+  doAssert statusCode(statusCreated) == 201
+  doAssert statusCode(statusBadRequest) == 400
+  doAssert statusCode(statusUnauthorized) == 401
+  doAssert statusCode(statusForbidden) == 403
+  doAssert statusCode(statusNotFound) == 404
+  doAssert statusCode(statusInternalServerError) == 500
+  let response = badRequest %*{"detail": "invalid"}
+  doAssert response.status == 400
+  doAssert response.body == """{"detail":"invalid"}"""
+
+block statusHelpersOutsideTypedRoutes:
+  let denied = unauthorized %*{"detail": "missing credentials"}
+  let unavailable = serviceUnavailable %*{"detail": "try again"}
+  let helper = initFastNim(logs = false)
+  helper.get("/hello"):
+    ok %*{"message": "hello"}
+  let hello = helper.handleSync(initRequest(HttpMethod.Get, "/hello"))
+  doAssert denied.status == 401
+  doAssert denied.headers["content-type"] == "application/json; charset=utf-8"
+  doAssert unavailable.status == 503
+  doAssert hello.status == 200
+  doAssert hello.body == """{"message":"hello"}"""
+
+block typedRouteStatusHelpers:
+  let helper = initFastNim(logs = false)
+  helper.get("/denied", responses = @[(401, Failure)]):
+    unauthorized Failure(detail: "missing credentials")
+  let denied = helper.handleSync(initRequest(HttpMethod.Get, "/denied"))
+  doAssert denied.status == 401
+  doAssert denied.body == """{"detail":"missing credentials"}"""
 
 block returnedSuccessResponse:
   let response = app.handleSync(initRequest(HttpMethod.Get, "/items/return"))
@@ -130,7 +166,7 @@ block jsonHelperInTypedRoute:
 block jsonHelperCustomStatus:
   let helper = initFastNim(logs = false)
   helper.get("/created"):
-    json(Member(name: "Ada", age: 36), 201)
+    json(statusCreated, %*{"name": "Ada", "age": 36})
 
   let response = helper.handleSync(initRequest(HttpMethod.Get, "/created"))
   doAssert response.status == 201

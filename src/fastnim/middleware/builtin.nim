@@ -85,8 +85,8 @@ proc cors*(options = initCorsOptions()): Middleware =
     let requestedMethod = request.header("access-control-request-method")
     if request.method == HttpMethod.Options and requestedMethod.len > 0:
       if not options.allowsMethod(requestedMethod):
-        return text("CORS method not allowed", 403)
-      result = initResponse(status = 204)
+        return text(statusForbidden, "CORS method not allowed")
+      result = initResponse(statusNoContent)
       result.applyCors(options, origin)
       result.setHeader(
         "access-control-allow-methods",
