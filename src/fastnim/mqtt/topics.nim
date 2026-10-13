@@ -30,6 +30,18 @@ proc validateMqttPattern*(pattern: string) =
     elif ('#' in segment or '+' in segment) and segment != "+":
       raise newException(ValueError, "MQTT wildcards must occupy a whole segment")
 
+proc validateMqttTopicFilter*(filter: string) =
+  ## Validates a protocol-level MQTT subscription filter.
+  if filter.len == 0:
+    raise newException(ValueError, "MQTT topic filter cannot be empty")
+  let segments = filter.split('/')
+  for index, segment in segments:
+    if segment == "#":
+      if index != segments.high:
+        raise newException(ValueError, "MQTT # wildcard must be last")
+    elif ('#' in segment or '+' in segment) and segment != "+":
+      raise newException(ValueError, "MQTT wildcards must occupy a whole level")
+
 proc matchMqttTopic*(
     pattern, topic: string, params: var Table[string, string]
 ): bool =
@@ -57,3 +69,13 @@ proc matchMqttTopic*(
     if patternIndex == patternSegments.high:
       return topicIndex == topicSegments.len
   topicIndex == topicSegments.len
+
+proc matchMqttTopicFilter*(filter, topic: string): bool =
+  ## Reports whether an MQTT subscription filter matches a topic name.
+  ##
+  ## A leading wildcard does not match the reserved ``$`` topic namespace.
+  if topic.len > 0 and topic[0] == '$' and filter.len > 0 and
+      filter[0] in {'+', '#'}:
+    return false
+  var params = initTable[string, string]()
+  matchMqttTopic(filter, topic, params)

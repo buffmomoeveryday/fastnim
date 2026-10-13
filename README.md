@@ -710,10 +710,11 @@ let server = app.serveMqtt()
 waitFor server.join()
 ```
 
-The initial broker transport supports MQTT 3.1, 3.1.1, and 5.0 over TCP with
-CONNECT, QoS 0/1 PUBLISH, PING, and DISCONNECT. Named route parameters match
-one topic level. Native `+` and terminal `#` filters are also accepted. QoS 2,
-subscriptions, retained messages, persistent sessions, TLS, and MQTT over
+The broker transport supports MQTT 3.1, 3.1.1, and 5.0 over TCP with CONNECT,
+QoS 0/1 inbound PUBLISH, SUBSCRIBE, UNSUBSCRIBE, retained messages, PING, and
+DISCONNECT. Named route parameters match one topic level. Native `+` and
+terminal `#` filters are also accepted. Subscription delivery currently grants
+QoS 0. QoS 2, outbound QoS 1 state, persistent sessions, TLS, and MQTT over
 WebSocket require later protocol phases.
 
 Run [`examples/mqtt.nim`](examples/mqtt.nim) with

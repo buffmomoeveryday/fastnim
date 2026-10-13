@@ -1,14 +1,15 @@
 ## MQTT broker plugin and ``app.mqtt`` route DSL.
 ##
 ## The current transport supports MQTT 3.1, 3.1.1, and 5.0 CONNECT,
-## QoS 0/1 PUBLISH, PING, and DISCONNECT over plain TCP.
+## QoS 0/1 PUBLISH, subscriptions, retained messages, PING, and DISCONNECT
+## over plain TCP.
 
 import std/[macros, tables]
 
 import chronos
 
 import fastnim/[context/state, plugin, routing/router]
-import fastnim/mqtt/[codec, topics, types]
+import fastnim/mqtt/[broker, codec, topics, types]
 
 export codec, types
 
@@ -33,9 +34,16 @@ type
   MqttRuntime = ref object
     options: MqttOptions
     routes: seq[MqttRoute]
+    broker: MqttBroker
 
   MqttConnectionState = ref object
-    connection: MqttConnection
+    peer: MqttPeer
+
+  MqttSubscriptionRequest = object
+    filter: string
+    noLocal: bool
+    retainAsPublished: bool
+    retainHandling: int
 
   PacketCursor = object
     data: seq[byte]
@@ -67,7 +75,9 @@ proc mqttPlugin*(options = initMqttOptions()): Plugin =
     MqttPluginName,
     "0.1.0",
     proc(app: Application) =
-      let runtime = MqttRuntime(options: options, routes: @[])
+      let runtime = MqttRuntime(
+        options: options, routes: @[], broker: newMqttBroker()
+      )
       app.pluginContext(MqttPluginName).setContext(MqttRuntimeKey, runtime),
   )
 
@@ -295,40 +305,157 @@ proc publishAck(
     return @[0x40'u8, 0x04, highByte, lowByte, byte(decision.reason), 0x00]
   @[]
 
+proc requireTopicFilter(filter: string) =
+  try:
+    validateMqttTopicFilter(filter)
+  except ValueError as exc:
+    raise newException(MqttProtocolError, exc.msg)
+
+proc parseSubscribe(
+    packet: MqttPacket, version: MqttVersion
+): tuple[packetId: uint16, subscriptions: seq[MqttSubscriptionRequest]] =
+  if packet.fixedHeader != 0x82:
+    raise newException(MqttProtocolError, "malformed MQTT SUBSCRIBE flags")
+  var cursor = PacketCursor(data: packet.body)
+  result.packetId = cursor.readUint16()
+  if result.packetId == 0:
+    raise newException(MqttProtocolError, "MQTT packet identifier cannot be zero")
+  if version == MqttVersion.V5:
+    cursor.skipProperties()
+  while cursor.position < cursor.data.len:
+    let filter = cursor.readUtf8()
+    requireTopicFilter(filter)
+    let options = int(cursor.readByte())
+    let requestedQos = options and 0x03
+    if requestedQos == 3:
+      raise newException(MqttProtocolError, "invalid MQTT subscription QoS")
+    if version == MqttVersion.V5:
+      if (options and 0xC0) != 0 or ((options shr 4) and 0x03) == 3:
+        raise newException(MqttProtocolError, "invalid MQTT subscription options")
+    elif (options and 0xFC) != 0:
+      raise newException(MqttProtocolError, "invalid MQTT subscription options")
+    result.subscriptions.add(MqttSubscriptionRequest(
+      filter: filter,
+      noLocal: version == MqttVersion.V5 and (options and 0x04) != 0,
+      retainAsPublished: version == MqttVersion.V5 and (options and 0x08) != 0,
+      retainHandling: if version == MqttVersion.V5: (options shr 4) and 0x03 else: 0,
+    ))
+  if result.subscriptions.len == 0:
+    raise newException(MqttProtocolError, "MQTT SUBSCRIBE payload cannot be empty")
+
+proc addRemainingLength(packet: var seq[byte], length: int) =
+  try:
+    packet.add(encodeRemainingLength(length))
+  except ValueError:
+    raiseAssert "validated MQTT packet exceeded the protocol packet limit"
+
+proc subscribeAck(
+    packetId: uint16, count: int, version: MqttVersion
+): seq[byte] =
+  var body = @[byte(packetId shr 8), byte(packetId and 0xFF)]
+  if version == MqttVersion.V5:
+    body.add(0'u8)
+  for _ in 0..<count:
+    body.add(0'u8)
+  result = @[0x90'u8]
+  result.addRemainingLength(body.len)
+  result.add(body)
+
+proc parseUnsubscribe(
+    packet: MqttPacket, version: MqttVersion
+): tuple[packetId: uint16, filters: seq[string]] =
+  if packet.fixedHeader != 0xA2:
+    raise newException(MqttProtocolError, "malformed MQTT UNSUBSCRIBE flags")
+  var cursor = PacketCursor(data: packet.body)
+  result.packetId = cursor.readUint16()
+  if result.packetId == 0:
+    raise newException(MqttProtocolError, "MQTT packet identifier cannot be zero")
+  if version == MqttVersion.V5:
+    cursor.skipProperties()
+  while cursor.position < cursor.data.len:
+    let filter = cursor.readUtf8()
+    requireTopicFilter(filter)
+    result.filters.add(filter)
+  if result.filters.len == 0:
+    raise newException(MqttProtocolError, "MQTT UNSUBSCRIBE payload cannot be empty")
+
+proc unsubscribeAck(
+    packetId: uint16, removed: openArray[bool], version: MqttVersion
+): seq[byte] =
+  var body = @[byte(packetId shr 8), byte(packetId and 0xFF)]
+  if version == MqttVersion.V5:
+    body.add(0'u8)
+    for existed in removed:
+      body.add(if existed: 0x00'u8 else: 0x11'u8)
+  result = @[0xB0'u8]
+  result.addRemainingLength(body.len)
+  result.add(body)
+
 proc processPacket(
     app: Application,
-    client: StreamTransport,
     packet: MqttPacket,
     state: MqttConnectionState,
-    options: MqttOptions,
+    runtime: MqttRuntime,
 ): Future[bool] {.
     async: (raises: [CancelledError, TransportError, MqttProtocolError])
 .} =
   let packetType = int(packet.fixedHeader shr 4)
-  if state.connection.isNil:
-    state.connection = parseConnect(packet, options)
-    discard await client.write(connAck(state.connection.version))
+  if state.peer.connection.isNil:
+    state.peer.connection = parseConnect(packet, runtime.options)
+    runtime.broker.add(state.peer)
+    await state.peer.writePacket(connAck(state.peer.connection.version))
     return true
 
   case packetType
   of 3:
-    let message = parsePublish(packet, state.connection.version)
+    let message = parsePublish(packet, state.peer.connection.version)
     var decision: MqttDecision
     try:
-      decision = await app.handleMqtt(message, state.connection)
+      decision = await app.handleMqtt(message, state.peer.connection)
     except CatchableError as exc:
       app.logError("Unhandled MQTT handler error: " & exc.msg)
       decision = mqttReject(MqttReasonCode.ImplementationSpecificError)
-    let acknowledgment = publishAck(message, state.connection, decision)
+    if decision.kind == MqttDecisionKind.Accepted:
+      runtime.broker.updateRetained(message)
+      await runtime.broker.publishToSubscribers(state.peer, message)
+    let acknowledgment = publishAck(message, state.peer.connection, decision)
     if acknowledgment.len > 0:
-      discard await client.write(acknowledgment)
+      await state.peer.writePacket(acknowledgment)
     result = decision.kind == MqttDecisionKind.Accepted or
-      (state.connection.version == MqttVersion.V5 and
+      (state.peer.connection.version == MqttVersion.V5 and
         message.qos != MqttQoS.AtMostOnce)
+  of 8:
+    let parsed = parseSubscribe(packet, state.peer.connection.version)
+    var newlyAdded: seq[bool]
+    for subscription in parsed.subscriptions:
+      newlyAdded.add(state.peer.subscribe(
+        subscription.filter,
+        subscription.noLocal,
+        subscription.retainAsPublished,
+      ))
+    await state.peer.writePacket(
+      subscribeAck(
+        parsed.packetId, parsed.subscriptions.len, state.peer.connection.version
+      )
+    )
+    for index, subscription in parsed.subscriptions:
+      if subscription.retainHandling == 0 or
+          (subscription.retainHandling == 1 and newlyAdded[index]):
+        await runtime.broker.sendRetained(state.peer, subscription.filter)
+    result = true
+  of 10:
+    let parsed = parseUnsubscribe(packet, state.peer.connection.version)
+    var removed: seq[bool]
+    for filter in parsed.filters:
+      removed.add(state.peer.unsubscribe(filter))
+    await state.peer.writePacket(
+      unsubscribeAck(parsed.packetId, removed, state.peer.connection.version)
+    )
+    result = true
   of 12:
     if packet.fixedHeader != 0xC0 or packet.body.len != 0:
       raise newException(MqttProtocolError, "malformed MQTT PINGREQ")
-    discard await client.write(@[0xD0'u8, 0x00])
+    await state.peer.writePacket(@[0xD0'u8, 0x00])
     result = true
   of 14:
     if packet.fixedHeader != 0xE0:
@@ -349,7 +476,7 @@ proc serveMqtt*(
       server: StreamServer, client: StreamTransport
   ) {.async: (raises: []).} =
     discard server
-    let state = MqttConnectionState()
+    let state = MqttConnectionState(peer: newMqttPeer(client))
     try:
       var decoder = initMqttDecoder(runtime.options.maxPacketSize)
       var reading = true
@@ -360,9 +487,7 @@ proc serveMqtt*(
           break
         chunk.setLen(count)
         for packet in decoder.feed(chunk):
-          reading = await processPacket(
-            app, client, packet, state, runtime.options
-          )
+          reading = await processPacket(app, packet, state, runtime)
           if not reading:
             break
     except CancelledError:
@@ -370,6 +495,7 @@ proc serveMqtt*(
     except CatchableError as exc:
       app.logError("MQTT connection closed: " & exc.msg)
     finally:
+      runtime.broker.remove(state.peer)
       await client.closeWait()
 
   let stream = createStreamServer(

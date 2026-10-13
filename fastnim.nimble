@@ -51,6 +51,7 @@ task docs, "Generate HTML API documentation with nim doc":
     "src/fastnim/mqtt/types.nim",
     "src/fastnim/mqtt/codec.nim",
     "src/fastnim/mqtt/topics.nim",
+    "src/fastnim/mqtt/broker.nim",
     "src/fastnim/websocket.nim",
     "src/fastnim/logging.nim",
   ]:

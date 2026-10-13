@@ -118,6 +118,75 @@ proc mqttV5RejectionClient() {.async.} =
   finally:
     await client.closeWait()
 
+proc connectMqtt311(clientId: string): Future[StreamTransport] {.async.} =
+  result = await connect(initTAddress("127.0.0.1", Port(18884)))
+  var packet = packetBytes([
+    0x10, 10 + 2 + clientId.len,
+    0x00, 0x04, 0x4D, 0x51, 0x54, 0x54,
+    0x04, 0x02, 0x00, 0x3C,
+    0x00, clientId.len,
+  ])
+  for value in clientId:
+    packet.add(byte(value))
+  discard await result.write(packet)
+  doAssert (await result.read(4)) == packetBytes([0x20, 0x02, 0x00, 0x00])
+
+proc mqttSubscriptionClients() {.async.} =
+  let subscriber = await connectMqtt311("sub")
+  let publisher = await connectMqtt311("pub")
+  try:
+    discard await publisher.write(packetBytes([
+      0x33, 0x0E,
+      0x00, 0x09, 0x2F, 0x72, 0x65, 0x74, 0x61, 0x69, 0x6E, 0x65, 0x64,
+      0x00, 0x03,
+      0x72,
+    ]))
+    doAssert (await publisher.read(4)) ==
+      packetBytes([0x40, 0x02, 0x00, 0x03])
+
+    discard await subscriber.write(packetBytes([
+      0x82, 0x0E, 0x00, 0x04,
+      0x00, 0x09, 0x2F, 0x72, 0x65, 0x74, 0x61, 0x69, 0x6E, 0x65, 0x64,
+      0x00,
+    ]))
+    doAssert (await subscriber.read(5)) ==
+      packetBytes([0x90, 0x03, 0x00, 0x04, 0x00])
+    doAssert (await subscriber.read(14)) == packetBytes([
+      0x31, 0x0C,
+      0x00, 0x09, 0x2F, 0x72, 0x65, 0x74, 0x61, 0x69, 0x6E, 0x65, 0x64,
+      0x72,
+    ])
+
+    discard await subscriber.write(packetBytes([
+      0x82, 0x0B, 0x00, 0x01,
+      0x00, 0x06, 0x2F, 0x72, 0x6F, 0x75, 0x74, 0x65,
+      0x00,
+    ]))
+    doAssert (await subscriber.read(5)) ==
+      packetBytes([0x90, 0x03, 0x00, 0x01, 0x00])
+
+    let publish = packetBytes([
+      0x30, 0x0A,
+      0x00, 0x06, 0x2F, 0x72, 0x6F, 0x75, 0x74, 0x65,
+      0x6F, 0x6B,
+    ])
+    discard await publisher.write(publish)
+    doAssert (await subscriber.read(publish.len)) == publish
+
+    discard await subscriber.write(packetBytes([
+      0xA2, 0x0A, 0x00, 0x02,
+      0x00, 0x06, 0x2F, 0x72, 0x6F, 0x75, 0x74, 0x65,
+    ]))
+    doAssert (await subscriber.read(4)) ==
+      packetBytes([0xB0, 0x02, 0x00, 0x02])
+
+    discard await publisher.write(publish)
+    discard await subscriber.write(packetBytes([0xC0, 0x00]))
+    doAssert (await subscriber.read(2)) == packetBytes([0xD0, 0x00])
+  finally:
+    await subscriber.closeWait()
+    await publisher.closeWait()
+
 block exchangesMqttPacketsOverTcp:
   let app = initFastNim(logs = false)
   app.install(mqttPlugin(initMqttOptions(port = 18884)))
@@ -131,6 +200,7 @@ block exchangesMqttPacketsOverTcp:
   try:
     waitFor mqttExchangeClient()
     waitFor mqttV5RejectionClient()
+    waitFor mqttSubscriptionClients()
   finally:
     app.stopMqtt(server)
     waitFor server.join()
