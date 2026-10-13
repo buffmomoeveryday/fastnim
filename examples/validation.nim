@@ -7,7 +7,7 @@
 ## - nested object and sequence validation;
 ## - JSON field names in validation locations;
 ## - custom cross-field validation through ``validator = ...``;
-## - explicit query validation; and
+## - typed query parsing and explicit query validation; and
 ## - the same typed-body syntax on POST and PATCH routes.
 ##
 ## A malformed or incorrectly shaped JSON body returns 400. Constraint
@@ -53,9 +53,10 @@
 ## Inspect ``http://127.0.0.1:8000/docs`` for generated constraints and the
 ## automatic 400/422 response schemas.
 
-import strutils
-
 import fastnim
+import options
+
+# Product creation
 
 type
   Contact = object
@@ -81,33 +82,9 @@ type
     price*, salePrice*: float
     quantity*: int
 
-  OrderState {.pure.} = enum
-    pending = "pending"
-    paid = "paid"
-    shipped = "shipped"
-    delivered = "delivered"
-    cancelled = "cancelled"
+let app = initFastNim()
 
-  StatusChange = object
-    fromStatus*: OrderState
-    toStatus*: OrderState
-
-  OrderStatus = object
-    id*: string
-    status*: OrderState
-
-  ProductOut = object
-    page: int
-    limit: int
-    sort: string
-    products: seq[Product]
-
-const AllowedTransitions = transitions(OrderState):
-  OrderState.pending.to OrderState.paid
-  OrderState.paid.to OrderState.shipped
-  OrderState.shipped.to OrderState.delivered
-  OrderState.pending.to OrderState.cancelled
-  OrderState.paid.to OrderState.cancelled
+var productsDb: seq[Product] = @[]
 
 proc validateCreateProduct(value: CreateProduct): ValidationResult =
   ## Adds a cross-field rule to the field constraints run by the route.
@@ -118,30 +95,6 @@ proc validateCreateProduct(value: CreateProduct): ValidationResult =
       "invalid_discount",
       "must be less than or equal to price",
     )
-
-proc validateStatusChange(value: StatusChange): ValidationResult =
-  ## Validates a domain transition that cannot be expressed by field pragmas.
-  result = initValidationResult()
-  result.checkTransition(
-    StatusChange.fieldName(toStatus),
-    value.fromStatus,
-    value.toStatus,
-    AllowedTransitions,
-  )
-
-proc queryInt(
-    request: Request, validation: var ValidationResult, name: string, default: int
-): int =
-  ## Extracts one integer query parameter and records conversion failures.
-  let raw = request.queryParam(name, $default)
-  try:
-    result = raw.parseInt()
-  except ValueError:
-    validation.addError(name, "integer", "must be an integer")
-    result = default
-
-let app = initFastNim()
-var productsDb: seq[Product] = @[]
 
 app.post(
   "/products",
@@ -165,20 +118,67 @@ app.post(
 
   created product
 
-app.get("/products", responses = @[(200, ProductOut)]):
-  var validation = initValidationResult()
+# Product listing
+type SortField = enum
+  name = "name"
+  price = "price"
 
-  let page = request.queryInt(validation, "page", 1)
-  let limit = request.queryInt(validation, "limit", 20)
-  let sort = request.queryParam("sort", "name")
+type ProductQueryParams = object
+  page {.ge: 1.}: int = 1
+  limit {.ge: 1, le: 100.}: int = 20
+  sort: SortField = SortField.name
 
-  validation.mergeErrors(validatePagination(page, limit))
-  validation.checkAllowed("sort", sort, ["name", "price"])
-  if not validation.isValid():
-    return validationResponse(validation, source = "query")
+type ProductOut = object
+  page: int
+  limit: int
+  sort: Option[SortField]
+  products: seq[Product]
 
-  let product = ProductOut(page: page, limit: limit, sort: sort, products: productsDb)
+app.get("/products", responses = @[(200, ProductOut)], queryParams = ProductQueryParams):
+  echo $queryParams.page
+  echo $queryParams.limit
+  echo queryParams.sort
+
+  let product = ProductOut(
+    page: queryParams.page,
+    limit: queryParams.limit,
+    sort: some(queryParams.sort),
+    products: productsDb,
+  )
   ok product
+
+# Order status changes
+type OrderState {.pure.} = enum
+  pending = "pending"
+  paid = "paid"
+  shipped = "shipped"
+  delivered = "delivered"
+  cancelled = "cancelled"
+
+type StatusChange = object
+  fromStatus*: OrderState
+  toStatus*: OrderState
+
+type OrderStatus = object
+  id*: string
+  status*: OrderState
+
+const AllowedTransitions = transitions(OrderState):
+  OrderState.pending.to OrderState.paid
+  OrderState.paid.to OrderState.shipped
+  OrderState.shipped.to OrderState.delivered
+  OrderState.pending.to OrderState.cancelled
+  OrderState.paid.to OrderState.cancelled
+
+proc validateStatusChange(value: StatusChange): ValidationResult =
+  ## Validates a domain transition that cannot be expressed by field pragmas.
+  result = initValidationResult()
+  result.checkTransition(
+    StatusChange.fieldName(toStatus),
+    value.fromStatus,
+    value.toStatus,
+    AllowedTransitions,
+  )
 
 app.patch(
   "/orders/{id}",
@@ -192,6 +192,4 @@ app.patch(
 
 when isMainModule:
   let server = app.serve(port = 8000)
-  echo "Listening at http://127.0.0.1:8000"
-  echo "Swagger UI: http://127.0.0.1:8000/docs"
   waitFor server.join()

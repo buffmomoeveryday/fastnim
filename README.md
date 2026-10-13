@@ -56,6 +56,59 @@ registration adapter.
 parser does not recognize the `QUERY` method yet, so serving `QUERY` requests
 requires a Chronos version with `MethodQuery` support.
 
+## Typed query parameters
+
+Declare query parameters as an object and pass its type to the route. FastNim
+parses it before the handler, exposes it as `queryParams`, validates field pragmas,
+and documents each field as an OpenAPI query parameter:
+
+```nim
+import std/options
+
+type
+  SortField = enum
+    name = "name"
+    price = "price"
+
+  ProductQuery = object
+    page {.ge: 1.}: int = 1
+    limit {.ge: 1, le: 100.}: int = 20
+    available: bool = false
+    sort: SortField
+    minPrice {.jsonName: "min_price".}: Option[int]
+    tags {.jsonName: "tag".}: seq[string]
+
+app.get(
+  "/products", queryParams = ProductQuery, responses = @[(200, ProductOut)]
+):
+  ok ProductOut(
+    page: queryParams.page,
+    limit: queryParams.limit,
+    sort: queryParams.sort,
+  )
+```
+
+A scalar field without an initializer is required. An initializer supplies its
+missing-value default. Missing `Option[T]` and `seq[T]` fields become `none(T)`
+and an empty sequence. Use `jsonName` when the query name differs from the Nim
+field name. For cross-field rules, pass `validator = validateProductQuery`; it
+has the same `ValidationResult` contract as typed request-body validators.
+
+The supported scalar types are `string`, `int`, `bool`, and enums. Booleans
+accept `true/false`, `1/0`, `yes/no`, `on/off`, and `y/n` without regard to
+ASCII letter case. Enums match their `$` representation exactly and are
+case-sensitive, so explicitly named enum strings make a stable wire format.
+
+`Option[T]` returns `none(T)` when absent. `seq[T]` consumes repeated names in
+URL order (`?tag=nim&tag=web`); commas are ordinary characters and are not
+split. Scalars retain the existing last-value-wins behavior. Missing required
+scalars and malformed values return structured 400 errors through
+`queryParsingResponse`; successfully parsed values that fail constraints such
+as pagination bounds return 422 through `validationResponse`.
+
+The lower-level `queryParam[T](request, name, parsing)` overloads remain
+available when a handler needs dynamic parameter names or custom control flow.
+
 ## Scaffolding
 
 Install the `fastnim` binary (`nimble install`) and generate a project:

@@ -28,6 +28,7 @@ type
     path*: string ## Route path template with ``{name}`` parameters.
     route*: OpenApiRoute ## Human-facing route documentation.
     responses*: JsonNode ## Status-keyed response objects.
+    parameters*: JsonNode ## Operation parameters, null when the route takes none.
     requestBody*: JsonNode ## Request body object, null when the route takes none.
 
 proc initOpenApiSettings*(
@@ -73,6 +74,7 @@ proc initOpenApiOperation*(
     path: path,
     route: route,
     responses: newJObject(),
+    parameters: newJNull(),
     requestBody: newJNull(),
   )
 
@@ -87,6 +89,31 @@ proc isOptionType(node: NimNode): bool {.compileTime.} =
     if impl.kind == nnkTypeDef:
       return isOptionType(impl[^1])
   false
+
+proc isSequenceType(node: NimNode): bool {.compileTime.} =
+  if node.kind == nnkBracketExpr and node.len == 2 and eqIdent(node[0], "seq"):
+    return true
+  if node.kind == nnkSym:
+    let impl = node.getImpl()
+    if impl.kind == nnkTypeDef:
+      return isSequenceType(impl[^1])
+  false
+
+proc objectType(node: NimNode): NimNode {.compileTime.} =
+  case node.kind
+  of nnkObjectTy:
+    node
+  of nnkBracketExpr:
+    if node.len == 2 and ($node[0] == "typeDesc" or $node[0] == "typedesc"):
+      objectType(node[1])
+    else:
+      newEmptyNode()
+  of nnkSym:
+    objectType(node.getImpl)
+  of nnkTypeDef:
+    objectType(node[^1])
+  else:
+    newEmptyNode()
 
 proc numericLiteral(node: NimNode): JsonNode {.compileTime.} =
   case node.kind
@@ -229,12 +256,40 @@ macro openApiSchema*(model: typedesc): untyped =
   let schema = typeSchema(model.getTypeImpl)
   result = newCall(ident("openApiSchemaJson"), newLit($schema))
 
+macro openApiQueryParameters*(model: typedesc): untyped =
+  ## Produces OpenAPI parameter objects for fields extracted from the query.
+  let implementation = objectType(model.getTypeImpl)
+  if implementation.kind != nnkObjectTy:
+    error("query route models must be object types", model)
+
+  var parameters = newJArray()
+  for field in jsonFields(implementation):
+    var schema = typeSchema(field.fieldType)
+    schema.applyValidationSchema(field.source)
+    if field.fieldType.isOptionType() and schema.kind == JObject:
+      schema.delete("nullable")
+    parameters.add(
+      %*{
+        "name": field.jsonName,
+        "in": "query",
+        "required": field.defaultValue.kind == nnkEmpty and
+          not field.fieldType.isOptionType() and
+          not field.fieldType.isSequenceType(),
+        "schema": schema,
+      }
+    )
+  result = newCall(ident("openApiSchemaJson"), newLit($parameters))
+
 proc openApiSchemaJson*(source: string): JsonNode =
   ## Parses schema JSON emitted by ``openApiSchema`` at compile time.
   parseJson(source)
 
 proc addPathParameters(operation: var JsonNode) =
-  var parameters = newJArray()
+  var parameters =
+    if operation.hasKey("parameters") and operation["parameters"].kind == JArray:
+      operation["parameters"]
+    else:
+      newJArray()
   for segment in operation["x-fastnim-path"].getStr.split('/'):
     if segment.len > 2 and segment[0] == '{' and segment[^1] == '}':
       parameters.add(
@@ -277,6 +332,8 @@ proc openApiDocument*(
       operation["deprecated"] = newJBool(true)
     if registered.requestBody.kind != JNull:
       operation["requestBody"] = registered.requestBody
+    if registered.parameters.kind != JNull:
+      operation["parameters"] = registered.parameters
     operation["responses"] =
       if registered.responses.len > 0:
         registered.responses

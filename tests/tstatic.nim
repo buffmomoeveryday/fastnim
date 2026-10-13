@@ -63,6 +63,11 @@ block indexAndRedirect:
   doAssert redirect.status == 307
   doAssert redirect.headers["location"] == "/static/docs/"
 
+  let repeated = app.handleSync(
+    initRequest(HttpMethod.Get, "/static/docs?tag=nim&tag=web")
+  )
+  doAssert repeated.headers["location"] == "/static/docs/?tag=nim&tag=web"
+
   let docs = app.handleSync(initRequest(HttpMethod.Get, "/static/docs/"))
   doAssert docs.status == 200
   doAssert docs.body == "<h1>docs</h1>"

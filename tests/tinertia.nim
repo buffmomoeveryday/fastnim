@@ -81,10 +81,14 @@ block ignoresPartialReloadForAnotherComponent:
 
 block rejectsStaleAssetVersion:
   let response = newInertiaApp().handleSync(
-    initRequest(HttpMethod.Get, "/users?sort=name", inertiaHeaders("assets-v0"))
+    initRequest(
+      HttpMethod.Get,
+      "/users?tag=nim&tag=web",
+      inertiaHeaders("assets-v0"),
+    )
   )
   doAssert response.status == 409
-  doAssert response.headers["x-inertia-location"] == "/users?sort=name"
+  doAssert response.headers["x-inertia-location"] == "/users?tag=nim&tag=web"
   doAssert response.headers["x-inertia-version"] == "assets-v1"
   doAssert "x-inertia" notin response.headers
 

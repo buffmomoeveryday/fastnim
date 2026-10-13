@@ -351,7 +351,7 @@ proc redirectToSlash(request: Request): Response =
   var location = request.path & "/"
   if request.queryParams.len > 0:
     var first = true
-    for key, value in request.queryParams:
+    for key, value in request.queryParamPairs():
       location.add(if first: "?" else: "&")
       first = false
       location.add(encodeUrl(key) & "=" & encodeUrl(value))
