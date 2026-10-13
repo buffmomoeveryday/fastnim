@@ -1,8 +1,10 @@
 ## Internal JSON conversion that honors FastNim field metadata.
 
-import std/[json, jsonutils, macros]
+import std/[json, jsonutils, macros, options]
 
 import fastnim/jsonfields
+
+export jsonutils
 
 proc renameJsonField(node: JsonNode, source, target: string) =
   if node.isNil or node.kind != JObject or source == target or source notin node:
@@ -25,7 +27,24 @@ template effectiveJsonName(field: untyped, defaultName: static[string]): string 
     defaultName
 
 proc transformJsonFields[T](node: JsonNode, value: T, encode: static[bool]) =
-  when T is object:
+  when T is Option:
+    if not node.isNil and node.kind != JNull:
+      when encode:
+        if value.isSome():
+          transformJsonFields(node, value.get(), encode)
+      else:
+        type Item = typeof(value.get())
+        var item: Item
+        transformJsonFields(node, item, encode)
+  elif T is ref:
+    when encode:
+      if not value.isNil:
+        transformJsonFields(node, value[], encode)
+    else:
+      type Item = typeof(value[])
+      var item: Item
+      transformJsonFields(node, item, encode)
+  elif T is object:
     for nimName, field in fieldPairs(value):
       const fieldName = effectiveJsonName(field, nimName)
       for otherNimName, otherField in fieldPairs(value):
@@ -36,6 +55,9 @@ proc transformJsonFields[T](node: JsonNode, value: T, encode: static[bool]) =
       const sourceName = if encode: nimName else: fieldName
       const targetName = if encode: fieldName else: nimName
       const childName = if encode: fieldName else: nimName
+      when not encode and field is Option:
+        if not node.isNil and node.kind == JObject and sourceName notin node:
+          node[targetName] = newJNull()
       renameJsonField(node, sourceName, targetName)
       if not node.isNil and node.kind == JObject and childName in node:
         transformJsonFields(node[childName], field, encode)

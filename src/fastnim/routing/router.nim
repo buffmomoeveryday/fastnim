@@ -11,6 +11,7 @@ import fastnim/context/state
 import fastnim/logging
 import fastnim/openapi/spec
 import fastnim/params/multipart
+import fastnim/params/validate
 import fastnim/websocket
 
 type
@@ -947,6 +948,31 @@ proc typedOpenApiOperation(
           "content": {`mediaType`: {"schema": openApiSchema(`bodyType`)}},
         }
     )
+    result[^1].add(
+      quote do:
+        if not `operation`.responses.hasKey("400"):
+          `operation`.responses["400"] = %*{
+            "description": "Invalid request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {"detail": {"type": "string"}},
+                  "required": ["detail"],
+                }
+              }
+            },
+          }
+        if not `operation`.responses.hasKey("422"):
+          `operation`.responses["422"] = %*{
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": openApiSchema(ValidationErrorResponse)
+              }
+            },
+          }
+    )
   result[^1].add(operation)
 
 proc buildTypedRoute(
@@ -954,6 +980,7 @@ proc buildTypedRoute(
     inputName: string,
     parser: NimNode,
     invalidInputMessage: string,
+    validator: NimNode,
     routeDocs: NimNode,
 ): NimNode =
   if responses.kind != nnkPrefix or $responses[0] != "@" or
@@ -1045,6 +1072,14 @@ proc buildTypedRoute(
         `documentation`,
       )
   else:
+    let validation = genSym(nskVar, "validation")
+    let source = newLit(inputName)
+    let customValidation =
+      if validator.kind == nnkEmpty:
+        newStmtList()
+      else:
+        quote do:
+          `validation`.mergeErrors(`validator`(`parsedBody`))
     result = quote:
       addRoute(
         `app`,
@@ -1056,6 +1091,12 @@ proc buildTypedRoute(
           var `parsedBody`: `bodyType`
           if not `parser`(`request`, `parsedBody`):
             return json(statusBadRequest, %*{"detail": `invalidInputMessage`})
+          var `validation` = initValidationResult()
+          when typeof(`parsedBody`) is object:
+            `validation` = validateModel(`parsedBody`)
+          `customValidation`
+          if not `validation`.isValid():
+            return validationResponse(`validation`, source = `source`)
           {.cast(gcsafe).}:
             `boundBody`,
         `documentation`,
@@ -1076,6 +1117,7 @@ macro get*(
     "",
     newEmptyNode(),
     "",
+    newEmptyNode(),
     newCall(ident("initOpenApiRoute")),
   )
 
@@ -1145,6 +1187,7 @@ macro get*(app: Application | Router, path: typed, args: varargs[untyped]): unty
     "",
     newEmptyNode(),
     "",
+    newEmptyNode(),
     docs,
   )
 
@@ -1163,6 +1206,7 @@ macro query*(
     "",
     newEmptyNode(),
     "",
+    newEmptyNode(),
     newCall(ident("initOpenApiRoute")),
   )
 
@@ -1199,17 +1243,20 @@ macro post*(
     "",
     newEmptyNode(),
     "",
+    newEmptyNode(),
     newCall(ident("initOpenApiRoute")),
   )
 
-macro post*(app: Application | Router, path: typed, args: varargs[untyped]): untyped =
-  ## Registers a typed POST route with inline OpenAPI metadata.
+proc buildBodyRoute(
+    app, path, args, `method`: NimNode, verb: string
+): NimNode {.compileTime.} =
   var responses = newEmptyNode()
   var routeBody = newEmptyNode()
   var bodyType = newEmptyNode()
   var inputName = ""
   var parser = newEmptyNode()
   var invalidMessage = ""
+  var validator = newEmptyNode()
   var tags = newEmptyNode()
   var summary = newEmptyNode()
   var description = newEmptyNode()
@@ -1231,6 +1278,8 @@ macro post*(app: Application | Router, path: typed, args: varargs[untyped]): unt
         inputName = "form"
         parser = ident("parseFormBody")
         invalidMessage = "invalid form request body"
+      of "validator":
+        validator = argument[1]
       of "tags":
         tags = argument[1]
       of "summary":
@@ -1242,18 +1291,20 @@ macro post*(app: Application | Router, path: typed, args: varargs[untyped]): unt
       of "deprecated":
         deprecated = argument[1]
       else:
-        error("unsupported POST route option: " & $argument[0], argument)
+        error("unsupported " & verb & " route option: " & $argument[0], argument)
     elif routeBody.kind == nnkEmpty:
       routeBody = argument
     else:
-      error("POST routes accept one handler block", argument)
+      error(verb & " routes accept one handler block", argument)
 
   if responses.kind == nnkEmpty:
     error(
       "inline OpenAPI metadata requires `responses = @[(status, Model), ...]`", path
     )
   if routeBody.kind == nnkEmpty:
-    error("POST routes require a handler block", path)
+    error(verb & " routes require a handler block", path)
+  if validator.kind != nnkEmpty and bodyType.kind == nnkEmpty:
+    error(verb & " route `validator` requires `body` or `form`", validator)
 
   var docs = newCall(ident("initOpenApiRoute"))
   proc addOption(name: string, value: NimNode) =
@@ -1266,51 +1317,125 @@ macro post*(app: Application | Router, path: typed, args: varargs[untyped]): unt
   addOption("operationId", operationId)
   addOption("deprecated", deprecated)
 
-  buildTypedRoute(
+  result = buildTypedRoute(
     app,
     path,
     responses,
     routeBody,
-    quote do:
-      HttpMethod.Post,
+    `method`,
     bodyType,
     inputName,
     parser,
     invalidMessage,
+    validator,
     docs,
   )
 
-proc put*(app: Application, path: string, handler: RouteHandler) =
-  ## Registers a PUT route.
-  app.addRoute(HttpMethod.Put, path, handler)
+proc buildBlockRoute(
+    app, path, body, `method`: NimNode
+): NimNode {.compileTime.} =
+  if body.kind != nnkStmtList:
+    return quote:
+      addRoute(`app`, `method`, `path`, `body`)
 
-proc put*(app: Application, path: string, handler: SyncRouteHandler) =
-  ## Registers a legacy synchronous PUT route.
-  app.addRoute(HttpMethod.Put, path, handler)
+  let request = genSym(nskParam, "request")
+  let boundBody = bindRouteIdentifiers(prepareRouteBody(body), app, request)
+  result = quote:
+    addRoute(
+      `app`,
+      `method`,
+      `path`,
+      proc(`request`: Request): Future[Response] {.async: (raises: [CatchableError]).} =
+        {.gcsafe.}:
+          `boundBody`,
+    )
 
-proc put*(router: Router, path: string, handler: RouteHandler) =
-  ## Registers a PUT route on a router.
-  router.addRoute(HttpMethod.Put, path, handler)
+macro post*(app: Application | Router, path: typed, args: varargs[untyped]): untyped =
+  ## Registers a typed POST route with inline OpenAPI metadata.
+  ##
+  ## A ``body = Model`` or ``form = Model`` is decoded and automatically
+  ## validated from its field pragmas before the handler runs. Supply
+  ## ``validator = validateModelBusinessRules`` to merge cross-field or
+  ## domain-specific errors with the declarative constraint errors.
+  ##
+  ## ```nim
+  ## app.post(
+  ##   "/products",
+  ##   body = CreateProduct,
+  ##   responses = @[(201, Product)],
+  ## ):
+  ##   created Product(name: body.name)
+  ## ```
+  buildBodyRoute(
+    app,
+    path,
+    args,
+    quote do:
+      HttpMethod.Post,
+    "POST",
+  )
 
-proc put*(router: Router, path: string, handler: SyncRouteHandler) =
-  ## Registers a legacy synchronous PUT route on a router.
-  router.addRoute(HttpMethod.Put, path, handler)
+macro put*(app: Application | Router, path: typed, body: untyped): untyped =
+  ## Registers a PUT route with either a handler or Nim block syntax.
+  buildBlockRoute(
+    app,
+    path,
+    body,
+    quote do:
+      HttpMethod.Put,
+  )
 
-proc patch*(app: Application, path: string, handler: RouteHandler) =
-  ## Registers a PATCH route.
-  app.addRoute(HttpMethod.Patch, path, handler)
+macro put*(app: Application | Router, path: typed, args: varargs[untyped]): untyped =
+  ## Registers a typed PUT route with optional body validation and OpenAPI metadata.
+  buildBodyRoute(
+    app,
+    path,
+    args,
+    quote do:
+      HttpMethod.Put,
+    "PUT",
+  )
 
-proc patch*(app: Application, path: string, handler: SyncRouteHandler) =
-  ## Registers a legacy synchronous PATCH route.
-  app.addRoute(HttpMethod.Patch, path, handler)
+macro patch*(app: Application | Router, path: typed, body: untyped): untyped =
+  ## Registers a PATCH route with either a handler or Nim block syntax.
+  buildBlockRoute(
+    app,
+    path,
+    body,
+    quote do:
+      HttpMethod.Patch,
+  )
 
-proc patch*(router: Router, path: string, handler: RouteHandler) =
-  ## Registers a PATCH route on a router.
-  router.addRoute(HttpMethod.Patch, path, handler)
+macro patch*(app: Application | Router, path: typed, args: varargs[untyped]): untyped =
+  ## Registers a typed PATCH route with optional body validation and OpenAPI metadata.
+  ##
+  ## ```nim
+  ## app.patch(
+  ##   "/orders/{id}",
+  ##   body = StatusChange,
+  ##   validator = validateStatusChange,
+  ##   responses = @[(200, StatusChange)],
+  ## ):
+  ##   ok body
+  ## ```
+  buildBodyRoute(
+    app,
+    path,
+    args,
+    quote do:
+      HttpMethod.Patch,
+    "PATCH",
+  )
 
-proc patch*(router: Router, path: string, handler: SyncRouteHandler) =
-  ## Registers a legacy synchronous PATCH route on a router.
-  router.addRoute(HttpMethod.Patch, path, handler)
+macro delete*(app: Application | Router, path: typed, body: untyped): untyped =
+  ## Registers a DELETE route with either a handler or Nim block syntax.
+  buildBlockRoute(
+    app,
+    path,
+    body,
+    quote do:
+      HttpMethod.Delete,
+  )
 
 macro delete*(app: Application | Router, path: typed, args: varargs[untyped]): untyped =
   ## Registers a DELETE route with typed responses and inline OpenAPI metadata.
@@ -1371,6 +1496,7 @@ macro delete*(app: Application | Router, path: typed, args: varargs[untyped]): u
     "",
     newEmptyNode(),
     "",
+    newEmptyNode(),
     docs,
   )
 
