@@ -85,8 +85,6 @@ proc toFastnimRequest(
     .} =
       await reader.closeWait()
     result.attachBodySource(newRequestBodySource(read, close))
-  for key, value in request.query.stringItems():
-    result.queryParams[key] = value
 
 proc toChronosResponse(
     request: chronosHttp.HttpRequestRef, response: fastnimHttp.Response
@@ -297,7 +295,15 @@ proc serve*(
     )
     .get()
   result.start()
-  app.log(lvlInfo, "Listening at http://" & address & ":" & $port)
+  let baseUrl = "http://" & address & ":" & $port
+  app.log(lvlInfo, "Listening at " & baseUrl)
+  if app.openApiSettings.enabled:
+    let docsPath =
+      if app.openApiSettings.docsPath.startsWith('/'):
+        app.openApiSettings.docsPath
+      else:
+        "/" & app.openApiSettings.docsPath
+    app.log(lvlInfo, "Docs served at " & baseUrl & docsPath)
 
 proc stop*(server: chronosHttp.HttpServerRef): auto =
   ## Stops a server created by ``serve``.

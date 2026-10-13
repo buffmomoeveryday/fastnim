@@ -10,6 +10,7 @@ import fastnim/context/http
 import fastnim/context/state
 import fastnim/logging
 import fastnim/openapi/spec
+import fastnim/params/extract
 import fastnim/params/multipart
 import fastnim/params/validate
 import fastnim/websocket
@@ -306,7 +307,11 @@ proc rewriteDependencyGet(node, app, context: NimNode): NimNode {.compileTime.} 
   newCall(getter, context, newLit(name))
 
 proc bindRouteIdentifiers(
-    node, app, request: NimNode, parsedBody = newEmptyNode(), inputName = ""
+    node, app, request: NimNode,
+    parsedBody = newEmptyNode(),
+    inputName = "",
+    parsedQuery = newEmptyNode(),
+    queryInputName = "queryParams",
 ): NimNode {.compileTime.} =
   let context = newDotExpr(request, ident("context"))
   let dependencyGet = rewriteDependencyGet(node, app, context)
@@ -316,11 +321,27 @@ proc bindRouteIdentifiers(
     return request
   if parsedBody.kind != nnkEmpty and node.kind == nnkIdent and eqIdent(node, inputName):
     return parsedBody
+  if parsedQuery.kind != nnkEmpty and node.kind == nnkIdent and
+      eqIdent(node, queryInputName):
+    return parsedQuery
   if node.kind == nnkIdent and eqIdent(node, "ctx"):
     return context
+  if node.kind == nnkDotExpr:
+    result = copyNimNode(node)
+    result.add(
+      bindRouteIdentifiers(
+        node[0], app, request, parsedBody, inputName, parsedQuery, queryInputName
+      )
+    )
+    result.add(node[1])
+    return
   result = copyNimNode(node)
   for child in node:
-    result.add(bindRouteIdentifiers(child, app, request, parsedBody, inputName))
+    result.add(
+      bindRouteIdentifiers(
+        child, app, request, parsedBody, inputName, parsedQuery, queryInputName
+      )
+    )
 
 proc replaceDependency(
     node: NimNode, name: string, replacement: NimNode
@@ -915,7 +936,8 @@ macro query*(app: Application | Router, path: typed, body: untyped): untyped =
     )
 
 proc typedOpenApiOperation(
-    `method`, path, responses, bodyType, routeDocs: NimNode, contentType: string
+    `method`, path, responses, bodyType, queryType, routeDocs: NimNode,
+    contentType: string,
 ): NimNode =
   let operation = genSym(nskVar, "openApiOperation")
   result = quote:
@@ -973,6 +995,32 @@ proc typedOpenApiOperation(
             },
           }
     )
+  if queryType.kind != nnkEmpty:
+    result[^1].add(
+      quote do:
+        `operation`.parameters = openApiQueryParameters(`queryType`)
+    )
+    result[^1].add(
+      quote do:
+        if not `operation`.responses.hasKey("400"):
+          `operation`.responses["400"] = %*{
+            "description": "Invalid query parameters",
+            "content": {
+              "application/json": {
+                "schema": openApiSchema(ValidationErrorResponse)
+              }
+            },
+          }
+        if not `operation`.responses.hasKey("422"):
+          `operation`.responses["422"] = %*{
+            "description": "Query parameter validation failed",
+            "content": {
+              "application/json": {
+                "schema": openApiSchema(ValidationErrorResponse)
+              }
+            },
+          }
+    )
   result[^1].add(operation)
 
 proc buildTypedRoute(
@@ -982,6 +1030,9 @@ proc buildTypedRoute(
     invalidInputMessage: string,
     validator: NimNode,
     routeDocs: NimNode,
+    queryType: NimNode = newEmptyNode(),
+    queryValidator: NimNode = newEmptyNode(),
+    queryInputName = "queryParams",
 ): NimNode =
   if responses.kind != nnkPrefix or $responses[0] != "@" or
       responses[1].kind != nnkBracket:
@@ -1050,15 +1101,28 @@ proc buildTypedRoute(
       newEmptyNode()
     else:
       genSym(nskVar, "body")
+  let parsedQuery =
+    if queryType.kind == nnkEmpty:
+      newEmptyNode()
+    else:
+      genSym(nskVar, "query")
   let checkedBody = checkedResponses(returnFinalTuple(body))
   let boundBody = bindRouteIdentifiers(
-    prepareRouteBody(checkedBody), app, request, parsedBody, inputName
+    prepareRouteBody(checkedBody),
+    app,
+    request,
+    parsedBody,
+    inputName,
+    parsedQuery,
+    queryInputName,
   )
   let contentType =
     if inputName == "form": "application/x-www-form-urlencoded" else: "application/json"
   let documentation =
-    typedOpenApiOperation(`method`, path, responses, bodyType, routeDocs, contentType)
-  if bodyType.kind == nnkEmpty:
+    typedOpenApiOperation(
+      `method`, path, responses, bodyType, queryType, routeDocs, contentType
+    )
+  if bodyType.kind == nnkEmpty and queryType.kind == nnkEmpty:
     result = quote:
       addRoute(
         `app`,
@@ -1068,6 +1132,36 @@ proc buildTypedRoute(
             `request`: Request
         ): Future[Response] {.async: (raises: [CatchableError]).} =
           {.gcsafe.}:
+            `boundBody`,
+        `documentation`,
+      )
+  elif queryType.kind != nnkEmpty:
+    let parsing = genSym(nskVar, "queryParsing")
+    let validation = genSym(nskVar, "queryValidation")
+    let customValidation =
+      if queryValidator.kind == nnkEmpty:
+        newStmtList()
+      else:
+        quote do:
+          `validation`.mergeErrors(`queryValidator`(`parsedQuery`))
+    result = quote:
+      addRoute(
+        `app`,
+        `method`,
+        `path`,
+        proc(
+            `request`: Request
+        ): Future[Response] {.async: (raises: [CatchableError]).} =
+          var `parsedQuery` = `queryType`()
+          var `parsing` = initValidationResult()
+          parseQueryParams(`queryType`, `request`, `parsedQuery`, `parsing`)
+          if not `parsing`.isValid():
+            return queryParsingResponse(`parsing`)
+          var `validation` = validateModel(`parsedQuery`)
+          `customValidation`
+          if not `validation`.isValid():
+            return validationResponse(`validation`, source = "query")
+          {.cast(gcsafe).}:
             `boundBody`,
         `documentation`,
       )
@@ -1125,8 +1219,10 @@ macro get*(app: Application | Router, path: typed, args: varargs[untyped]): unty
   ## Registers a typed GET route with inline OpenAPI metadata.
   ##
   ## ```nim
-  ## app.get("/users", responses = @[(200, User)], tags = @["users"]):
-  ##   ok User()
+  ## app.get(
+  ##   "/users", queryParams = UserQuery, responses = @[(200, User)]
+  ## ):
+  ##   ok findUser(queryParams.id)
   ## ```
   var responses = newEmptyNode()
   var routeBody = newEmptyNode()
@@ -1135,6 +1231,9 @@ macro get*(app: Application | Router, path: typed, args: varargs[untyped]): unty
   var description = newEmptyNode()
   var operationId = newEmptyNode()
   var deprecated = newEmptyNode()
+  var queryType = newEmptyNode()
+  var queryValidator = newEmptyNode()
+  var queryInputName = ""
 
   for argument in args:
     if argument.kind == nnkExprEqExpr:
@@ -1151,6 +1250,13 @@ macro get*(app: Application | Router, path: typed, args: varargs[untyped]): unty
         operationId = argument[1]
       of "deprecated":
         deprecated = argument[1]
+      of "queryParams", "query":
+        if queryType.kind != nnkEmpty:
+          error("GET routes accept only one query model", argument)
+        queryType = argument[1]
+        queryInputName = $argument[0]
+      of "validator":
+        queryValidator = argument[1]
       else:
         error("unsupported GET route option: " & $argument[0], argument)
     elif routeBody.kind == nnkEmpty:
@@ -1164,6 +1270,8 @@ macro get*(app: Application | Router, path: typed, args: varargs[untyped]): unty
     )
   if routeBody.kind == nnkEmpty:
     error("GET routes require a handler block", path)
+  if queryValidator.kind != nnkEmpty and queryType.kind == nnkEmpty:
+    error("GET route `validator` requires `queryParams`", queryValidator)
 
   var docs = newCall(ident("initOpenApiRoute"))
   proc addOption(name: string, value: NimNode) =
@@ -1189,6 +1297,9 @@ macro get*(app: Application | Router, path: typed, args: varargs[untyped]): unty
     "",
     newEmptyNode(),
     docs,
+    queryType,
+    queryValidator,
+    queryInputName,
   )
 
 macro query*(

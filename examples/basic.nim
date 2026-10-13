@@ -22,16 +22,16 @@ app.middlewares:
   requestId()
 
 app.get("/"):
-  ok %*{"message": "Hello from FastNim"}
+  ok (%*{"message": "Hello from FastNim"})
 
 app.get("/async"):
-  ok %*{"message": "Completed without blocking the Chronos event loop"}
+  ok (%*{"message": "Completed without blocking the Chronos event loop"})
 
 app.get("/items/{itemId}"):
   let itemId = request.pathParam("itemId")
   let page = request.queryParam("page", "1")
 
-  ok %*{"itemId": itemId, "page": page}
+  ok (%*{"itemId": itemId, "page": page})
 
 app.get("/request-info", responses = @[(200, RequestInfo)]):
   ok RequestInfo(requestId: 1, path: request.path)

@@ -84,7 +84,7 @@ proc inertiaLocation*(url: string): Response =
 proc requestUrl(request: Request): string =
   result = request.path
   var separator = '?'
-  for key, value in request.queryParams:
+  for key, value in request.queryParamPairs():
     result.add(separator)
     separator = '&'
     result.add(encodeUrl(key))

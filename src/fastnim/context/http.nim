@@ -106,11 +106,13 @@ type
     `method`*: HttpMethod ## Request method.
     path*: string ## Request path without the query string.
     pathParams*: Table[string, string] ## ``{name}`` segments matched by the route.
-    queryParams*: Table[string, string] ## Decoded query parameters.
+    queryParams*: Table[string, string]
+      ## Decoded query parameters using the last value for repeated names.
     headers*: Headers ## Request headers with lowercase names.
     body*: string ## Buffered raw body; empty for streaming multipart requests.
     context*: Context ## Application-scoped values for handlers.
     bodySource: RequestBodySource
+    queryValues: Table[string, seq[string]]
 
   Response* = object ## A complete HTTP response ready for the Chronos adapter to send.
     status*: int ## HTTP status code.
@@ -133,19 +135,47 @@ type
 proc decodeComponent(value: string): string =
   decodeUrl(value.replace("+", " "))
 
-proc parseQuery*(query: string): Table[string, string] =
-  ## Splits a query string or form body into decoded fields.
-  ##
-  ## Also used by ``params/extract`` to decode form request bodies.
-  result = initTable[string, string]()
+iterator decodedQueryFields(query: string): tuple[key, value: string] =
   for field in query.split('&'):
     if field.len > 0:
       let separator = field.find('=')
       if separator < 0:
-        result[decodeComponent(field)] = ""
+        yield (decodeComponent(field), "")
       else:
-        result[decodeComponent(field[0 ..< separator])] =
-          decodeComponent(field[separator + 1 ..^ 1])
+        yield (
+          decodeComponent(field[0..<separator]),
+          decodeComponent(field[separator + 1..^1]),
+        )
+
+proc parseQuery*(query: string): Table[string, string] =
+  ## Splits a query string or form body into decoded fields.
+  ##
+  ## Repeated names use their final value. Request query extraction separately
+  ## preserves all repeated values.
+  ## Also used by ``params/extract`` to decode form request bodies.
+  result = initTable[string, string]()
+  for key, value in decodedQueryFields(query):
+    result[key] = value
+
+proc queryParamValues*(request: Request, name: string): seq[string] {.
+    inline, raises: []
+.} =
+  ## Returns every decoded value for the query parameter ``name``.
+  ##
+  ## Values follow their order in the URL query string. Repeated names create
+  ## separate values; commas are retained as ordinary value characters.
+  result = request.queryValues.getOrDefault(name)
+  if result.len == 0 and name in request.queryParams:
+    result = @[request.queryParams.getOrDefault(name)]
+
+iterator queryParamPairs*(request: Request): tuple[key, value: string] =
+  ## Yields every decoded URL query parameter, including repeated values.
+  for key, values in request.queryValues:
+    for value in values:
+      yield (key, value)
+  for key, value in request.queryParams:
+    if key notin request.queryValues:
+      yield (key, value)
 
 proc initRequest*(
     `method`: HttpMethod,
@@ -158,16 +188,19 @@ proc initRequest*(
   result = Request(
     `method`: `method`,
     pathParams: initTable[string, string](),
+    queryParams: initTable[string, string](),
+    queryValues: initTable[string, seq[string]](),
     headers: headers,
     body: body,
     context: newContext(),
   )
   if separator < 0:
     result.path = target
-    result.queryParams = initTable[string, string]()
   else:
     result.path = target[0 ..< separator]
-    result.queryParams = parseQuery(target[separator + 1 ..^ 1])
+    for key, value in decodedQueryFields(target[separator + 1..^1]):
+      result.queryParams[key] = value
+      result.queryValues.mgetOrPut(key, @[]).add(value)
 
 proc newRequestBodySource*(
     read: BodyReadProc, close: BodyCloseProc

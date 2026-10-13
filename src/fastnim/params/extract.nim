@@ -3,12 +3,21 @@
 ## These helpers read values out of a ``Request``: path parameters matched
 ## from ``{name}`` route segments, decoded query parameters, request
 ## headers, and typed JSON or form bodies.
+##
+## Typed URL query extraction supports ``string``, ``int``, ``bool``, enums,
+## ``Option[T]``, and ``seq[T]``. Boolean words are ASCII case-insensitive;
+## enum strings are exact and case-sensitive. Sequences consume repeated keys,
+## while commas remain ordinary characters within a value.
 
 import std/[json, macros, options, strutils, tables]
 
 import fastnim/context/http
 import fastnim/jsonfields
+import fastnim/params/validationtypes
 import fastnim/private/jsonconversion
+import fastnim/private/jsonmetadata
+
+export validationtypes
 
 template effectiveInputName(
     field: untyped, defaultName: static[string]
@@ -30,8 +39,163 @@ proc pathParam*(
 proc queryParam*(
     request: Request, name: string, default = ""
 ): string {.inline, raises: [].} =
-  ## Returns a decoded query parameter, or ``default`` when it is absent.
+  ## Returns the final decoded URL query value, or ``default`` when absent.
   request.queryParams.getOrDefault(name, default)
+
+proc parseQueryScalar[T](raw: string, value: var T): bool {.raises: [].} =
+  try:
+    when T is string:
+      value = raw
+    elif T is int:
+      value = parseInt(raw)
+    elif T is bool:
+      case raw.toLowerAscii()
+      of "y", "yes", "true", "1", "on":
+        value = true
+      of "n", "no", "false", "0", "off":
+        value = false
+      else:
+        return false
+    elif T is enum:
+      let parsed = parseEnum[T](raw)
+      if $parsed != raw:
+        return false
+      value = parsed
+    else:
+      {.error: "typed query parameters support string, int, bool, enum, Option[T], and seq[T]".}
+    true
+  except ValueError:
+    false
+
+proc addQueryValueError[T](
+    validation: var ValidationResult,
+    location: openArray[string],
+) {.raises: [].} =
+  when T is int:
+    validation.addError(location, "integer", "must be an integer")
+  elif T is bool:
+    validation.addError(location, "boolean", "must be a boolean")
+  elif T is enum:
+    validation.addError(location, "enum", "must be a valid enum value")
+  elif T is string:
+    discard
+  else:
+    {.error: "typed query parameters support scalar Option and seq item types only".}
+
+proc extractQueryParam[T](
+    request: Request,
+    name: string,
+    validation: var ValidationResult,
+    hasDefault: bool,
+    fallback: T,
+): T {.raises: [].} =
+  let values = request.queryParamValues(name)
+  if values.len == 0:
+    if hasDefault:
+      return fallback
+    when T is Option:
+      type Item = typeof(result.get())
+      return none(Item)
+    elif T is seq:
+      return @[]
+    else:
+      validation.addError(name, "required", "is required")
+      return default(T)
+
+  when T is Option:
+    type Item = typeof(result.get())
+    var item: Item
+    if parseQueryScalar(values[^1], item):
+      result = some(item)
+    else:
+      addQueryValueError[Item](validation, [name])
+  elif T is seq:
+    type Item = typeof(result[0])
+    result = @[]
+    for index, raw in values:
+      var item: Item
+      if parseQueryScalar(raw, item):
+        result.add(item)
+      else:
+        addQueryValueError[Item](validation, [name, $index])
+  else:
+    if not parseQueryScalar(values[^1], result):
+      addQueryValueError[T](validation, [name])
+
+proc queryParam*[T](
+    request: Request, name: string, validation: var ValidationResult
+): T {.raises: [].} =
+  ## Extracts a typed value from the URL query string.
+  ##
+  ## Missing scalar values and invalid present values are appended to
+  ## ``validation``. Missing ``Option[T]`` values return ``none(T)`` and
+  ## missing ``seq[T]`` values return an empty sequence. A sequence consumes
+  ## repeated names in URL order; comma-separated text remains one value.
+  ## Supported scalar types are ``string``, ``int``, ``bool``, and enums.
+  extractQueryParam(request, name, validation, false, default(T))
+
+proc queryParam*[T](
+    request: Request,
+    name: string,
+    validation: var ValidationResult,
+    default: T,
+): T {.raises: [].} =
+  ## Extracts a typed value from the URL query string with a missing-value default.
+  ##
+  ## ``default`` is used only when the parameter is absent. Invalid present
+  ## values are appended to ``validation`` using the same rules as the required
+  ## typed query extractor.
+  extractQueryParam(request, name, validation, true, default)
+
+proc objectType(node: NimNode): NimNode {.compileTime.} =
+  case node.kind
+  of nnkObjectTy:
+    node
+  of nnkBracketExpr:
+    if node.len == 2 and eqIdent(node[0], "typedesc"):
+      objectType(node[1])
+    else:
+      newEmptyNode()
+  of nnkSym:
+    objectType(node.getImpl)
+  of nnkTypeDef:
+    objectType(node[^1])
+  else:
+    newEmptyNode()
+
+macro parseQueryParams*(
+    model: typedesc,
+    request: Request,
+    value: untyped,
+    validation: untyped,
+): untyped =
+  ## Populates an object model from URL query parameters.
+  ##
+  ## Fields with initializers retain their initialized value when the query
+  ## parameter is absent. Other scalar fields are required; ``Option[T]`` and
+  ## ``seq[T]`` fields use the missing-value behavior of ``queryParam``.
+  ## ``jsonName`` selects a field's external query parameter name.
+  let implementation = objectType(model.getTypeImpl)
+  if implementation.kind != nnkObjectTy:
+    error("query route models must be object types", model)
+
+  result = newStmtList()
+  for field in jsonFields(implementation):
+    let queryName = newLit(field.jsonName)
+    let access = newDotExpr(value, ident(field.nimName))
+    let extractor = newTree(nnkBracketExpr, bindSym("queryParam"), field.fieldType)
+    let assignment = newAssignment(
+      access,
+      newCall(extractor, request, newLit(field.jsonName), validation),
+    )
+    if field.defaultValue.kind == nnkEmpty:
+      result.add(assignment)
+    else:
+      result.add(
+        quote do:
+          if `request`.queryParamValues(`queryName`).len > 0:
+            `assignment`
+      )
 
 proc header*(
     request: Request, name: string, default = ""

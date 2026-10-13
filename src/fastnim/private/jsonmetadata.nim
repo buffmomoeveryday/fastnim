@@ -8,6 +8,7 @@ type
     nimName*: string ## Field name used by Nim code.
     jsonName*: string ## Field name used by JSON and OpenAPI.
     fieldType*: NimNode ## Field type AST.
+    defaultValue*: NimNode ## Field initializer AST, or ``nnkEmpty`` when absent.
     source*: NimNode ## Source AST used for compiler diagnostics.
 
 proc bareFieldName(node: NimNode): NimNode {.compileTime.} =
@@ -42,6 +43,7 @@ proc collectFields(node: NimNode, fields: var seq[JsonFieldInfo]) {.compileTime.
           nimName: name,
           jsonName: renamedFieldName(source, name),
           fieldType: fieldType,
+          defaultValue: node[^1],
           source: source,
         )
       )

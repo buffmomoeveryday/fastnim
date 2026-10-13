@@ -30,40 +30,35 @@ import std/[json, macros, math, options, strutils]
 import fastnim/context/http
 import fastnim/jsonfields
 import fastnim/params/extract
+import fastnim/params/validationtypes
+
+export validationtypes
 
 type
-  FieldError* = object
-    ## One value-constraint failure on a single field.
-    location*: seq[string] ## Path below the input source, e.g. ``@["user", "email"]``.
-    code*: string ## Stable rule code, e.g. ``"non_empty"`` or ``"email"``.
-    message*: string ## Human-readable message for this field.
-
-  ValidationResult* = object
-    ## Outcome of validating a decoded JSON body or query values.
-    errors*: seq[FieldError] ## One entry per violated constraint.
-
   ValidationErrorResponse* = object
-    ## Interim 422 envelope. Migrates to the unified ``ApiError`` of issue
+    ## Interim structured input-error envelope.
+    ##
+    ## Query parsing uses it for 400 responses and constraint validation uses
+    ## it for 422 responses. It migrates to the unified ``ApiError`` of issue
     ## #9; ``errors`` preserves every failure and its nested location.
     code*: string ## Machine-readable error code, e.g. ``"validation_failed"``.
     message*: string ## Human-readable summary, e.g. ``"validation failed"``.
-    errors*: seq[FieldError] ## Constraint failures with source-prefixed locations.
+    errors*: seq[validationtypes.FieldError]
+      ## Constraint failures with source-prefixed locations.
 
   ValidatedBody*[T] = object
     ## Outcome of ``request.validate``: the parsed body plus its status.
     ## ``value`` is only meaningful when ``ok`` is true.
     ok*: bool ## True when JSON parsing and validation both passed.
     value*: T ## Parsed request body.
-    error*: Option[Response] ## 400 shape or 422 validation response when ``ok`` is false.
+    error*: Option[Response]
+      ## 400 shape or 422 validation response when ``ok`` is false.
 
-  StateTransition*[T: enum] = tuple
-    ## One permitted transition between two values of the same enum type.
-    fromState: T
-    toState: T
-
-func field*(error: FieldError): string {.inline, raises: [].} =
-  ## Returns the final field or index in an error location, or ``""`` at the root.
-  if error.location.len == 0: "" else: error.location[^1]
+  StateTransition*[T: enum] =
+    tuple
+      ## One permitted transition between two values of the same enum type.
+      fromState: T
+      toState: T
 
 template nonEmpty*() {.pragma.}
   ## Marks a string model field as required to be non-empty.
@@ -112,8 +107,10 @@ macro transitions*(stateType: typedesc, body: untyped): untyped =
   ##   OrderState.paid.to OrderState.shipped
   ## ```
   let statements =
-    if body.kind == nnkStmtList: body
-    else: newStmtList(body)
+    if body.kind == nnkStmtList:
+      body
+    else:
+      newStmtList(body)
   if statements.len == 0:
     error("transitions requires at least one 'fromState.to toState' entry", body)
 
@@ -131,57 +128,12 @@ macro transitions*(stateType: typedesc, body: untyped): untyped =
     )
     result.add(
       newCall(
-        newTree(
-          nnkBracketExpr,
-          bindSym("StateTransition"),
-          stateType.copyNimTree(),
-        ),
+        newTree(nnkBracketExpr, bindSym("StateTransition"), stateType.copyNimTree()),
         transition,
       )
     )
 
-proc initValidationResult*(): ValidationResult {.inline, raises: [].} =
-  ## Creates an empty (valid) validation result.
-  ValidationResult(errors: @[])
-
-proc addError*(
-    result: var ValidationResult,
-    location: openArray[string],
-    code, message: string,
-) {.raises: [].} =
-  ## Records one error at ``location``.
-  result.errors.add(
-    FieldError(location: @location, code: code, message: message)
-  )
-
-proc addError*(
-    result: var ValidationResult, field, code, message: string
-) {.raises: [].} =
-  ## Records one field error and marks ``result`` as invalid.
-  result.addError([field], code, message)
-
-proc isValid*(validation: ValidationResult): bool {.inline, raises: [].} =
-  ## Returns whether ``result`` holds no field errors.
-  validation.errors.len == 0
-
-proc mergeErrors*(
-    result: var ValidationResult, other: ValidationResult
-) {.raises: [].} =
-  ## Folds ``other`` into ``result``. Used to combine per-section checks.
-  for error in other.errors:
-    result.errors.add(error)
-
-proc withPrefix*(
-    validation: ValidationResult, prefix: openArray[string]
-): ValidationResult {.raises: [].} =
-  ## Returns ``validation`` with ``prefix`` prepended to every error location.
-  result = initValidationResult()
-  for error in validation.errors:
-    result.addError(@prefix & error.location, error.code, error.message)
-
-proc checkNonEmpty*(
-    result: var ValidationResult, field, value: string
-) {.raises: [].} =
+proc checkNonEmpty*(result: var ValidationResult, field, value: string) {.raises: [].} =
   ## Records ``"non_empty"`` on ``field`` when ``value`` is empty.
   ## Use for JSON body string fields such as product names.
   if value.len == 0:
@@ -208,9 +160,7 @@ proc isEmailFormat*(value: string): bool {.inline, raises: [].} =
       return false
   true
 
-proc checkEmail*(
-    result: var ValidationResult, field, value: string
-) {.raises: [].} =
+proc checkEmail*(result: var ValidationResult, field, value: string) {.raises: [].} =
   ## Records ``"email"`` on ``field`` when ``value`` is not email-shaped.
   ## Use for JSON body string fields such as contact addresses.
   if not isEmailFormat(value):
@@ -230,16 +180,17 @@ proc checkPositive*[T](
     {.error: "checkPositive requires a numeric value".}
 
 proc checkLengthAtLeast*[T](
-    result: var ValidationResult,
-    location: openArray[string],
-    value: T,
-    bound: Natural,
+    result: var ValidationResult, location: openArray[string], value: T, bound: Natural
 ) {.raises: [].} =
   ## Records ``"min_length"`` when ``value`` has fewer than ``bound`` items.
   when compiles(value.len):
     if value.len < bound:
       const unit = when T is string: "character" else: "item"
-      let units = if bound == 1: unit else: unit & "s"
+      let units =
+        if bound == 1:
+          unit
+        else:
+          unit & "s"
       result.addError(
         location, "min_length", "must contain at least " & $bound & " " & units
       )
@@ -247,16 +198,17 @@ proc checkLengthAtLeast*[T](
     {.error: "checkLengthAtLeast requires a value with a length".}
 
 proc checkLengthAtMost*[T](
-    result: var ValidationResult,
-    location: openArray[string],
-    value: T,
-    bound: Natural,
+    result: var ValidationResult, location: openArray[string], value: T, bound: Natural
 ) {.raises: [].} =
   ## Records ``"max_length"`` when ``value`` has more than ``bound`` items.
   when compiles(value.len):
     if value.len > bound:
       const unit = when T is string: "character" else: "item"
-      let units = if bound == 1: unit else: unit & "s"
+      let units =
+        if bound == 1:
+          unit
+        else:
+          unit & "s"
       result.addError(
         location, "max_length", "must contain at most " & $bound & " " & units
       )
@@ -300,9 +252,15 @@ func compareNumbers[T: SomeNumber, U: SomeNumber](
   elif T is SomeUnsignedInt and U is SomeUnsignedInt:
     cmp(BiggestUInt(value), BiggestUInt(bound))
   elif T is SomeSignedInt and U is SomeUnsignedInt:
-    if value < 0: -1 else: cmp(BiggestUInt(value), BiggestUInt(bound))
+    if value < 0:
+      -1
+    else:
+      cmp(BiggestUInt(value), BiggestUInt(bound))
   elif T is SomeUnsignedInt and U is SomeSignedInt:
-    if bound < 0: 1 else: cmp(BiggestUInt(value), BiggestUInt(bound))
+    if bound < 0:
+      1
+    else:
+      cmp(BiggestUInt(value), BiggestUInt(bound))
   elif T is SomeInteger and U is SomeFloat:
     compareIntegerToFloat(value, bound)
   elif T is SomeFloat and U is SomeInteger:
@@ -316,10 +274,7 @@ proc addFiniteNumberError(
   result.addError(location, "finite_number", "must be a finite number")
 
 proc checkGreaterThan*[T, U](
-    result: var ValidationResult,
-    location: openArray[string],
-    value: T,
-    bound: U,
+    result: var ValidationResult, location: openArray[string], value: T, bound: U
 ) {.raises: [].} =
   ## Records ``"greater_than"`` when ``value`` is not greater than ``bound``.
   when T is SomeNumber and U is SomeNumber:
@@ -331,10 +286,7 @@ proc checkGreaterThan*[T, U](
     {.error: "checkGreaterThan requires numeric values".}
 
 proc checkGreaterOrEqual*[T, U](
-    result: var ValidationResult,
-    location: openArray[string],
-    value: T,
-    bound: U,
+    result: var ValidationResult, location: openArray[string], value: T, bound: U
 ) {.raises: [].} =
   ## Records ``"greater_than_or_equal"`` when ``value`` is below ``bound``.
   when T is SomeNumber and U is SomeNumber:
@@ -342,17 +294,13 @@ proc checkGreaterOrEqual*[T, U](
       result.addFiniteNumberError(location)
     elif compareNumbers(value, bound) < 0:
       result.addError(
-        location, "greater_than_or_equal",
-        "must be greater than or equal to " & $bound,
+        location, "greater_than_or_equal", "must be greater than or equal to " & $bound
       )
   else:
     {.error: "checkGreaterOrEqual requires numeric values".}
 
 proc checkLessThan*[T, U](
-    result: var ValidationResult,
-    location: openArray[string],
-    value: T,
-    bound: U,
+    result: var ValidationResult, location: openArray[string], value: T, bound: U
 ) {.raises: [].} =
   ## Records ``"less_than"`` when ``value`` is not less than ``bound``.
   when T is SomeNumber and U is SomeNumber:
@@ -364,10 +312,7 @@ proc checkLessThan*[T, U](
     {.error: "checkLessThan requires numeric values".}
 
 proc checkLessOrEqual*[T, U](
-    result: var ValidationResult,
-    location: openArray[string],
-    value: T,
-    bound: U,
+    result: var ValidationResult, location: openArray[string], value: T, bound: U
 ) {.raises: [].} =
   ## Records ``"less_than_or_equal"`` when ``value`` is above ``bound``.
   when T is SomeNumber and U is SomeNumber:
@@ -408,10 +353,7 @@ proc checkRange*[T](
     )
 
 proc checkAllowed*[T](
-    result: var ValidationResult,
-    field: string,
-    value: T,
-    allowed: openArray[T],
+    result: var ValidationResult, field: string, value: T, allowed: openArray[T]
 ) {.raises: [].} =
   ## Records ``"not_allowed"`` on ``field`` when ``value`` is not in
   ## ``allowed``. Comparison is exact (case-sensitive for strings). Use for
@@ -433,8 +375,7 @@ proc checkTransition*[T](
     result.addError(
       field,
       "invalid_transition",
-      "transition from '" & $fromState & "' to '" & $toState &
-        "' is not allowed",
+      "transition from '" & $fromState & "' to '" & $toState & "' is not allowed",
     )
 
 proc validatePagination*(
@@ -456,8 +397,12 @@ proc toValidationError*(
     message = "validation failed",
     source = "body",
 ): ValidationErrorResponse {.raises: [].} =
-  ## Builds the standard 422 envelope and prefixes locations with ``source``.
-  let prefix = if source.len == 0: @[] else: @[source]
+  ## Builds a structured input-error envelope prefixed with ``source``.
+  let prefix =
+    if source.len == 0:
+      @[]
+    else:
+      @[source]
   ValidationErrorResponse(
     code: code, message: message, errors: validation.withPrefix(prefix).errors
   )
@@ -467,26 +412,29 @@ proc validationResponse*(
     code = "validation_failed",
     message = "validation failed",
     source = "body",
+    status: HttpStatus = statusUnprocessableContent,
 ): Response =
-  ## Creates the standard 422 response for ``result``.
+  ## Creates a structured validation response using the requested HTTP status.
   ##
   ## The body is assembled directly to keep the wire representation stable.
   let envelope = toValidationError(validation, code, message, source)
   var errors = newJArray()
   for issue in envelope.errors:
     errors.add(
-      %*{
-        "location": issue.location,
-        "code": issue.code,
-        "message": issue.message,
-      }
+      %*{"location": issue.location, "code": issue.code, "message": issue.message}
     )
-  var node = %*{
-    "code": envelope.code,
-    "message": envelope.message,
-    "errors": errors,
-  }
-  json(statusUnprocessableContent, node)
+  var node = %*{"code": envelope.code, "message": envelope.message, "errors": errors}
+  json(status, node)
+
+proc queryParsingResponse*(validation: ValidationResult): Response =
+  ## Creates a structured 400 response for URL query extraction failures.
+  validationResponse(
+    validation,
+    code = "invalid_query_parameters",
+    message = "invalid query parameters",
+    source = "query",
+    status = statusBadRequest,
+  )
 
 proc parseAndValidateBody*[T](
     request: Request,
@@ -506,15 +454,14 @@ proc parseAndValidateBody*[T](
   ##   return checked.error.get()
   ## ```
   if not parseJsonBody(request, value):
-    return (false, some(json(statusBadRequest, %*{"detail": "invalid JSON request body"})))
+    return
+      (false, some(json(statusBadRequest, %*{"detail": "invalid JSON request body"})))
   let validation = validate(value)
   if not validation.isValid():
     return (false, some(validationResponse(validation)))
   (true, none(Response))
 
-template effectiveValidationName(
-    field: untyped, defaultName: static[string]
-): string =
+template effectiveValidationName(field: untyped, defaultName: static[string]): string =
   when field.hasCustomPragma(jsonName):
     const customName = field.getCustomPragmaVal(jsonName).name
     when customName.len == 0:
@@ -524,9 +471,7 @@ template effectiveValidationName(
     defaultName
 
 proc validateValue[T](
-    value: T,
-    validationResult: var ValidationResult,
-    location: seq[string],
+    value: T, validationResult: var ValidationResult, location: seq[string]
 ) {.raises: [].} =
   when T is Option:
     if value.isSome():
@@ -536,16 +481,15 @@ proc validateValue[T](
       validateValue(value[], validationResult, location)
   elif T is object:
     for validationName, validationField in fieldPairs(value):
-      const validationFieldName = effectiveValidationName(
-        validationField, validationName
-      )
+      const validationFieldName =
+        effectiveValidationName(validationField, validationName)
       let validationLocation = location & @[validationFieldName]
-      when validationField is SomeFloat and
-          (validationField.hasCustomPragma(positive) or
-          validationField.hasCustomPragma(gt) or
-          validationField.hasCustomPragma(ge) or
-          validationField.hasCustomPragma(lt) or
-          validationField.hasCustomPragma(le)):
+      discard validationLocation
+      when validationField is SomeFloat and (
+        validationField.hasCustomPragma(positive) or validationField.hasCustomPragma(gt) or
+        validationField.hasCustomPragma(ge) or validationField.hasCustomPragma(lt) or
+        validationField.hasCustomPragma(le)
+      ):
         let validationFieldIsFinite = validationField.isFiniteNumber()
         if not validationFieldIsFinite:
           validationResult.addFiniteNumberError(validationLocation)
@@ -579,23 +523,19 @@ proc validateValue[T](
           {.error: "positive requires a numeric field".}
       when validationField.hasCustomPragma(minValue):
         when validationField is SomeInteger:
-          const validationLower =
-            validationField.getCustomPragmaVal(minValue).bound
+          const validationLower = validationField.getCustomPragmaVal(minValue).bound
           if validationField < validationLower:
             validationResult.addError(
-              validationLocation, "out_of_range",
-              "must be at least " & $validationLower,
+              validationLocation, "out_of_range", "must be at least " & $validationLower
             )
         else:
           {.error: "minValue requires an integer field".}
       when validationField.hasCustomPragma(maxValue):
         when validationField is SomeInteger:
-          const validationUpper =
-            validationField.getCustomPragmaVal(maxValue).bound
+          const validationUpper = validationField.getCustomPragmaVal(maxValue).bound
           if validationField > validationUpper:
             validationResult.addError(
-              validationLocation, "out_of_range",
-              "must be at most " & $validationUpper,
+              validationLocation, "out_of_range", "must be at most " & $validationUpper
             )
         else:
           {.error: "maxValue requires an integer field".}
@@ -644,13 +584,11 @@ proc validateValue[T](
           when validationField is SomeFloat:
             if validationFieldIsFinite:
               checkGreaterOrEqual(
-                validationResult, validationLocation, validationField,
-                validationMinimum,
+                validationResult, validationLocation, validationField, validationMinimum
               )
           else:
             checkGreaterOrEqual(
-              validationResult, validationLocation, validationField,
-              validationMinimum,
+              validationResult, validationLocation, validationField, validationMinimum
             )
         else:
           {.error: "ge requires a numeric field".}
@@ -677,25 +615,20 @@ proc validateValue[T](
           when validationField is SomeFloat:
             if validationFieldIsFinite:
               checkLessOrEqual(
-                validationResult, validationLocation, validationField,
-                validationMaximum,
+                validationResult, validationLocation, validationField, validationMaximum
               )
           else:
             checkLessOrEqual(
-              validationResult, validationLocation, validationField,
-              validationMaximum,
+              validationResult, validationLocation, validationField, validationMaximum
             )
         else:
           {.error: "le requires a numeric field".}
-      when validationField is ref or validationField is object or
-          validationField is seq or
+      when validationField is ref or validationField is object or validationField is seq or
           validationField is array:
         validateValue(validationField, validationResult, validationLocation)
   elif T is seq or T is array:
     for validationIndex, validationItem in value:
-      validateValue(
-        validationItem, validationResult, location & @[$validationIndex]
-      )
+      validateValue(validationItem, validationResult, location & @[$validationIndex])
 
 template validateModel*[T](value: T): ValidationResult =
   ## Validates ``value`` recursively against its field pragmas.
