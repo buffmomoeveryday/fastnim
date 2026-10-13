@@ -223,6 +223,10 @@ proc typeSchema(node: NimNode): JsonNode {.compileTime.} =
     if container in ["seq", "array"]:
       let item = current[^1]
       return %*{"type": "array", "items": typeSchema(item)}
+    if container in ["Table", "OrderedTable"] and current.len == 3:
+      return %*{
+        "type": "object", "additionalProperties": typeSchema(current[2])
+      }
     if container == "Option":
       result = typeSchema(current[1])
       result["nullable"] = newJBool(true)

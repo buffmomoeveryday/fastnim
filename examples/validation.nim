@@ -17,13 +17,9 @@
 ## {
 ##   "code": "validation_failed",
 ##   "message": "validation failed",
-##   "errors": [
-##     {
-##       "location": ["body", "contact", "email"],
-##       "code": "email",
-##       "message": "must be a valid email address"
-##     }
-##   ]
+##   "fields": {
+##     "body.contact.email": "must be a valid email address"
+##   }
 ## }
 ## ```
 ##

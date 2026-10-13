@@ -220,9 +220,12 @@ proc wwwAuthenticate*(options: AuthOptions): string =
 
 proc unauthorized*(missing: bool, options: AuthOptions): Response =
   ## Creates a 401 JSON response with the scheme challenge when applicable.
-  result = json(
+  result = apiErrorResponse(
     statusUnauthorized,
-    %*{"detail": if missing: "authentication required" else: "invalid credentials"},
+    initApiError(
+      if missing: "authentication_required" else: "invalid_credentials",
+      if missing: "authentication required" else: "invalid credentials",
+    ),
   )
   let challenge = wwwAuthenticate(options)
   if challenge.len > 0:

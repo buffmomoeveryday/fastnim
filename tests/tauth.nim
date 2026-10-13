@@ -85,8 +85,8 @@ block bearerRejectsUnknownAndMissing:
   doAssert wrong.headers["content-type"] == "application/json; charset=utf-8"
   let missing = app.handleSync(initRequest(HttpMethod.Get, "/me"))
   doAssert missing.status == 401
-  doAssert parseJson(missing.body)["detail"].getStr() == "authentication required"
-  doAssert parseJson(wrong.body)["detail"].getStr() == "invalid credentials"
+  doAssert parseJson(missing.body)["message"].getStr() == "authentication required"
+  doAssert parseJson(wrong.body)["message"].getStr() == "invalid credentials"
 
 block identityHeadersCannotBeSpoofed:
   let app = initFastNim(logs = false)

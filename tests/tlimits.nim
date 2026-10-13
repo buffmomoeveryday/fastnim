@@ -1,4 +1,4 @@
-import std/[assertions, logging, os, strutils, tables, tempfiles]
+import std/[assertions, json, logging, os, strutils, tables, tempfiles]
 
 import chronos
 
@@ -37,6 +37,8 @@ block rejectsOversizedBufferedBody:
   )
   doAssert oversized.status == 413
   doAssert "request body exceeds the size limit" in oversized.body
+  doAssert parseJson(oversized.body)["code"].getStr() == "content_too_large"
+  doAssert parseJson(oversized.body)["fields"].len == 0
   doAssert handlerCalls == 0
   let allowed = app.handleSync(
     initRequest(HttpMethod.Post, "/items", body = "abcd")
@@ -134,6 +136,7 @@ block cancelsHandlerThatExceedsTimeout:
   let timedOut = app.handleSync(initRequest(HttpMethod.Get, "/slow"))
   doAssert timedOut.status == 503
   doAssert "request handler timed out" in timedOut.body
+  doAssert parseJson(timedOut.body)["code"].getStr() == "handler_timeout"
   doAssert "x-response-time-us" in timedOut.headers
   doAssert handlerCancelled
   doAssert loggedTimeout

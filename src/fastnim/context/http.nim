@@ -100,6 +100,33 @@ type
 
   Headers* = Table[string, string] ## HTTP header mapping with lowercase names.
 
+  ApiError* = object
+    ## Standard JSON error returned by FastNim applications.
+    ##
+    ## ``code`` is stable and machine-readable, ``message`` is safe to show to
+    ## clients, and ``fields`` maps dotted input locations to error messages.
+    code*: string ## Machine-readable error code.
+    message*: string ## Human-readable, client-safe summary.
+    fields*: Table[string, string] ## Field-specific messages keyed by dotted path.
+
+  ApiErrorException* = object of CatchableError
+    ## Base class for application exceptions translated into ``ApiError`` responses.
+    code*: string ## Machine-readable error code returned to the client.
+    fields*: Table[string, string] ## Optional field-specific error messages.
+
+  BadRequestError* = object of ApiErrorException
+    ## Application error translated to HTTP 400.
+  UnauthorizedError* = object of ApiErrorException
+    ## Application error translated to HTTP 401.
+  ForbiddenError* = object of ApiErrorException
+    ## Application error translated to HTTP 403.
+  NotFoundError* = object of ApiErrorException
+    ## Application error translated to HTTP 404.
+  ConflictError* = object of ApiErrorException
+    ## Application error translated to HTTP 409.
+  UnprocessableEntityError* = object of ApiErrorException
+    ## Application error translated to HTTP 422.
+
   Request* = object
     ## An incoming HTTP request after route matching.
     ## ``method`` holds the request method.
@@ -131,6 +158,94 @@ type
     event*: string ## Optional event name, omitted when empty.
     id*: string ## Optional event ID for client-side replay, omitted when empty.
     retry*: int ## Reconnection delay in milliseconds, omitted when negative.
+
+proc initApiError*(
+    code, message: string,
+    fields = initTable[string, string](),
+): ApiError {.raises: [].} =
+  ## Creates the standard FastNim error value.
+  ApiError(code: code, message: message, fields: fields)
+
+proc newApiErrorException[T: ApiErrorException](
+    errorType: typedesc[T], message, code: string,
+    fields: Table[string, string],
+): ref T =
+  result = newException(errorType, message)
+  result.code = code
+  result.fields = fields
+
+proc newBadRequestError*(
+    message: string,
+    code = "bad_request",
+    fields = initTable[string, string](),
+): ref BadRequestError =
+  ## Creates an application exception translated to HTTP 400.
+  newApiErrorException(BadRequestError, message, code, fields)
+
+proc newUnauthorizedError*(
+    message: string,
+    code = "unauthorized",
+    fields = initTable[string, string](),
+): ref UnauthorizedError =
+  ## Creates an application exception translated to HTTP 401.
+  newApiErrorException(UnauthorizedError, message, code, fields)
+
+proc newForbiddenError*(
+    message: string,
+    code = "forbidden",
+    fields = initTable[string, string](),
+): ref ForbiddenError =
+  ## Creates an application exception translated to HTTP 403.
+  newApiErrorException(ForbiddenError, message, code, fields)
+
+proc newNotFoundError*(
+    message: string,
+    code = "not_found",
+    fields = initTable[string, string](),
+): ref NotFoundError =
+  ## Creates an application exception translated to HTTP 404.
+  newApiErrorException(NotFoundError, message, code, fields)
+
+proc newConflictError*(
+    message: string,
+    code = "conflict",
+    fields = initTable[string, string](),
+): ref ConflictError =
+  ## Creates an application exception translated to HTTP 409.
+  newApiErrorException(ConflictError, message, code, fields)
+
+proc newUnprocessableEntityError*(
+    message: string,
+    code = "unprocessable_entity",
+    fields = initTable[string, string](),
+): ref UnprocessableEntityError =
+  ## Creates an application exception translated to HTTP 422.
+  newApiErrorException(UnprocessableEntityError, message, code, fields)
+
+proc apiError*(error: ref ApiErrorException): ApiError {.raises: [].} =
+  ## Converts an application exception into its public error value.
+  initApiError(error.code, error.msg, error.fields)
+
+proc apiErrorStatus*(error: ref ApiErrorException): HttpStatus {.raises: [].} =
+  ## Returns the HTTP status assigned to a known application exception.
+  ##
+  ## The mapping is: ``BadRequestError`` 400, ``UnauthorizedError`` 401,
+  ## ``ForbiddenError`` 403, ``NotFoundError`` 404, ``ConflictError`` 409, and
+  ## ``UnprocessableEntityError`` 422.
+  if error of BadRequestError:
+    statusBadRequest
+  elif error of UnauthorizedError:
+    statusUnauthorized
+  elif error of ForbiddenError:
+    statusForbidden
+  elif error of NotFoundError:
+    statusNotFound
+  elif error of ConflictError:
+    statusConflict
+  elif error of UnprocessableEntityError:
+    statusUnprocessableContent
+  else:
+    statusInternalServerError
 
 proc decodeComponent(value: string): string =
   decodeUrl(value.replace("+", " "))
@@ -452,6 +567,27 @@ proc response*[T](status: int, model: T): Response =
   result = initResponse(body = $toJsonValue(model))
   result.status = status
   result.setHeader("content-type", "application/json; charset=utf-8")
+
+proc apiErrorResponse*(
+    status: int, error: ApiError
+): Response {.gcsafe, raises: [].} =
+  ## Serializes ``error`` using FastNim's standard JSON error envelope.
+  var fields = newJObject()
+  for name, message in error.fields:
+    fields[name] = newJString(message)
+  var node = newJObject()
+  node["code"] = newJString(error.code)
+  node["message"] = newJString(error.message)
+  node["fields"] = fields
+  result = initResponse(body = $node)
+  result.status = status
+  result.setHeader("content-type", "application/json; charset=utf-8")
+
+proc apiErrorResponse*(
+    status: HttpStatus, error: ApiError
+): Response {.gcsafe, raises: [].} =
+  ## Serializes ``error`` using a named HTTP status.
+  apiErrorResponse(status.statusCode(), error)
 
 proc response*(status: int, model: JsonNode): Response {.raises: [].} =
   ## Creates a JSON response from an already-encoded JSON value.

@@ -41,10 +41,6 @@ type
     id*: int
     name*: string
     email*: string
-
-  ApiError* = object
-    ## Error payload returned with 4xx statuses.
-    detail*: string
 """
 
 proc apiUsersRoutes(): string =
@@ -79,7 +75,7 @@ userRouter.get("/{id}", responses = @[(200, User), (404, ApiError)]):
       -1
   let ix = findUser(id)
   if ix < 0:
-    notFound ApiError(detail: "user not found")
+    notFound initApiError("user_not_found", "user not found")
   else:
     ok store[ix]
 
@@ -97,7 +93,7 @@ userRouter.delete("/{id}", responses = @[(204, void), (404, ApiError)]):
       -1
   let ix = findUser(id)
   if ix < 0:
-    notFound ApiError(detail: "user not found")
+    notFound initApiError("user_not_found", "user not found")
   else:
     {.gcsafe.}:
       store.del(ix)
@@ -144,7 +140,9 @@ suite "users":
   test "gets a missing user":
     let response = client.get("/users/999")
     check response.status == 404
-    check response.json() == %*{"detail": "user not found"}
+    check response.json() == %*{
+      "code": "user_not_found", "message": "user not found", "fields": {}
+    }
 
   test "creates a user":
     let response = client.post(

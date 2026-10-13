@@ -4,14 +4,13 @@
 ## constraints: non-empty product names, valid email addresses, positive
 ## quantities, bounded pagination, and allowed order transitions.
 ##
-## Boundary rule: malformed JSON or wrong field types keep the existing
-## ``400 {"detail": ...}`` shape failure (see ``parseJsonBody``); only
-## value-constraint failures produce ``422`` through this module.
+## Boundary rule: malformed JSON or wrong field types produce ``400``; only
+## value-constraint failures produce ``422`` through this module. Both use
+## FastNim's standard ``ApiError`` envelope.
 ##
-## The 422 envelope contains an ``errors`` array. Each error has a stable code,
-## human-readable message, and location such as ``["body", "customer", "email"]``.
-## Keeping errors as a sequence preserves multiple failures on one field and
-## supports nested objects and arrays.
+## Field failures use dotted, source-prefixed keys such as
+## ``body.customer.email``. When more than one failure targets the same path,
+## the first message is retained in the response.
 ##
 ## ```nim
 ## import fastnim
@@ -35,16 +34,8 @@ import fastnim/params/validationtypes
 export validationtypes
 
 type
-  ValidationErrorResponse* = object
-    ## Interim structured input-error envelope.
-    ##
-    ## Query parsing uses it for 400 responses and constraint validation uses
-    ## it for 422 responses. It migrates to the unified ``ApiError`` of issue
-    ## #9; ``errors`` preserves every failure and its nested location.
-    code*: string ## Machine-readable error code, e.g. ``"validation_failed"``.
-    message*: string ## Human-readable summary, e.g. ``"validation failed"``.
-    errors*: seq[validationtypes.FieldError]
-      ## Constraint failures with source-prefixed locations.
+  ValidationErrorResponse* = ApiError
+    ## Compatibility alias for the standard ``ApiError`` validation envelope.
 
   ValidatedBody*[T] = object
     ## Outcome of ``request.validate``: the parsed body plus its status.
@@ -396,16 +387,19 @@ proc toValidationError*(
     code = "validation_failed",
     message = "validation failed",
     source = "body",
-): ValidationErrorResponse {.raises: [].} =
+): ApiError {.raises: [].} =
   ## Builds a structured input-error envelope prefixed with ``source``.
   let prefix =
     if source.len == 0:
       @[]
     else:
       @[source]
-  ValidationErrorResponse(
-    code: code, message: message, errors: validation.withPrefix(prefix).errors
-  )
+  var fields = initTable[string, string]()
+  for issue in validation.withPrefix(prefix).errors:
+    let location = issue.location.join(".")
+    if location notin fields:
+      fields[location] = issue.message
+  initApiError(code, message, fields)
 
 proc validationResponse*(
     validation: ValidationResult,
@@ -416,15 +410,9 @@ proc validationResponse*(
 ): Response =
   ## Creates a structured validation response using the requested HTTP status.
   ##
-  ## The body is assembled directly to keep the wire representation stable.
+  ## Field locations are dot-separated and the first error for a location wins.
   let envelope = toValidationError(validation, code, message, source)
-  var errors = newJArray()
-  for issue in envelope.errors:
-    errors.add(
-      %*{"location": issue.location, "code": issue.code, "message": issue.message}
-    )
-  var node = %*{"code": envelope.code, "message": envelope.message, "errors": errors}
-  json(status, node)
+  apiErrorResponse(status, envelope)
 
 proc queryParsingResponse*(validation: ValidationResult): Response =
   ## Creates a structured 400 response for URL query extraction failures.
@@ -444,9 +432,9 @@ proc parseAndValidateBody*[T](
   ## Decodes a JSON request body into ``value`` and runs ``validate`` on it.
   ##
   ## Returns ``(true, none)`` when both steps pass. A JSON shape failure
-  ## (malformed JSON or wrong field types) returns the existing 400
-  ## ``{"detail": ...}`` response; a value-constraint failure returns the
-  ## standard 422 response. Handlers early-return on ``error``:
+  ## (malformed JSON or wrong field types) returns a standard 400 ``ApiError``;
+  ## a value-constraint failure returns the standard 422 response. Handlers
+  ## early-return on ``error``:
   ##
   ## ```nim
   ## let checked = parseAndValidateBody(request, body, validateProduct)
@@ -454,8 +442,15 @@ proc parseAndValidateBody*[T](
   ##   return checked.error.get()
   ## ```
   if not parseJsonBody(request, value):
-    return
-      (false, some(json(statusBadRequest, %*{"detail": "invalid JSON request body"})))
+    return (
+      false,
+      some(
+        apiErrorResponse(
+          statusBadRequest,
+          initApiError("invalid_request_body", "invalid JSON request body"),
+        )
+      ),
+    )
   let validation = validate(value)
   if not validation.isValid():
     return (false, some(validationResponse(validation)))

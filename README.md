@@ -87,9 +87,56 @@ Handlers must await Chronos operations; `os.sleep` cannot be cancelled.
 | Client stalls while sending headers | `408` |
 | HTTP handler exceeds `handlerTimeout` | `503` |
 
-Limit responses are JSON `{"detail": ...}`. `onError` can replace that body.
+FastNim-owned limit responses use the standard `ApiError` JSON envelope.
+`onError` can replace that body.
 A handler deadline cancels the handler and is still logged with its status and
 elapsed time. The connection stays open for later requests.
+
+## API errors
+
+Framework-generated errors have one public shape:
+
+```json
+{
+  "code": "validation_failed",
+  "message": "validation failed",
+  "fields": {
+    "body.name": "must not be empty"
+  }
+}
+```
+
+`ApiError` exports `code`, `message`, and `fields`. Field keys are dotted paths
+prefixed by their input source (`body`, `form`, or `query`); sequence indexes
+are path components. If validation produces multiple failures for one path,
+the first message is retained.
+
+Raise a typed application exception when routing should translate a domain
+failure automatically:
+
+```nim
+proc getProduct(request: Request): Response =
+  discard request
+  raise newNotFoundError(
+    "product was not found",
+    code = "product_not_found",
+  )
+
+app.get("/products/{id}", getProduct)
+```
+
+| Exception | Status | Default code |
+| --- | ---: | --- |
+| `BadRequestError` | `400` | `bad_request` |
+| `UnauthorizedError` | `401` | `unauthorized` |
+| `ForbiddenError` | `403` | `forbidden` |
+| `NotFoundError` | `404` | `not_found` |
+| `ConflictError` | `409` | `conflict` |
+| `UnprocessableEntityError` | `422` | `unprocessable_entity` |
+
+Other `CatchableError` values are logged and become a sanitized 500 with code
+`internal_server_error`; their messages and stack details are never returned.
+An `onError` handler remains an explicit override for framework responses.
 
 ## Typed query parameters
 
@@ -317,7 +364,7 @@ app.post("/login", form = LoginForm, responses = @[(200, LoginForm)]):
 ```
 
 Fields support strings, booleans, numeric types, and enums. Malformed typed
-values return `400 {"detail":"invalid form request body"}`. Run the complete
+values return a 400 `ApiError` with code `invalid_request_body`. Run the complete
 example with `nim c -r --path:src examples/forms.nim`.
 
 ## Multipart uploads
@@ -697,25 +744,21 @@ return JSON responses, including when passed a `%*` JSON node. `noContent void`
 is the special empty 204 response.
 
 ```nim
-type
-  Item = object
-    id: int
-
-  ApiError = object
-    detail: string
+type Item = object
+  id: int
 
 app.get("/items/{itemId}", responses = @[(200, Item), (404, ApiError)]):
   if request.pathParam("itemId") == "1":
     ok Item(id: 1)
   else:
-    notFound ApiError(detail: "item not found")
+    notFound initApiError("item_not_found", "item not found")
 ```
 
 ## Typed JSON bodies
 
 For `POST` routes, declare `body = ModelType`; the route receives the decoded
 model as `body` and retains the raw HTTP request as `request`. Invalid JSON
-returns `400 {"detail":"invalid JSON request body"}`.
+returns a 400 `ApiError` with code `invalid_request_body`.
 
 ```nim
 type
