@@ -66,6 +66,18 @@ block registersMiddlewareWithCommandSyntax:
   doAssert response.headers["x-command-style"] == "use"
   doAssert response.headers["x-command-style-plural"] == "true"
 
+block registersMiddlewareListInOrder:
+  stepCount = 0
+  let app = initFastNim(logs = false)
+  app.middlewares:
+    firstMiddleware
+    secondMiddleware
+  app.get("/", endpoint)
+
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/"))
+  doAssert response.status == 200
+  doAssert steps[0..<stepCount] == [1, 2, 5, 3, 4]
+
 block canShortCircuitRoutes:
   endpointCalled = false
   let app = initFastNim(logs = false)

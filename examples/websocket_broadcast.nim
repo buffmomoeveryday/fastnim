@@ -17,8 +17,6 @@ app.websocket("/chat"):
     {.gcsafe.}:
       discard clients.removeWebSocket(websocket)
 
-
-
 let server = app.serve(port = 8000)
 echo "Connect multiple WebSocket clients to ws://127.0.0.1:8000/chat"
 waitFor server.join()

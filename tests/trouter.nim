@@ -96,6 +96,35 @@ block routerMiddlewareIsolation:
   let appRoute = app.handleSync(initRequest(HttpMethod.Get, "/app"))
   doAssert appRoute.headers.getOrDefault("x-router") == ""
 
+block routerMiddlewareList:
+  proc addFirstHeader(
+      request: Request, next: NextHandler
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
+    var response = await next(request)
+    response.setHeader("x-first", "true")
+    response
+
+  proc addSecondHeader(
+      request: Request, next: NextHandler
+  ): Future[Response] {.async: (raises: [CatchableError]).} =
+    var response = await next(request)
+    response.setHeader("x-second", "true")
+    response
+
+  let router = initRouter(prefix = "/list")
+  router.middlewares:
+    addFirstHeader
+    addSecondHeader
+  router.get("/"):
+    text("ok")
+
+  let app = initFastNim(logs = false)
+  app.addRouter(router)
+
+  let response = app.handleSync(initRequest(HttpMethod.Get, "/list/"))
+  doAssert response.headers.getOrDefault("x-first") == "true"
+  doAssert response.headers.getOrDefault("x-second") == "true"
+
 block routerTagsMerge:
   let router = initRouter(prefix = "/users", tags = @["users"])
   router.get(

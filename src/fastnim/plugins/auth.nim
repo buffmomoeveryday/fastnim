@@ -46,28 +46,24 @@ const
   AuthSchemeHeader* = "x-auth-scheme"
     ## Downstream header carrying the verifying scheme name.
 
-type
-  AuthOptions* = object ## Configuration installed by ``authPlugin``.
-    schemes*: set[AuthScheme] ## Accepted mechanisms; must not be empty.
-    includePaths*: seq[string]
-      ## Protected URL patterns (``{name}`` and trailing ``*`` allowed).
-    excludePaths*: seq[string] ## Public URL patterns; exclusions always win.
-    realm*: string ## Authentication realm reported in challenges.
-    bearerTokens*: Table[string, string]
-      ## Static bearer token to subject mapping.
-    apiKeys*: Table[string, string] ## Static API key to subject mapping.
-    apiKeyHeader*: string ## Header carrying API keys.
-    apiKeyQuery*: string
-      ## Query parameter also accepted for API keys; empty disables it.
-    basicUsers*: Table[string, string]
-      ## Username to password mapping. Passwords are compared in constant
-      ## time, but for production look users up in a real credential store
-      ## with a password hasher instead of keeping them here.
-    jwtSecrets*: seq[string]
-      ## HS256 secrets tried in order, so rotation is hitless.
-    jwtLeewaySeconds*: int ## Clock skew accepted for ``exp``/``nbf``.
-    sessionStore*: SessionStore ## Enables the session scheme when set.
-    sessionCookie*: string ## Cookie carrying session ids.
+type AuthOptions* = object ## Configuration installed by ``authPlugin``.
+  schemes*: set[AuthScheme] ## Accepted mechanisms; must not be empty.
+  includePaths*: seq[string]
+    ## Protected URL patterns (``{name}`` and trailing ``*`` allowed).
+  excludePaths*: seq[string] ## Public URL patterns; exclusions always win.
+  realm*: string ## Authentication realm reported in challenges.
+  bearerTokens*: Table[string, string] ## Static bearer token to subject mapping.
+  apiKeys*: Table[string, string] ## Static API key to subject mapping.
+  apiKeyHeader*: string ## Header carrying API keys.
+  apiKeyQuery*: string ## Query parameter also accepted for API keys; empty disables it.
+  basicUsers*: Table[string, string]
+    ## Username to password mapping. Passwords are compared in constant
+    ## time, but for production look users up in a real credential store
+    ## with a password hasher instead of keeping them here.
+  jwtSecrets*: seq[string] ## HS256 secrets tried in order, so rotation is hitless.
+  jwtLeewaySeconds*: int ## Clock skew accepted for ``exp``/``nbf``.
+  sessionStore*: SessionStore ## Enables the session scheme when set.
+  sessionCookie*: string ## Cookie carrying session ids.
 
 proc initAuthOptions*(
     schemes: set[AuthScheme] = {AuthScheme.Bearer},
@@ -138,8 +134,9 @@ proc authScheme*(request: Request): string {.inline, raises: [].} =
   ## Returns the verifying scheme name set by the auth middleware, or "".
   request.header(AuthSchemeHeader)
 
-proc authenticate*(request: Request, options: AuthOptions): Future[AuthIdentity] {.
-    async: (raises: [CatchableError]).} =
+proc authenticate*(
+    request: Request, options: AuthOptions
+): Future[AuthIdentity] {.async: (raises: [CatchableError]).} =
   ## Asynchronously verifies ``request`` credentials and returns the identity,
   ## or nil.
   ##
@@ -149,28 +146,26 @@ proc authenticate*(request: Request, options: AuthOptions): Future[AuthIdentity]
   ## ``app.sse`` handlers, which middleware never reaches.
   let authorization = request.header("authorization")
   if authorization.len > 0:
-    if authorization.len > 7 and
-        authorization[0 .. 6].cmpIgnoreCase("bearer ") == 0:
+    if authorization.len > 7 and authorization[0 .. 6].cmpIgnoreCase("bearer ") == 0:
       let token = authorization[7 ..^ 1].strip()
       if AuthScheme.Bearer in options.schemes:
         let subject = lookupSubject(token, options.bearerTokens)
         if subject.len > 0:
-          return AuthIdentity(subject: subject, scheme: AuthScheme.Bearer,
-            claims: newJObject())
+          return AuthIdentity(
+            subject: subject, scheme: AuthScheme.Bearer, claims: newJObject()
+          )
       if AuthScheme.Jwt in options.schemes:
         try:
-          let claims = verifyJwtHs256(
-            token, options.jwtSecrets, options.jwtLeewaySeconds
-          )
+          let claims =
+            verifyJwtHs256(token, options.jwtSecrets, options.jwtLeewaySeconds)
           let subject = claims.getOrDefault("sub").getStr("")
           if subject.len > 0:
-            return AuthIdentity(subject: subject, scheme: AuthScheme.Jwt,
-              claims: claims)
+            return
+              AuthIdentity(subject: subject, scheme: AuthScheme.Jwt, claims: claims)
         except ValueError:
           discard
       return nil
-    if authorization.len > 6 and
-        authorization[0 .. 5].cmpIgnoreCase("basic ") == 0:
+    if authorization.len > 6 and authorization[0 .. 5].cmpIgnoreCase("basic ") == 0:
       if AuthScheme.Basic notin options.schemes:
         return nil
       let (user, password, ok) = basicCredentials(request)
@@ -183,8 +178,8 @@ proc authenticate*(request: Request, options: AuthOptions): Future[AuthIdentity]
           known = true
           expected = stored
       if known and secureCompare(password, expected):
-        return AuthIdentity(subject: user, scheme: AuthScheme.Basic,
-          claims: newJObject())
+        return
+          AuthIdentity(subject: user, scheme: AuthScheme.Basic, claims: newJObject())
       return nil
     return nil
 
@@ -193,8 +188,9 @@ proc authenticate*(request: Request, options: AuthOptions): Future[AuthIdentity]
     if key.len > 0:
       let subject = lookupSubject(key, options.apiKeys)
       if subject.len > 0:
-        return AuthIdentity(subject: subject, scheme: AuthScheme.ApiKey,
-          claims: newJObject())
+        return AuthIdentity(
+          subject: subject, scheme: AuthScheme.ApiKey, claims: newJObject()
+        )
       return nil
 
   if AuthScheme.Session in options.schemes and not options.sessionStore.isNil:
@@ -202,8 +198,8 @@ proc authenticate*(request: Request, options: AuthOptions): Future[AuthIdentity]
       options.sessionStore, sessionIdCookie(request, options.sessionCookie)
     )
     if subject.len > 0:
-      return AuthIdentity(subject: subject, scheme: AuthScheme.Session,
-        claims: newJObject())
+      return
+        AuthIdentity(subject: subject, scheme: AuthScheme.Session, claims: newJObject())
     if sessionIdCookie(request, options.sessionCookie).len > 0:
       return nil
 
@@ -222,30 +218,24 @@ proc wwwAuthenticate*(options: AuthOptions): string =
     parts.add("Basic realm=\"" & options.realm & "\"")
   parts.join(", ")
 
-proc unauthorized*(
-    missing: bool, options: AuthOptions
-): Response =
+proc unauthorized*(missing: bool, options: AuthOptions): Response =
   ## Creates a 401 JSON response with the scheme challenge when applicable.
   result = json(
     statusUnauthorized,
-    %*{
-      "detail":
-        if missing:
-          "authentication required"
-        else:
-          "invalid credentials"
-    },
+    %*{"detail": if missing: "authentication required" else: "invalid credentials"},
   )
   let challenge = wwwAuthenticate(options)
   if challenge.len > 0:
     result.setHeader("www-authenticate", challenge)
 
 proc hasCredentials(request: Request, options: AuthOptions): bool =
-  request.header("authorization").len > 0 or
-    (AuthScheme.ApiKey in options.schemes and
-      apiKey(request, options.apiKeyHeader, options.apiKeyQuery).len > 0) or
-    (AuthScheme.Session in options.schemes and not options.sessionStore.isNil and
-      sessionIdCookie(request, options.sessionCookie).len > 0)
+  request.header("authorization").len > 0 or (
+    AuthScheme.ApiKey in options.schemes and
+    apiKey(request, options.apiKeyHeader, options.apiKeyQuery).len > 0
+  ) or (
+    AuthScheme.Session in options.schemes and not options.sessionStore.isNil and
+    sessionIdCookie(request, options.sessionCookie).len > 0
+  )
 
 proc isPreflight(request: Request): bool {.inline.} =
   ## Detects CORS preflight, which carries no credentials by design.
@@ -278,9 +268,7 @@ proc contributeAuth(document: var JsonNode) =
       if operation.kind == JObject and "responses" in operation:
         operation["responses"]["401"] = %*{
           "description": "Unauthorized",
-          "content": {
-            "application/json": {"schema": {"type": "object"}}
-          },
+          "content": {"application/json": {"schema": {"type": "object"}}},
         }
 
 proc authPlugin*(

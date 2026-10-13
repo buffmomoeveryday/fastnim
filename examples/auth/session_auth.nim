@@ -45,7 +45,7 @@ app.post("/login"):
   if not parseJsonBody(request, credentials):
     return json(statusBadRequest, %*{"detail": "invalid JSON request body"})
   if not secureCompare(
-      DemoUsers.getOrDefault(credentials.username, ""), credentials.password
+    DemoUsers.getOrDefault(credentials.username, ""), credentials.password
   ):
     return json(statusUnauthorized, %*{"detail": "invalid credentials"})
   var response = json(%*{"ok": true})

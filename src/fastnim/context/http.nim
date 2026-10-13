@@ -143,8 +143,8 @@ iterator decodedQueryFields(query: string): tuple[key, value: string] =
         yield (decodeComponent(field), "")
       else:
         yield (
-          decodeComponent(field[0..<separator]),
-          decodeComponent(field[separator + 1..^1]),
+          decodeComponent(field[0 ..< separator]),
+          decodeComponent(field[separator + 1 ..^ 1]),
         )
 
 proc parseQuery*(query: string): Table[string, string] =
@@ -157,9 +157,9 @@ proc parseQuery*(query: string): Table[string, string] =
   for key, value in decodedQueryFields(query):
     result[key] = value
 
-proc queryParamValues*(request: Request, name: string): seq[string] {.
-    inline, raises: []
-.} =
+proc queryParamValues*(
+    request: Request, name: string
+): seq[string] {.inline, raises: [].} =
   ## Returns every decoded value for the query parameter ``name``.
   ##
   ## Values follow their order in the URL query string. Repeated names create
@@ -198,7 +198,7 @@ proc initRequest*(
     result.path = target
   else:
     result.path = target[0 ..< separator]
-    for key, value in decodedQueryFields(target[separator + 1..^1]):
+    for key, value in decodedQueryFields(target[separator + 1 ..^ 1]):
       result.queryParams[key] = value
       result.queryValues.mgetOrPut(key, @[]).add(value)
 
@@ -256,7 +256,7 @@ proc statusCode*(status: HttpStatus): int {.inline, raises: [].} =
 
 macro defineStatusResponse(name: untyped, code: static[int]): untyped =
   let exportedName = nnkPostfix.newTree(ident("*"), name)
-  result = quote do:
+  result = quote:
     template `exportedName`(model: untyped): Response =
       ## Creates a JSON response using the corresponding HTTP status.
       response(`code`, model)
@@ -265,6 +265,7 @@ defineStatusResponse(ok, 200)
 template ok*(responseType: typedesc[Response], model: untyped): Response =
   ## Supports command-style ``ok %*{...}`` inside route blocks.
   response(200, model)
+
 defineStatusResponse(created, 201)
 defineStatusResponse(accepted, 202)
 defineStatusResponse(switchingProtocols, 101)

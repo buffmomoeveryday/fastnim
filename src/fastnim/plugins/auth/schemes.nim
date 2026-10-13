@@ -228,8 +228,8 @@ proc verifyJwtHs256*(
       raise newException(ValueError, failure)
   payload
 
-proc verifyJwtHs256*(token, secret: string, leewaySeconds = 60): JsonNode {.
-    raises: [ValueError]
-.} =
+proc verifyJwtHs256*(
+    token, secret: string, leewaySeconds = 60
+): JsonNode {.raises: [ValueError].} =
   ## Verifies an HS256 JWT against a single ``secret``.
   verifyJwtHs256(token, [secret], leewaySeconds)

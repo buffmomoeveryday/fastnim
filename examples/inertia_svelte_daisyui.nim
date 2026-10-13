@@ -196,8 +196,8 @@ proc rootTemplate(pageJson: string): string =
     <script type="module" src="/assets/app.js"></script>
   </head>
   <body>
-    <script data-page="app" type="application/json">""" & pageJson &
-    """</script>
+    <script data-page="app" type="application/json">""" &
+    pageJson & """</script>
     <div id="app"></div>
   </body>
 </html>"""
@@ -211,16 +211,41 @@ proc dashboardProps(): JsonNode =
 proc usersProps(): JsonNode =
   %*{
     "users": [
-      {"id": 1, "name": "Ada Lovelace", "email": "ada@example.com",
-       "role": "Admin", "active": true},
-      {"id": 2, "name": "Linus Torvalds", "email": "linus@example.com",
-       "role": "Maintainer", "active": true},
-      {"id": 3, "name": "Grace Hopper", "email": "grace@example.com",
-       "role": "Reviewer", "active": false},
-      {"id": 4, "name": "Edsger Dijkstra", "email": "edsger@example.com",
-       "role": "Contributor", "active": true},
-      {"id": 5, "name": "Barbara Liskov", "email": "barbara@example.com",
-       "role": "Contributor", "active": false},
+      {
+        "id": 1,
+        "name": "Ada Lovelace",
+        "email": "ada@example.com",
+        "role": "Admin",
+        "active": true,
+      },
+      {
+        "id": 2,
+        "name": "Linus Torvalds",
+        "email": "linus@example.com",
+        "role": "Maintainer",
+        "active": true,
+      },
+      {
+        "id": 3,
+        "name": "Grace Hopper",
+        "email": "grace@example.com",
+        "role": "Reviewer",
+        "active": false,
+      },
+      {
+        "id": 4,
+        "name": "Edsger Dijkstra",
+        "email": "edsger@example.com",
+        "role": "Contributor",
+        "active": true,
+      },
+      {
+        "id": 5,
+        "name": "Barbara Liskov",
+        "email": "barbara@example.com",
+        "role": "Contributor",
+        "active": false,
+      },
     ]
   }
 

@@ -81,8 +81,7 @@ proc initOpenApiOperation*(
 proc typeSchema(node: NimNode): JsonNode {.compileTime.}
 
 proc isOptionType(node: NimNode): bool {.compileTime.} =
-  if node.kind == nnkBracketExpr and node.len == 2 and
-      eqIdent(node[0], "Option"):
+  if node.kind == nnkBracketExpr and node.len == 2 and eqIdent(node[0], "Option"):
     return true
   if node.kind == nnkSym:
     let impl = node.getImpl()
@@ -117,9 +116,9 @@ proc objectType(node: NimNode): NimNode {.compileTime.} =
 
 proc numericLiteral(node: NimNode): JsonNode {.compileTime.} =
   case node.kind
-  of nnkIntLit..nnkUInt64Lit:
+  of nnkIntLit .. nnkUInt64Lit:
     result = newJInt(node.intVal)
-  of nnkFloatLit..nnkFloat128Lit:
+  of nnkFloatLit .. nnkFloat128Lit:
     result = newJFloat(node.floatVal)
   of nnkPrefix:
     if node.len == 2 and eqIdent(node[0], "-"):
@@ -147,15 +146,11 @@ proc compareNumbers(a, b: JsonNode): int {.compileTime.} =
   else:
     cmp(a.numericValue(), b.numericValue())
 
-proc mergeMinimum(
-    schema: var JsonNode, name: string, bound: JsonNode
-) {.compileTime.} =
+proc mergeMinimum(schema: var JsonNode, name: string, bound: JsonNode) {.compileTime.} =
   if name notin schema or compareNumbers(bound, schema[name]) > 0:
     schema[name] = bound
 
-proc mergeMaximum(
-    schema: var JsonNode, name: string, bound: JsonNode
-) {.compileTime.} =
+proc mergeMaximum(schema: var JsonNode, name: string, bound: JsonNode) {.compileTime.} =
   if name notin schema or compareNumbers(bound, schema[name]) < 0:
     schema[name] = bound
 
@@ -164,8 +159,10 @@ proc applyValidationSchema(schema: var JsonNode, source: NimNode) {.compileTime.
     return
   for pragma in source[1]:
     let name =
-      if pragma.kind in {nnkCall, nnkCommand, nnkExprColonExpr}: $pragma[0]
-      else: $pragma
+      if pragma.kind in {nnkCall, nnkCommand, nnkExprColonExpr}:
+        $pragma[0]
+      else:
+        $pragma
     case name
     of "nonEmpty":
       schema.mergeMinimum("minLength", newJInt(1))
@@ -272,8 +269,8 @@ macro openApiQueryParameters*(model: typedesc): untyped =
       %*{
         "name": field.jsonName,
         "in": "query",
-        "required": field.defaultValue.kind == nnkEmpty and
-          not field.fieldType.isOptionType() and
+        "required":
+          field.defaultValue.kind == nnkEmpty and not field.fieldType.isOptionType() and
           not field.fieldType.isSequenceType(),
         "schema": schema,
       }

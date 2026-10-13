@@ -56,6 +56,41 @@ registration adapter.
 parser does not recognize the `QUERY` method yet, so serving `QUERY` requests
 requires a Chronos version with `MethodQuery` support.
 
+## Request limits
+
+`initRequestLimits` caps body size, header name, value, and count, the raw
+header block, how long a client may take to send headers, and how long one
+HTTP handler may run:
+
+```nim
+let app = initFastNim(
+  limits = initRequestLimits(
+    maxBodySize = 1024 * 1024,
+    maxHeaderCount = 40,
+    handlerTimeout = 5.seconds,
+  )
+)
+```
+
+`serve` copies `maxBodySize`, `maxHeadersSize`, and `headersTimeout` into
+Chronos. A positive `serve(maxRequestBodySize = ...)` overrides `maxBodySize`
+for that server. Header name, value, and count limits, and `handlerTimeout`,
+are read on each request. `InfiniteDuration` disables a timeout.
+`handlerTimeout` does not apply to server-sent events or WebSocket routes.
+Handlers must await Chronos operations; `os.sleep` cannot be cancelled.
+
+| Condition | Status |
+| --- | --- |
+| Body or upload above its limit | `413` |
+| Header name, value, count, or raw header block above its limit | `431` |
+| Malformed request | `400` |
+| Client stalls while sending headers | `408` |
+| HTTP handler exceeds `handlerTimeout` | `503` |
+
+Limit responses are JSON `{"detail": ...}`. `onError` can replace that body.
+A handler deadline cancels the handler and is still logged with its status and
+elapsed time. The connection stays open for later requests.
+
 ## Typed query parameters
 
 Declare query parameters as an object and pass its type to the route. FastNim
@@ -232,8 +267,8 @@ app.use(proc(
 )
 ```
 
-The command style (`app.use:`) and the plural alias (`app.middlewares:`) are
-equivalent alternatives. Each block takes a single middleware:
+The command style (`app.use:`) accepts one middleware. The plural alias
+(`app.middlewares:`) accepts a list and registers each middleware in order:
 
 ```nim
 app.use:
@@ -246,14 +281,6 @@ app.use:
 
 app.middlewares:
   requestId()
-```
-
-Repeat the block — or call `app.use(...)` — for each additional middleware:
-
-```nim
-app.middlewares:
-  requestId()
-app.middlewares:
   responseTime()
 ```
 
@@ -363,9 +390,11 @@ let options = initMultipartOptions(
 ```
 
 Malformed multipart input returns JSON `400`, size and file-count violations
-return `413`, and rejected content types return `415`. The transport also has a
-body limit configured with `app.serve(maxRequestBodySize = ...)`; keep it at
-least as large as the endpoint's multipart request limit. See
+return `413`, and rejected content types return `415`. `maxBodySize` is the
+outer cap: a `Content-Length` or buffered body above it returns `413` before
+`parseMultipart` runs. Keep it at least as large as the endpoint's multipart
+`maxRequestSize`. `serve(maxRequestBodySize = ...)` overrides that cap for the
+server. A handler timeout cancels parsing and deletes partial uploads. See
 [`examples/product_image_upload.nim`](examples/product_image_upload.nim) for a
 complete product-image endpoint and `curl -F` command.
 

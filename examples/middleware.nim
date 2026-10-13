@@ -14,7 +14,7 @@ middleware requireAdmin:
   # after the request reaches the handler
 
 middleware addResponseHeaders:
-  # brefore the request reaches the handler
+  # before the request reaches the handler
   var response = await next(request)
   # after the request reaches the handler
   response.setHeader("x-powered-by", "fastnim")
@@ -22,14 +22,15 @@ middleware addResponseHeaders:
 
 let app = initFastNim()
 
-app.use requireAdmin
-app.use addResponseHeaders
+app.middlewares:
+  requireAdmin
+  addResponseHeaders
 
 app.get("/"):
   text "Public endpoint"
 
 app.get("/json"):
-  ok %*{"ok": "done"}
+  ok (%*{"ok": "done", "hello": 1})
 
 app.get("/admin"):
   text "Admin endpoint"

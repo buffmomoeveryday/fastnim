@@ -30,17 +30,20 @@ proc initDb(): DbConn =
 
 api.dependencies(Dependencies):
   # database
-  provide db: initDb()
-  cleanup db: db.close()
+  provide db:
+    initDb()
+  cleanup db:
+    db.close()
 
   # const
-  provide str: "hello world"
-  cleanup str: discard
+  provide str:
+    "hello world"
+  cleanup str:
+    discard
 
-type
-  User = object
-    id: int
-    name: string
+type User = object
+  id: int
+  name: string
 
 proc getAllUsers(db: DbConn): seq[User] =
   result = @[]

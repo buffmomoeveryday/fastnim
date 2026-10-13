@@ -147,8 +147,7 @@ app.get("/"):
       """<h1>FastNim + Datastar</h1>""" &
 
     # ---- Counter ---------------------------------------------------------
-    """<section><h2>Counter</h2>""" &
-      """<div data-init="@get('/count/stream')"></div>""" &
+    """<section><h2>Counter</h2>""" & """<div data-init="@get('/count/stream')"></div>""" &
       """<div>Server count: <b id="count">0</b> | Client signal: <b data-text="$count"></b></div>""" &
       """<button data-on:click="@post('/increment')">Increment</button> """ &
       """<button data-on:click="$count = 0">Reset (client only)</button>""" &
@@ -183,11 +182,10 @@ app.get("/"):
       renderFeed() &
       """<input type="text" placeholder="Post a note to every tab" data-bind:note """ &
       """data-on:keydown="evt.key === 'Enter' && @post('/notes/add')"> """ &
-      """<button data-on:click="@post('/notes/add')">Post</button>""" &
-      """</section>""" &
+      """<button data-on:click="@post('/notes/add')">Post</button>""" & """</section>""" &
 
-    # ---- Misc server-driven actions -------------------------------------
-    """<section><h2>Server actions</h2>""" &
+      # ---- Misc server-driven actions -------------------------------------
+      """<section><h2>Server actions</h2>""" &
       """<button data-on:click="@post('/log')">Run script in browser</button> """ &
       """<button data-on:click="@post('/go-about')">Redirect to /about</button>""" &
       """</section>""" & """</body></html>"""
@@ -208,7 +206,7 @@ app.post("/increment"):
 
   countFeed.broadcast(countEvent)
   countFeed.broadcast(countSignals)
-  
+
   datastarStream([countEvent, countSignals])
 
 app.sse("/count/stream"):
@@ -244,7 +242,8 @@ app.post("/todos/add"):
     [
       renderTodos().patchElements(),
       renderStats().patchElements(),
-      patchSignals(%*{"newTodo": ""}), # clears the bound input (call syntax: %* can't prefix a dot-call)
+      patchSignals(%*{"newTodo": ""}),
+        # clears the bound input (call syntax: %* can't prefix a dot-call)
     ]
   )
 
@@ -254,16 +253,13 @@ app.post("/todos/toggle"):
     todos[idx].done = not todos[idx].done
     datastarStream(
       [
-        patchElements renderTodo(todos[idx]), 
+        patchElements renderTodo(todos[idx]),
         patchElements renderStats() # renders stats
+        ,
       ]
     )
   else:
-    datastarStream(
-      [
-      removeElements("#todo-" & request.queryParam("id"))
-      ]
-      )
+    datastarStream([removeElements("#todo-" & request.queryParam("id"))])
 
 app.post("/todos/delete"):
   let id = todoIdParam(request)
@@ -299,7 +295,7 @@ app.sse("/notes/stream"):
     var firstHtml = ""
     {.gcsafe.}:
       firstHtml = feed.snapshot()
-    
+
     if firstHtml.len > 0:
       await send(patchElements(firstHtml))
 
@@ -331,7 +327,6 @@ app.post("/log"):
 app.post("/go-about"):
   datastarStream([redirect("/about")])
 
-
 proc feedHeartbeat() {.gcsafe, async.} =
   ## Keeps idle streams alive through proxies and bounds dead-client
   ## detection: the next relay after a heartbeat fails on dead connections,
@@ -341,7 +336,6 @@ proc feedHeartbeat() {.gcsafe, async.} =
     {.gcsafe.}:
       feed.broadcast(patchSignals(newJObject()))
       countFeed.broadcast(patchSignals(newJObject()))
-
 
 let server = app.serve(port = Port)
 echo "Datastar demo: http://127.0.0.1:" & $Port

@@ -2,14 +2,13 @@
 
 import std/[macros, sets]
 
-type
-  JsonFieldInfo* = object
-    ## Compile-time names and type information for one JSON object field.
-    nimName*: string ## Field name used by Nim code.
-    jsonName*: string ## Field name used by JSON and OpenAPI.
-    fieldType*: NimNode ## Field type AST.
-    defaultValue*: NimNode ## Field initializer AST, or ``nnkEmpty`` when absent.
-    source*: NimNode ## Source AST used for compiler diagnostics.
+type JsonFieldInfo* = object
+  ## Compile-time names and type information for one JSON object field.
+  nimName*: string ## Field name used by Nim code.
+  jsonName*: string ## Field name used by JSON and OpenAPI.
+  fieldType*: NimNode ## Field type AST.
+  defaultValue*: NimNode ## Field initializer AST, or ``nnkEmpty`` when absent.
+  source*: NimNode ## Source AST used for compiler diagnostics.
 
 proc bareFieldName(node: NimNode): NimNode {.compileTime.} =
   result = node
@@ -23,8 +22,8 @@ proc renamedFieldName(node: NimNode, defaultName: string): string {.compileTime.
   if node.kind != nnkPragmaExpr:
     return
   for pragma in node[1]:
-    if pragma.kind in {nnkCall, nnkCommand, nnkExprColonExpr} and
-        pragma.len >= 2 and eqIdent(pragma[0], "jsonName"):
+    if pragma.kind in {nnkCall, nnkCommand, nnkExprColonExpr} and pragma.len >= 2 and
+        eqIdent(pragma[0], "jsonName"):
       if pragma[1].kind notin {nnkStrLit, nnkRStrLit, nnkTripleStrLit}:
         error("jsonName must be a string literal", pragma)
       result = pragma[1].strVal

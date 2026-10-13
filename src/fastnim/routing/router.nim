@@ -2,12 +2,13 @@
 
 import std/[json, logging, macrocache, macros, monotimes, strutils, tables, times]
 
-import chronos/[asyncloop, futures, transport]
-from chronos/apps/http/httpserver import HttpWriteError
+import chronos/[asyncloop, futures, timer, transport]
+from chronos/apps/http/httpserver import HttpRequestBodyTooLargeError, HttpWriteError
 from websock/websock import WebSocketError
 
 import fastnim/context/http
 import fastnim/context/state
+import fastnim/core/limits
 import fastnim/logging
 import fastnim/openapi/spec
 import fastnim/params/extract
@@ -114,14 +115,18 @@ type
     openApiContributors: seq[OpenApiContributor]
     errorHandlers*: Table[int, ErrorHandler]
       ## Custom responses for framework-generated error statuses.
+    limits: RequestLimits
 
 proc initFastNim*(
-    settings: ApplicationSettings, openApi = initOpenApiSettings()
+    settings: ApplicationSettings,
+    openApi = initOpenApiSettings(),
+    limits = initRequestLimits(),
 ): Application =
   ## Creates an empty application with the supplied settings.
   ##
   ## When logging is enabled and no handler is configured, logs are colorized
-  ## on the console.
+  ## on the console. ``limits`` caps request bodies, headers, and handler time.
+  validateRequestLimits(limits)
   result = Application(
     routes: @[],
     middleware: @[],
@@ -134,6 +139,7 @@ proc initFastNim*(
     pluginContexts: initTable[string, Context](),
     openApiContributors: @[],
     errorHandlers: initTable[int, ErrorHandler](),
+    limits: limits,
   )
   if result.settings.logs and result.settings.logHandler.isNil:
     result.settings.logHandler = colorConsoleLogHandler(result.settings.logLevel)
@@ -143,27 +149,36 @@ proc initFastNim*(
     logHandler: LogHandler = nil,
     logLevel = lvlInfo,
     openApi = initOpenApiSettings(),
+    limits = initRequestLimits(),
 ): Application =
   ## Creates an empty application.
   ##
   ## Set ``logs = false`` to disable framework logs, or provide ``logHandler``
-  ## to send them to a custom destination.
-  initFastNim(initApplicationSettings(logs, logHandler, logLevel), openApi)
+  ## to send them to a custom destination. ``limits`` caps request bodies,
+  ## headers, and handler time.
+  initFastNim(
+    initApplicationSettings(logs, logHandler, logLevel), openApi, limits
+  )
 
 proc newApplication*(
-    settings: ApplicationSettings, openApi = initOpenApiSettings()
+    settings: ApplicationSettings,
+    openApi = initOpenApiSettings(),
+    limits = initRequestLimits(),
 ): Application {.deprecated: "Use FastNim instead.".} =
   ## Deprecated alias for ``initFastNim``.
-  initFastNim(settings, openApi)
+  initFastNim(settings, openApi, limits)
 
 proc newApplication*(
     logs = true,
     logHandler: LogHandler = nil,
     logLevel = lvlInfo,
     openApi = initOpenApiSettings(),
+    limits = initRequestLimits(),
 ): Application {.deprecated: "Use FastNim instead.".} =
   ## Deprecated alias for ``initFastNim``.
-  initFastNim(initApplicationSettings(logs, logHandler, logLevel), openApi)
+  initFastNim(
+    initApplicationSettings(logs, logHandler, logLevel), openApi, limits
+  )
 
 proc initRouter*(prefix = "", tags: seq[string] = @[]): Router =
   ## Creates an empty router with an optional path prefix and default tags.
@@ -216,6 +231,22 @@ proc insertRegistration(
 proc openApiSettings*(app: Application): OpenApiSettings {.inline.} =
   ## Returns this application's OpenAPI endpoint configuration.
   app.openApiSettings
+
+proc requestLimits*(app: Application): lent RequestLimits =
+  ## Returns the request limits used for new requests.
+  app.limits
+
+proc configureRequestLimits*(app: Application, limits: RequestLimits) =
+  ## Replaces this application's request limits.
+  ##
+  ## ``serve`` copies ``maxBodySize``, ``maxHeadersSize``, and
+  ## ``headersTimeout`` into Chronos when the server starts. Header name,
+  ## value, and count limits, plus ``handlerTimeout``, are read on each
+  ## request. ``limits`` must be valid for ``initRequestLimits``: positive
+  ## sizes, header name and value limits that fit in the header block, and
+  ## timeouts that are positive or infinite.
+  validateRequestLimits(limits)
+  app.limits = limits
 
 proc configureOpenApi*(app: Application, settings: OpenApiSettings) =
   ## Configures this application's OpenAPI and Swagger UI endpoints.
@@ -494,6 +525,25 @@ proc onError*(app: Application, status: int, handler: ErrorHandler) =
     raise newException(ValueError, "Error handler status must be between 400 and 599")
   app.errorHandlers[status] = handler
 
+proc limitResponse*(
+    app: Application, request: Request, status: int, detail: string
+): Response =
+  ## Builds a JSON limit response, using ``onError`` when one is registered.
+  ##
+  ## The default body is ``{"detail": detail}``. A handler registered for
+  ## ``status`` replaces that body. Handler failures fall back to the JSON body.
+  let handler = app.errorHandlers.getOrDefault(status)
+  if not handler.isNil:
+    try:
+      return handler(request)
+    except CatchableError as exc:
+      app.logError("Error handler for status " & $status & " failed: " & exc.msg)
+    except:
+      app.logError("Error handler for status " & $status & " failed")
+  result = initResponse($(%*{"detail": detail}))
+  result.status = status
+  result.setHeader("content-type", "application/json; charset=utf-8")
+
 proc errorResponse*(app: Application, request: Request, status: int): Response =
   ## Builds a framework error response, using a registered handler if present.
   let handler = app.errorHandlers.getOrDefault(status)
@@ -545,13 +595,24 @@ proc use*(
   inc router.middlewareOrder
   insertRegistration(router.middleware, registration)
 
-proc middlewares*(app: Application, middleware: Middleware) =
-  ## Adds middleware using the plural ``app.middlewares: middleware`` style.
-  app.use(middleware)
+macro middlewares*(target: Application | Router, body: untyped): untyped =
+  ## Adds one or more middleware values in declaration order.
+  ##
+  ## Each expression in a colon block is registered as a separate middleware:
+  ##
+  ## ```nim
+  ## app.middlewares:
+  ##   requestId()
+  ##   responseTime()
+  ## ```
+  let targetSym = genSym(nskLet, "middlewareTarget")
+  result = newStmtList(newLetStmt(targetSym, target))
 
-proc middlewares*(router: Router, middleware: Middleware) =
-  ## Adds router-scoped middleware using the plural style.
-  router.use(middleware)
+  if body.kind == nnkStmtList:
+    for middleware in body:
+      result.add(newCall(bindSym("use"), targetSym, middleware))
+  else:
+    result.add(newCall(bindSym("use"), targetSym, body))
 
 proc initPlugin*(name, version: string, install: PluginInstall): Plugin =
   ## Creates a plugin definition for use with ``app.install``.
@@ -861,7 +922,10 @@ proc responseStatus(node: NimNode): NimNode =
   if node.kind != nnkIdent:
     return node
   let code = responseAliasCode($node)
-  if code < 0: node else: newLit(code)
+  if code < 0:
+    node
+  else:
+    newLit(code)
 
 proc responseTuple(node: NimNode): NimNode =
   if node.kind == nnkTupleConstr:
@@ -988,11 +1052,8 @@ proc typedOpenApiOperation(
         if not `operation`.responses.hasKey("422"):
           `operation`.responses["422"] = %*{
             "description": "Request validation failed",
-            "content": {
-              "application/json": {
-                "schema": openApiSchema(ValidationErrorResponse)
-              }
-            },
+            "content":
+              {"application/json": {"schema": openApiSchema(ValidationErrorResponse)}},
           }
     )
   if queryType.kind != nnkEmpty:
@@ -1005,20 +1066,14 @@ proc typedOpenApiOperation(
         if not `operation`.responses.hasKey("400"):
           `operation`.responses["400"] = %*{
             "description": "Invalid query parameters",
-            "content": {
-              "application/json": {
-                "schema": openApiSchema(ValidationErrorResponse)
-              }
-            },
+            "content":
+              {"application/json": {"schema": openApiSchema(ValidationErrorResponse)}},
           }
         if not `operation`.responses.hasKey("422"):
           `operation`.responses["422"] = %*{
             "description": "Query parameter validation failed",
-            "content": {
-              "application/json": {
-                "schema": openApiSchema(ValidationErrorResponse)
-              }
-            },
+            "content":
+              {"application/json": {"schema": openApiSchema(ValidationErrorResponse)}},
           }
     )
   result[^1].add(operation)
@@ -1057,9 +1112,12 @@ proc buildTypedRoute(
         if values[0].kind in {nnkIntLit .. nnkInt64Lit}:
           values[0].intVal.int
         elif values[0].kind == nnkIdent:
-          if eqIdent(values[0], "noContent"): 204
-          else: responseAliasCode($values[0])
-        else: -1
+          if eqIdent(values[0], "noContent"):
+            204
+          else:
+            responseAliasCode($values[0])
+        else:
+          -1
       if status < 0:
         error("response returns need a literal status or status alias", values[0])
       if status notin models:
@@ -1071,7 +1129,11 @@ proc buildTypedRoute(
 
     if node.kind in {nnkCall, nnkCommand} and node.len >= 2 and node[0].kind == nnkIdent:
       let name = $node[0]
-      let status = if name == "noContent": 204 else: responseAliasCode(name)
+      let status =
+        if name == "noContent":
+          204
+        else:
+          responseAliasCode(name)
       if status >= 0:
         if node.len != 2:
           error(name & " expects exactly one response model", node)
@@ -1118,10 +1180,9 @@ proc buildTypedRoute(
   )
   let contentType =
     if inputName == "form": "application/x-www-form-urlencoded" else: "application/json"
-  let documentation =
-    typedOpenApiOperation(
-      `method`, path, responses, bodyType, queryType, routeDocs, contentType
-    )
+  let documentation = typedOpenApiOperation(
+    `method`, path, responses, bodyType, queryType, routeDocs, contentType
+  )
   if bodyType.kind == nnkEmpty and queryType.kind == nnkEmpty:
     result = quote:
       addRoute(
@@ -1142,7 +1203,7 @@ proc buildTypedRoute(
       if queryValidator.kind == nnkEmpty:
         newStmtList()
       else:
-        quote do:
+        quote:
           `validation`.mergeErrors(`queryValidator`(`parsedQuery`))
     result = quote:
       addRoute(
@@ -1172,7 +1233,7 @@ proc buildTypedRoute(
       if validator.kind == nnkEmpty:
         newStmtList()
       else:
-        quote do:
+        quote:
           `validation`.mergeErrors(`validator`(`parsedBody`))
     result = quote:
       addRoute(
@@ -1429,22 +1490,11 @@ proc buildBodyRoute(
   addOption("deprecated", deprecated)
 
   result = buildTypedRoute(
-    app,
-    path,
-    responses,
-    routeBody,
-    `method`,
-    bodyType,
-    inputName,
-    parser,
-    invalidMessage,
-    validator,
-    docs,
+    app, path, responses, routeBody, `method`, bodyType, inputName, parser,
+    invalidMessage, validator, docs,
   )
 
-proc buildBlockRoute(
-    app, path, body, `method`: NimNode
-): NimNode {.compileTime.} =
+proc buildBlockRoute(app, path, body, `method`: NimNode): NimNode {.compileTime.} =
   if body.kind != nnkStmtList:
     return quote:
       addRoute(`app`, `method`, `path`, `body`)
@@ -1712,16 +1762,37 @@ proc match(route: Route, request: Request, params: var Table[string, string]): b
       return false
   true
 
+proc invokeHandler(
+    app: Application, handler: RouteHandler, request: Request
+): Future[Response] {.async: (raises: [CatchableError]).} =
+  ## Runs one HTTP handler, cancelling it when ``handlerTimeout`` elapses.
+  ##
+  ## The deadline becomes a ``503`` response so middleware still observes it.
+  ## Cancellation of this procedure itself, such as server shutdown, is
+  ## re-raised. Server-sent events and WebSocket handlers do not use this path.
+  let timeout = app.requestLimits.handlerTimeout
+  if timeout.isInfinite():
+    return await handler(request)
+  let pending = handler(request)
+  let finished =
+    try:
+      await pending.withTimeout(timeout)
+    except CancelledError as exc:
+      raise exc
+  if not finished:
+    return app.limitResponse(request, 503, HandlerTimeoutDetail)
+  await pending
+
 proc runRouteMiddleware(
-    route: Route, index: int, request: Request
+    app: Application, route: Route, index: int, request: Request
 ): Future[Response] {.async: (raises: [CatchableError]).} =
   ## Runs router-scoped middleware around an already matched route handler.
   if index == route.routerMiddleware.len:
-    return await route.handler(request)
+    return await app.invokeHandler(route.handler, request)
   let next: NextHandler = proc(
       nextRequest: Request
   ): Future[Response] {.async: (raises: [CatchableError]).} =
-    return await runRouteMiddleware(route, index + 1, nextRequest)
+    return await runRouteMiddleware(app, route, index + 1, nextRequest)
   return await route.routerMiddleware[index](request, next)
 
 proc dispatch(
@@ -1756,8 +1827,8 @@ proc dispatch(
       if route.kind == RouteKind.WebSocket:
         return text(statusNotImplemented, "WebSocket routes require an HTTP server")
       if route.routerMiddleware.len > 0:
-        return await runRouteMiddleware(route, 0, matchedRequest)
-      return await route.handler(matchedRequest)
+        return await runRouteMiddleware(app, route, 0, matchedRequest)
+      return await app.invokeHandler(route.handler, matchedRequest)
   return app.errorResponse(request, 404)
 
 proc runMiddleware(
@@ -1780,9 +1851,21 @@ proc handle*(
   var contextualRequest = request
   contextualRequest.context = app.context
   try:
-    result = await app.runMiddleware(0, contextualRequest)
+    let headerDetail = headerLimitDetail(contextualRequest.headers, app.requestLimits)
+    if headerDetail.len > 0:
+      result = app.limitResponse(contextualRequest, 431, headerDetail)
+    else:
+      let bodyDetail = bodyLimitDetail(
+        contextualRequest.headers, contextualRequest.body, app.requestLimits
+      )
+      if bodyDetail.len > 0:
+        result = app.limitResponse(contextualRequest, 413, bodyDetail)
+      else:
+        result = await app.runMiddleware(0, contextualRequest)
   except CancelledError as exc:
     raise exc
+  except HttpRequestBodyTooLargeError:
+    result = app.limitResponse(contextualRequest, 413, BodyTooLargeDetail)
   except MultipartError as exc:
     result = initResponse($(%*{"detail": exc.msg}))
     result.status = exc.status
