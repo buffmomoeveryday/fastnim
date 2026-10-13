@@ -84,7 +84,9 @@ wrong JSON shape returns:
 
 ```json
 {
-  "detail": "invalid JSON request body"
+  "code": "invalid_request_body",
+  "message": "invalid JSON request body",
+  "fields": {}
 }
 ```
 
@@ -361,13 +363,9 @@ Constraint failures use status `422` by default:
 {
   "code": "validation_failed",
   "message": "validation failed",
-  "errors": [
-    {
-      "location": ["body", "quantity"],
-      "code": "greater_than_or_equal",
-      "message": "must be greater than or equal to 1"
-    }
-  ]
+  "fields": {
+    "body.quantity": "must be greater than or equal to 1"
+  }
 }
 ```
 
@@ -379,8 +377,7 @@ Automatic source prefixes are:
 
 Query parsing errors use status `400` with code
 `invalid_query_parameters` and message `invalid query parameters`. Repeated
-parameter errors include the zero-based value index, for example
-`["query", "id", "1"]`.
+parameter errors include the zero-based value index, for example `query.id.1`.
 
 For manual response construction:
 
@@ -394,7 +391,7 @@ return validationResponse(
 )
 ```
 
-`toValidationError` builds the typed `ValidationErrorResponse` without
+`toValidationError` builds the typed `ApiError` without
 creating an HTTP response. `queryParsingResponse` creates the standard query
 parsing `400` response.
 

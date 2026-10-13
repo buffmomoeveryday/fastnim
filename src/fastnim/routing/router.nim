@@ -23,7 +23,9 @@ type
   SyncRouteHandler* =
     proc(request: Request): Response {.nimcall, raises: [CatchableError].}
     ## Legacy synchronous route handler adapted to ``RouteHandler`` at registration.
-  ErrorHandler* = proc(request: Request): Response {.closure, gcsafe.}
+  ErrorHandler* = proc(request: Request): Response {.
+    closure, gcsafe, raises: [CatchableError]
+  .}
     ## Creates a response for a framework-generated HTTP error status.
   NextHandler* = proc(request: Request): Future[Response] {.
     closure, async: (raises: [CatchableError])
@@ -525,45 +527,51 @@ proc onError*(app: Application, status: int, handler: ErrorHandler) =
     raise newException(ValueError, "Error handler status must be between 400 and 599")
   app.errorHandlers[status] = handler
 
+proc defaultApiError(status: int, message = ""): ApiError {.raises: [].} =
+  let fallback =
+    case status
+    of 400: ("bad_request", "Bad Request")
+    of 401: ("unauthorized", "Unauthorized")
+    of 403: ("forbidden", "Forbidden")
+    of 404: ("not_found", "Not Found")
+    of 408: ("request_timeout", "Request Timeout")
+    of 409: ("conflict", "Conflict")
+    of 413: ("content_too_large", "Content Too Large")
+    of 422: ("validation_failed", "Unprocessable Content")
+    of 431: ("request_headers_too_large", "Request Header Fields Too Large")
+    of 500: ("internal_server_error", "Internal Server Error")
+    of 503: ("service_unavailable", "Service Unavailable")
+    else: ("http_error", "HTTP Error " & $status)
+  initApiError(
+    fallback[0],
+    if message.len == 0: fallback[1] else: message,
+  )
+
+proc apiErrorResponse(
+    app: Application, request: Request, status: int, error: ApiError
+): Response {.gcsafe, raises: [].} =
+  let handler = app.errorHandlers.getOrDefault(status)
+  if not handler.isNil:
+    try:
+      return handler(request)
+    except CatchableError as exc:
+      app.logError("Error handler for status " & $status & " failed: " & exc.msg)
+  http.apiErrorResponse(status, error)
+
 proc limitResponse*(
     app: Application, request: Request, status: int, detail: string
-): Response =
-  ## Builds a JSON limit response, using ``onError`` when one is registered.
-  ##
-  ## The default body is ``{"detail": detail}``. A handler registered for
-  ## ``status`` replaces that body. Handler failures fall back to the JSON body.
-  let handler = app.errorHandlers.getOrDefault(status)
-  if not handler.isNil:
-    try:
-      return handler(request)
-    except CatchableError as exc:
-      app.logError("Error handler for status " & $status & " failed: " & exc.msg)
-    except:
-      app.logError("Error handler for status " & $status & " failed")
-  result = initResponse($(%*{"detail": detail}))
-  result.status = status
-  result.setHeader("content-type", "application/json; charset=utf-8")
+): Response {.gcsafe, raises: [].} =
+  ## Builds a standard JSON limit response, honoring ``onError`` overrides.
+  var error = defaultApiError(status, detail)
+  if status == 503 and detail == HandlerTimeoutDetail:
+    error.code = "handler_timeout"
+  app.apiErrorResponse(request, status, error)
 
-proc errorResponse*(app: Application, request: Request, status: int): Response =
-  ## Builds a framework error response, using a registered handler if present.
-  let handler = app.errorHandlers.getOrDefault(status)
-  if not handler.isNil:
-    try:
-      return handler(request)
-    except CatchableError as exc:
-      app.logError("Error handler for status " & $status & " failed: " & exc.msg)
-    except:
-      app.logError("Error handler for status " & $status & " failed")
-  case status
-  of 404:
-    notFound()
-  of 500:
-    json(statusInternalServerError, %*{"detail": "Internal Server Error"})
-  else:
-    block:
-      var response = initResponse("HTTP Error " & $status)
-      response.status = status
-      response
+proc errorResponse*(
+    app: Application, request: Request, status: int
+): Response {.gcsafe, raises: [].} =
+  ## Builds a standard framework error, honoring ``onError`` overrides.
+  app.apiErrorResponse(request, status, defaultApiError(status))
 
 proc use*(
     app: Application,
@@ -1041,11 +1049,7 @@ proc typedOpenApiOperation(
             "description": "Invalid request body",
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {"detail": {"type": "string"}},
-                  "required": ["detail"],
-                }
+                  "schema": openApiSchema(ApiError)
               }
             },
           }
@@ -1053,7 +1057,7 @@ proc typedOpenApiOperation(
           `operation`.responses["422"] = %*{
             "description": "Request validation failed",
             "content":
-              {"application/json": {"schema": openApiSchema(ValidationErrorResponse)}},
+              {"application/json": {"schema": openApiSchema(ApiError)}},
           }
     )
   if queryType.kind != nnkEmpty:
@@ -1067,13 +1071,13 @@ proc typedOpenApiOperation(
           `operation`.responses["400"] = %*{
             "description": "Invalid query parameters",
             "content":
-              {"application/json": {"schema": openApiSchema(ValidationErrorResponse)}},
+              {"application/json": {"schema": openApiSchema(ApiError)}},
           }
         if not `operation`.responses.hasKey("422"):
           `operation`.responses["422"] = %*{
             "description": "Query parameter validation failed",
             "content":
-              {"application/json": {"schema": openApiSchema(ValidationErrorResponse)}},
+              {"application/json": {"schema": openApiSchema(ApiError)}},
           }
     )
   result[^1].add(operation)
@@ -1245,7 +1249,10 @@ proc buildTypedRoute(
         ): Future[Response] {.async: (raises: [CatchableError]).} =
           var `parsedBody`: `bodyType`
           if not `parser`(`request`, `parsedBody`):
-            return json(statusBadRequest, %*{"detail": `invalidInputMessage`})
+            return apiErrorResponse(
+              statusBadRequest,
+              initApiError("invalid_request_body", `invalidInputMessage`),
+            )
           var `validation` = initValidationResult()
           when typeof(`parsedBody`) is object:
             `validation` = validateModel(`parsedBody`)
@@ -1866,10 +1873,17 @@ proc handle*(
     raise exc
   except HttpRequestBodyTooLargeError:
     result = app.limitResponse(contextualRequest, 413, BodyTooLargeDetail)
+  except ApiErrorException as exc:
+    let status = exc.apiErrorStatus().statusCode()
+    if status == 500:
+      app.logError("Unhandled request error: " & exc.msg)
+      result = app.errorResponse(contextualRequest, 500)
+    else:
+      result = app.apiErrorResponse(contextualRequest, status, exc.apiError())
   except MultipartError as exc:
-    result = initResponse($(%*{"detail": exc.msg}))
-    result.status = exc.status
-    result.setHeader("content-type", "application/json; charset=utf-8")
+    result = app.apiErrorResponse(
+      contextualRequest, exc.status, defaultApiError(exc.status, exc.msg)
+    )
   except CatchableError as exc:
     app.logError("Unhandled request error: " & exc.msg)
     result = app.errorResponse(contextualRequest, 500)

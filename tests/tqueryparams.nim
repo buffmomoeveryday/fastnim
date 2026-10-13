@@ -38,7 +38,8 @@ proc validateWindow(query: WindowQuery): ValidationResult =
   if query.finish < query.start:
     result.addError("finish", "range", "must be greater than or equal to start")
 
-proc firstError(response: Response): JsonNode = response.json()["errors"][0]
+proc fieldMessage(response: Response, location: string): string =
+  response.json()["fields"][location].getStr()
 
 proc testApp(): TestClient =
   let api = initFastNim(logs = false)
@@ -148,42 +149,40 @@ suite "Typed query parameters":
     let response = testApp().get("/required")
     check response.status == 400
     check response.json()["code"].getStr() == "invalid_query_parameters"
-    check response.firstError()["location"] == %*["query", "value"]
-    check response.firstError()["code"].getStr() == "required"
+    check response.fieldMessage("query.value") == "is required"
 
   test "returns structured 400 errors for invalid scalar values":
     let invalidInt = testApp().get("/required?value=two")
     check invalidInt.status == 400
-    check invalidInt.firstError()["code"].getStr() == "integer"
+    check invalidInt.fieldMessage("query.value") == "must be an integer"
 
     let invalidBool = testApp().get(
       "/search?category=books&sort=price&available=sometimes"
     )
     check invalidBool.status == 400
-    check invalidBool.firstError()["code"].getStr() == "boolean"
+    check invalidBool.fieldMessage("query.available") == "must be a boolean"
 
     let invalidEnum = testApp().get("/search?category=Books&sort=price")
     check invalidEnum.status == 400
-    check invalidEnum.firstError()["code"].getStr() == "enum"
+    check invalidEnum.fieldMessage("query.category") == "must be a valid enum value"
 
     let overflowingInt = testApp().get("/required?value=999999999999999999999999")
     check overflowingInt.status == 400
-    check overflowingInt.firstError()["code"].getStr() == "integer"
+    check overflowingInt.fieldMessage("query.value") == "must be an integer"
 
   test "reports the index of an invalid repeated value":
     let response = testApp().get("/ids?id=1&id=bad&id=3")
     check response.status == 400
-    check response.firstError()["location"] == %*["query", "id", "1"]
-    check response.firstError()["code"].getStr() == "integer"
+    check response.fieldMessage("query.id.1") == "must be an integer"
 
   test "rejects pagination values outside configured bounds":
     let badPage = testApp().get("/search?page=0&category=books&sort=price")
     check badPage.status == 422
-    check badPage.firstError()["location"] == %*["query", "page"]
+    check "query.page" in badPage.json()["fields"]
 
     let badLimit = testApp().get("/search?limit=101&category=books&sort=price")
     check badLimit.status == 422
-    check badLimit.firstError()["location"] == %*["query", "limit"]
+    check "query.limit" in badLimit.json()["fields"]
 
   test "preserves field defaults and runs a custom query validator":
     let defaulted = testApp().get("/window")
@@ -192,8 +191,8 @@ suite "Typed query parameters":
 
     let invalid = testApp().get("/window?start=10&finish=5")
     check invalid.status == 422
-    check invalid.firstError()["location"] == %*["query", "finish"]
-    check invalid.firstError()["code"].getStr() == "range"
+    check invalid.fieldMessage("query.finish") ==
+      "must be greater than or equal to start"
 
   test "documents query model fields as OpenAPI parameters":
     let api = initFastNim(logs = false)
@@ -208,4 +207,11 @@ suite "Typed query parameters":
     check not parameters[2]["required"].getBool()
     check parameters[3]["name"].getStr() == "category"
     check parameters[3]["required"].getBool()
+    let errorSchema =
+      api.openApiDocument()["paths"]["/search"]["get"]["responses"]["400"][
+        "content"
+      ]["application/json"]["schema"]
+    check errorSchema["properties"]["code"]["type"].getStr() == "string"
+    check errorSchema["properties"]["message"]["type"].getStr() == "string"
+    check errorSchema["properties"]["fields"]["type"].getStr() == "object"
     check parameters[7]["schema"]["type"].getStr() == "array"

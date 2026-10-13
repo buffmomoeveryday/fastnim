@@ -100,6 +100,11 @@ block uncaughtHandlerExceptionBecomesJson500:
     let response = await app.handle(initRequest(HttpMethod.Get, "/fail"))
     doAssert response.status == 500
     doAssert response.headers["content-type"].startsWith("application/json")
-    doAssert parseJson(response.body) == %*{"detail": "Internal Server Error"}
+    doAssert parseJson(response.body) == %*{
+      "code": "internal_server_error",
+      "message": "Internal Server Error",
+      "fields": {},
+    }
+    doAssert "handler failed" notin response.body
 
   waitFor asyncTest()

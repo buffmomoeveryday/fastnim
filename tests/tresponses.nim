@@ -94,7 +94,11 @@ block invalidJsonBody:
   let response =
     app.handleSync(initRequest(HttpMethod.Post, "/items/from-body", body = "not json"))
   doAssert response.status == 400
-  doAssert response.body == "{\"detail\":\"invalid JSON request body\"}"
+  doAssert parseJson(response.body) == %*{
+    "code": "invalid_request_body",
+    "message": "invalid JSON request body",
+    "fields": {},
+  }
 
 block jsonNameEncodesAndDecodesRequestBodies:
   let helper = initFastNim(logs = false)
