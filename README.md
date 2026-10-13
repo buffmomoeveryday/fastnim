@@ -686,6 +686,40 @@ small `HttpRequestRef.upgradeStream` Chronos extension in
 Apply it to Chronos 4.4.x until that API is available in the installed Chronos
 release.
 
+## MQTT
+
+Install the MQTT plugin to register publication handlers with the same block
+syntax as HTTP routes. Successful completion is acknowledged automatically;
+explicit rejection is only needed for exceptional outcomes:
+
+```nim
+let app = initFastNim()
+
+app.install:
+  mqttPlugin(initMqttOptions(address = "0.0.0.0", port = 1883))
+
+app.mqtt("/devices/{deviceId}/telemetry"):
+  let deviceId = message.topicParam("deviceId")
+  echo deviceId, ": ", message.payloadString
+
+app.mqtt("/private"):
+  if connection.username.len == 0:
+    return mqttReject(MqttReasonCode.NotAuthorized)
+
+let server = app.serveMqtt()
+waitFor server.join()
+```
+
+The broker transport supports MQTT 3.1, 3.1.1, and 5.0 over TCP with CONNECT,
+QoS 0/1 inbound PUBLISH, SUBSCRIBE, UNSUBSCRIBE, retained messages, PING, and
+DISCONNECT. Named route parameters match one topic level. Native `+` and
+terminal `#` filters are also accepted. Subscription delivery currently grants
+QoS 0. QoS 2, outbound QoS 1 state, persistent sessions, TLS, and MQTT over
+WebSocket require later protocol phases.
+
+Run [`examples/mqtt.nim`](examples/mqtt.nim) with
+`nim c -r --path:src examples/mqtt.nim` for a complete listener example.
+
 ## Typed responses
 
 Declare every status and JSON model a route may return. Within that route,
