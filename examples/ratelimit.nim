@@ -5,7 +5,8 @@ import fastnim/plugins/ratelimit
 
 let app = initFastNim()
 
-app.install(rateLimitPlugin(initRateLimitOptions(limit = 5, windowSeconds = 60)))
+app.install:
+  rateLimitPlugin initRateLimitOptions(limit = 5, windowSeconds = 60)
 
 app.get("/"):
   "This endpoint allows five requests per minute per x-forwarded-for value."

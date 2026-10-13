@@ -1,4 +1,4 @@
-import std/[assertions, json, strutils, tables]
+import std/[assertions, json, options, strutils, tables]
 
 import fastnim
 
@@ -8,7 +8,16 @@ type
     name {.jsonName: "display_name".}: string
 
   CreateItem = object
-    name: string
+    name {.minLen: 2, maxLen: 80, nonEmpty.}: string
+
+  OptionalItem = object
+    note: Option[string]
+
+  ItemDetails = ref object
+    label {.jsonName: "display_label", minLen: 1.}: string
+
+  ReferencedItem = object
+    details: ItemDetails
 
 let app = initFastNim(
   logs = false,
@@ -35,6 +44,20 @@ app.post(
 ):
   created Item(id: 1, name: body.name)
 
+app.put(
+  "/items/{itemId}",
+  body = CreateItem,
+  responses = @[(200, Item)],
+):
+  ok Item(id: 1, name: body.name)
+
+app.patch(
+  "/items/{itemId}",
+  body = CreateItem,
+  responses = @[(200, Item)],
+):
+  ok Item(id: 1, name: body.name)
+
 app.get(
   "/tagged",
   responses = @[(200, Item)],
@@ -51,12 +74,33 @@ block generatedDocument:
   doAssert document["info"]["title"].getStr == "Inventory"
   doAssert document["paths"]["/items/{itemId}"]["get"]["summary"].getStr == "Get one item"
   doAssert document["paths"]["/items/{itemId}"]["get"]["parameters"][0]["name"].getStr == "itemId"
-  let itemSchema = document["paths"]["/items/{itemId}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+  let itemResponse =
+    document["paths"]["/items/{itemId}"]["get"]["responses"]["200"]
+  let itemSchema = itemResponse["content"]["application/json"]["schema"]
   doAssert itemSchema["properties"]["id"]["type"].getStr == "integer"
   doAssert itemSchema["properties"]["display_name"]["type"].getStr == "string"
   doAssert "name" notin itemSchema["properties"]
-  let requestSchema = document["paths"]["/items"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+  let requestContent = document["paths"]["/items"]["post"]["requestBody"]["content"]
+  let requestSchema = requestContent["application/json"]["schema"]
   doAssert requestSchema["properties"]["name"]["type"].getStr == "string"
+  doAssert requestSchema["properties"]["name"]["minLength"].getInt == 2
+  doAssert requestSchema["properties"]["name"]["maxLength"].getInt == 80
+  let optionalSchema = openApiSchema(OptionalItem)
+  doAssert optionalSchema["properties"]["note"]["nullable"].getBool()
+  doAssert optionalSchema["required"].len == 0
+  let referencedSchema = openApiSchema(ReferencedItem)
+  let detailsSchema = referencedSchema["properties"]["details"]
+  doAssert detailsSchema["type"].getStr == "object"
+  doAssert detailsSchema["properties"]["display_label"]["minLength"].getInt == 1
+  doAssert "400" in document["paths"]["/items"]["post"]["responses"]
+  doAssert "422" in document["paths"]["/items"]["post"]["responses"]
+  doAssert "put" in document["paths"]["/items/{itemId}"]
+  doAssert "patch" in document["paths"]["/items/{itemId}"]
+  let patchOperation = document["paths"]["/items/{itemId}"]["patch"]
+  let patchSchema =
+    patchOperation["requestBody"]["content"]["application/json"]["schema"]
+  doAssert patchSchema["properties"]["name"]["minLength"].getInt == 2
+  doAssert "422" in patchOperation["responses"]
   doAssert document["paths"]["/items"]["post"]["tags"][0].getStr == "items"
   let tagged = document["paths"]["/tagged"]["get"]
   doAssert tagged["tags"][0].getStr == "items"

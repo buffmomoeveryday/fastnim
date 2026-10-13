@@ -78,6 +78,95 @@ proc initOpenApiOperation*(
 
 proc typeSchema(node: NimNode): JsonNode {.compileTime.}
 
+proc isOptionType(node: NimNode): bool {.compileTime.} =
+  if node.kind == nnkBracketExpr and node.len == 2 and
+      eqIdent(node[0], "Option"):
+    return true
+  if node.kind == nnkSym:
+    let impl = node.getImpl()
+    if impl.kind == nnkTypeDef:
+      return isOptionType(impl[^1])
+  false
+
+proc numericLiteral(node: NimNode): JsonNode {.compileTime.} =
+  case node.kind
+  of nnkIntLit..nnkUInt64Lit:
+    result = newJInt(node.intVal)
+  of nnkFloatLit..nnkFloat128Lit:
+    result = newJFloat(node.floatVal)
+  of nnkPrefix:
+    if node.len == 2 and eqIdent(node[0], "-"):
+      result = numericLiteral(node[1])
+      if result.kind == JInt:
+        result = newJInt(-result.getBiggestInt())
+      elif result.kind == JFloat:
+        result = newJFloat(-result.getFloat())
+      else:
+        error("validation bound must be a numeric literal", node)
+    else:
+      error("validation bound must be a numeric literal", node)
+  else:
+    error("validation bound must be a numeric literal", node)
+
+proc numericValue(node: JsonNode): BiggestFloat {.compileTime.} =
+  if node.kind == JInt:
+    BiggestFloat(node.getBiggestInt())
+  else:
+    BiggestFloat(node.getFloat())
+
+proc compareNumbers(a, b: JsonNode): int {.compileTime.} =
+  if a.kind == JInt and b.kind == JInt:
+    cmp(a.getBiggestInt(), b.getBiggestInt())
+  else:
+    cmp(a.numericValue(), b.numericValue())
+
+proc mergeMinimum(
+    schema: var JsonNode, name: string, bound: JsonNode
+) {.compileTime.} =
+  if name notin schema or compareNumbers(bound, schema[name]) > 0:
+    schema[name] = bound
+
+proc mergeMaximum(
+    schema: var JsonNode, name: string, bound: JsonNode
+) {.compileTime.} =
+  if name notin schema or compareNumbers(bound, schema[name]) < 0:
+    schema[name] = bound
+
+proc applyValidationSchema(schema: var JsonNode, source: NimNode) {.compileTime.} =
+  if source.kind != nnkPragmaExpr:
+    return
+  for pragma in source[1]:
+    let name =
+      if pragma.kind in {nnkCall, nnkCommand, nnkExprColonExpr}: $pragma[0]
+      else: $pragma
+    case name
+    of "nonEmpty":
+      schema.mergeMinimum("minLength", newJInt(1))
+    of "email":
+      schema["format"] = newJString("email")
+    of "positive":
+      schema.mergeMinimum("exclusiveMinimum", newJInt(0))
+    of "minValue", "ge":
+      schema.mergeMinimum("minimum", numericLiteral(pragma[1]))
+    of "maxValue", "le":
+      schema.mergeMaximum("maximum", numericLiteral(pragma[1]))
+    of "gt":
+      schema.mergeMinimum("exclusiveMinimum", numericLiteral(pragma[1]))
+    of "lt":
+      schema.mergeMaximum("exclusiveMaximum", numericLiteral(pragma[1]))
+    of "minLen":
+      if schema.getOrDefault("type").getStr() == "array":
+        schema.mergeMinimum("minItems", numericLiteral(pragma[1]))
+      else:
+        schema.mergeMinimum("minLength", numericLiteral(pragma[1]))
+    of "maxLen":
+      if schema.getOrDefault("type").getStr() == "array":
+        schema.mergeMaximum("maxItems", numericLiteral(pragma[1]))
+      else:
+        schema.mergeMaximum("maxLength", numericLiteral(pragma[1]))
+    else:
+      discard
+
 proc namedTypeSchema(name: string): JsonNode {.compileTime.} =
   case name
   of "string", "cstring", "char":
@@ -114,11 +203,16 @@ proc typeSchema(node: NimNode): JsonNode {.compileTime.} =
       result = typeSchema(current[1])
       result["nullable"] = newJBool(true)
       return result
+  if current.kind == nnkRefTy:
+    return typeSchema(current[0])
   if current.kind == nnkObjectTy:
     result = %*{"type": "object", "properties": newJObject(), "required": newJArray()}
     for field in jsonFields(current):
-      result["properties"][field.jsonName] = typeSchema(field.fieldType)
-      result["required"].add(newJString(field.jsonName))
+      var fieldSchema = typeSchema(field.fieldType)
+      fieldSchema.applyValidationSchema(field.source)
+      result["properties"][field.jsonName] = fieldSchema
+      if not field.fieldType.isOptionType():
+        result["required"].add(newJString(field.jsonName))
     return result
   if current.kind == nnkEnumTy:
     result = %*{"type": "string", "enum": newJArray()}

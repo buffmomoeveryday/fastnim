@@ -1,4 +1,6 @@
 ## A small, FastNim API-inspired routing layer for Chronos applications.
+import std/jsonutils
+
 import chronos
 import
   fastnim/[
@@ -13,6 +15,7 @@ import
     params/extract,
     params/multipart,
     params/uploadsink,
+    params/validate,
     plugin,
     plugins,
     routing/router,
@@ -24,7 +27,8 @@ import
 
 export
   http, state, server, jsonfields, logging, dsl, builtin, spec, extract, multipart,
-  uploadsink, plugin, plugins, router, embed, files, testing, websocket, chronos
+  uploadsink, validate, plugin, plugins, router, embed, files, testing, websocket,
+  chronos, jsonutils
 
 when isMainModule:
   import std/os
