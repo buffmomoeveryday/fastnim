@@ -397,9 +397,9 @@ proc serveStatic*(
       newException(ValueError, "static spaFallback must be relative to the directory")
   let absDir = absolutePath(directory)
   app.use(
-    proc(request: Request, next: NextHandler): Future[Response] {.
-        async: (raises: [CatchableError])
-    .} =
+    proc(
+        request: Request, next: NextHandler
+    ): Future[Response] {.async: (raises: [CatchableError]).} =
       if request.method != HttpMethod.Get and request.method != HttpMethod.Head:
         return await next(request)
       var sub: string
@@ -443,9 +443,9 @@ proc serveSingleFile*(
     raise newException(ValueError, "static file does not exist: " & file)
   let absFile = absolutePath(file)
   app.use(
-    proc(request: Request, next: NextHandler): Future[Response] {.
-        async: (raises: [CatchableError])
-    .} =
+    proc(
+        request: Request, next: NextHandler
+    ): Future[Response] {.async: (raises: [CatchableError]).} =
       if request.method != HttpMethod.Get and request.method != HttpMethod.Head:
         return await next(request)
       if request.path != path:
@@ -467,9 +467,9 @@ proc serveEmbeddedFiles*(
   let normPrefix = normalizePrefix(prefix)
   checkMaxAge(maxAge)
   app.use(
-    proc(request: Request, next: NextHandler): Future[Response] {.
-        async: (raises: [CatchableError])
-    .} =
+    proc(
+        request: Request, next: NextHandler
+    ): Future[Response] {.async: (raises: [CatchableError]).} =
       if request.method != HttpMethod.Get and request.method != HttpMethod.Head:
         return await next(request)
       var sub: string
@@ -498,9 +498,9 @@ proc serveSingleEmbedded*(
     raise newException(ValueError, "static file path must start with '/'")
   checkMaxAge(maxAge)
   app.use(
-    proc(request: Request, next: NextHandler): Future[Response] {.
-        async: (raises: [CatchableError])
-    .} =
+    proc(
+        request: Request, next: NextHandler
+    ): Future[Response] {.async: (raises: [CatchableError]).} =
       if request.method != HttpMethod.Get and request.method != HttpMethod.Head:
         return await next(request)
       if request.path != path:

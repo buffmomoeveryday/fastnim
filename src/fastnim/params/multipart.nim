@@ -21,18 +21,21 @@ type
     Memory = "memory"
     External = "external"
 
-  UploadContentTypeHook* = proc(
-      fieldName, filename, contentType: string
-  ): bool {.closure, gcsafe, raises: [].}
+  UploadContentTypeHook* =
+    proc(fieldName, filename, contentType: string): bool {.closure, gcsafe, raises: [].}
     ## Decides whether a file part's declared content type is accepted.
 
-  UploadFileSizeHook* = proc(
-      fieldName, filename, contentType: string
-  ): int64 {.closure, gcsafe, raises: [].}
-    ## Returns the byte limit for a file part, or zero to use ``maxFileSize``.
+  UploadFileSizeHook* = proc(fieldName, filename, contentType: string): int64 {.
+    closure, gcsafe, raises: []
+  .} ## Returns the byte limit for a file part, or zero to use ``maxFileSize``.
 
   UploadLimits* = object
     ## Resource limits enforced while consuming a multipart request.
+    ##
+    ## These are the inner cap. The application's ``maxBodySize`` is the outer
+    ## cap and rejects a larger ``Content-Length`` or buffered body with
+    ## ``413`` before this parser runs. Keep ``maxRequestSize`` less than or
+    ## equal to ``maxBodySize``.
     maxRequestSize*: int64 ## Maximum encoded request-body bytes.
     maxFileSize*: int64 ## Maximum bytes in any individual file.
     maxFiles*: int ## Maximum number of file parts.
@@ -40,8 +43,7 @@ type
     allowContentType*: UploadContentTypeHook ## Optional file-type allowlist hook.
     fileSizeLimit*: UploadFileSizeHook ## Optional per-file size-limit hook.
 
-  MultipartOptions* = object
-    ## Controls multipart parsing and uploaded-file storage.
+  MultipartOptions* = object ## Controls multipart parsing and uploaded-file storage.
     storage*: UploadStorage ## Disk by default; memory is explicit opt-in.
     uploadDir*: string ## Directory for disk uploads; empty uses the system temp dir.
     memorySizeCap*: int64 ## Aggregate file-byte cap required by memory mode.
@@ -65,8 +67,7 @@ type
     partHeadersSize*: int ## Maximum bytes in one part's headers.
     chunkSize*: int ## Maximum body chunk requested from the transport.
 
-  UploadedFile* = object
-    ## Metadata and storage location for one uploaded file part.
+  UploadedFile* = object ## Metadata and storage location for one uploaded file part.
     fieldName*: string ## Multipart form field name.
     filename*: string ## Client-supplied filename, retained only as metadata.
     contentType*: string ## Declared part content type.
@@ -76,13 +77,11 @@ type
     data*: string ## Binary-safe contents in memory mode; empty in disk mode.
     stored*: StoredUpload ## Identity returned by an external upload store.
 
-  MultipartForm* = object
-    ## Parsed multipart fields and uploaded files.
+  MultipartForm* = object ## Parsed multipart fields and uploaded files.
     fields*: Table[string, seq[string]] ## Values grouped by field name.
     files*: seq[UploadedFile] ## File parts in wire order.
 
-  MultipartError* = object of CatchableError
-    ## Invalid or rejected multipart input.
+  MultipartError* = object of CatchableError ## Invalid or rejected multipart input.
     status*: int ## HTTP status appropriate for this failure.
 
   ParserState = ref object
@@ -111,16 +110,16 @@ type
     size: int64
 
 template upload*(
-    fieldName: static[string] = "",
-    contentTypes: untyped = [],
-    maxFileSize: static[int64] = 10'i64 * 1024 * 1024,
-    maxRequestSize: static[int64] = 32'i64 * 1024 * 1024,
-    uploadDir: static[string] = "",
-    storage: static[UploadStorage] = UploadStorage.Disk,
-    memorySizeCap: static[int64] = 0'i64,
-    maxFieldSize: static[int64] = 64'i64 * 1024,
-    partHeadersSize: static[int] = DefaultPartHeadersSize,
-    chunkSize: static[int] = DefaultChunkSize,
+  fieldName: static[string] = "",
+  contentTypes: untyped = [],
+  maxFileSize: static[int64] = 10'i64 * 1024 * 1024,
+  maxRequestSize: static[int64] = 32'i64 * 1024 * 1024,
+  uploadDir: static[string] = "",
+  storage: static[UploadStorage] = UploadStorage.Disk,
+  memorySizeCap: static[int64] = 0'i64,
+  maxFieldSize: static[int64] = 64'i64 * 1024,
+  partHeadersSize: static[int] = DefaultPartHeadersSize,
+  chunkSize: static[int] = DefaultChunkSize,
 ) {.pragma.}
   ## Configures an ``UploadedFile`` field for typed ``parseUpload``.
   ##
@@ -135,8 +134,7 @@ proc initUploadLimits*(
     fileSizeLimit: UploadFileSizeHook = nil,
 ): UploadLimits =
   ## Creates upload limits. Every numeric limit must be positive.
-  if maxRequestSize <= 0 or maxFileSize <= 0 or maxFiles <= 0 or
-      maxFieldSize <= 0:
+  if maxRequestSize <= 0 or maxFileSize <= 0 or maxFiles <= 0 or maxFieldSize <= 0:
     raise newException(ValueError, "upload limits must be positive")
   UploadLimits(
     maxRequestSize: maxRequestSize,
@@ -220,9 +218,9 @@ proc initUploadConfig*(
     chunkSize: chunkSize,
   )
 
-proc firstField*(form: MultipartForm, name: string, default = ""): string {.
-    raises: []
-.} =
+proc firstField*(
+    form: MultipartForm, name: string, default = ""
+): string {.raises: [].} =
   ## Returns the first value for ``name``, or ``default`` when absent.
   let values = form.fields.getOrDefault(name)
   if values.len == 0:
@@ -246,7 +244,7 @@ proc stripQuotes(value: string): string =
   if clean.len >= 2 and clean[0] == '"' and clean[^1] == '"':
     result = ""
     var escaped = false
-    for ch in clean[1..^2]:
+    for ch in clean[1 ..^ 2]:
       if escaped:
         result.add(ch)
         escaped = false
@@ -269,18 +267,18 @@ proc splitParameters(value: string): seq[string] =
     elif ch == '"':
       quoted = not quoted
     elif ch == ';' and not quoted:
-      result.add(value[start..<index].strip())
+      result.add(value[start ..< index].strip())
       start = index + 1
-  result.add(value[start..^1].strip())
+  result.add(value[start ..^ 1].strip())
 
 proc multipartBoundary(contentType: string): string =
   let parts = splitParameters(contentType)
   if parts.len == 0 or parts[0].toLowerAscii() != "multipart/form-data":
     raiseMultipart(400, "request content type is not multipart/form-data")
-  for part in parts[1..^1]:
+  for part in parts[1 ..^ 1]:
     let separator = part.find('=')
-    if separator > 0 and part[0..<separator].strip().toLowerAscii() == "boundary":
-      result = stripQuotes(part[separator + 1..^1])
+    if separator > 0 and part[0 ..< separator].strip().toLowerAscii() == "boundary":
+      result = stripQuotes(part[separator + 1 ..^ 1])
       break
   if result.len == 0 or result.len > 70 or '\r' in result or '\n' in result:
     raiseMultipart(400, "multipart boundary is missing or invalid")
@@ -291,11 +289,11 @@ proc parsePartInfo(headers: Table[string, string]): PartInfo =
   let parts = splitParameters(headers["content-disposition"])
   if parts.len == 0 or parts[0].toLowerAscii() != "form-data":
     raiseMultipart(400, "multipart Content-Disposition must be form-data")
-  for part in parts[1..^1]:
+  for part in parts[1 ..^ 1]:
     let separator = part.find('=')
     if separator > 0:
-      let key = part[0..<separator].strip().toLowerAscii()
-      let value = stripQuotes(part[separator + 1..^1])
+      let key = part[0 ..< separator].strip().toLowerAscii()
+      let value = stripQuotes(part[separator + 1 ..^ 1])
       case key
       of "name":
         result.name = value
@@ -316,10 +314,10 @@ proc parseHeaders(raw: string): Table[string, string] =
     let separator = line.find(':')
     if separator <= 0:
       raiseMultipart(400, "malformed multipart part header")
-    let name = line[0..<separator].strip().toLowerAscii()
+    let name = line[0 ..< separator].strip().toLowerAscii()
     if name in result:
       raiseMultipart(400, "duplicate multipart part header")
-    result[name] = line[separator + 1..^1].strip()
+    result[name] = line[separator + 1 ..^ 1].strip()
 
 proc readMore(state: ParserState) {.async: (raises: [CatchableError]).} =
   if state.eof:
@@ -341,8 +339,8 @@ proc takeUntil(
     if markerAt >= 0:
       if markerAt > limit:
         raiseMultipart(400, "multipart section exceeds its header limit")
-      result = state.buffer[0..<markerAt]
-      state.buffer = state.buffer[markerAt + marker.len..^1]
+      result = state.buffer[0 ..< markerAt]
+      state.buffer = state.buffer[markerAt + marker.len ..^ 1]
       return
     if state.buffer.len > limit:
       raiseMultipart(400, "multipart section exceeds its header limit")
@@ -404,9 +402,8 @@ proc consumePart(
 
   var fileSizeLimit = state.options.limits.maxFileSize
   if info.hasFilename and not state.options.limits.fileSizeLimit.isNil:
-    let configuredLimit = state.options.limits.fileSizeLimit(
-      info.name, info.filename, info.contentType
-    )
+    let configuredLimit =
+      state.options.limits.fileSizeLimit(info.name, info.filename, info.contentType)
     if configuredLimit > 0:
       fileSizeLimit = configuredLimit
 
@@ -417,16 +414,13 @@ proc consumePart(
   if info.hasFilename and not state.store.isNil:
     sink = await state.store.begin(
       UploadMetadata(
-        fieldName: info.name,
-        filename: info.filename,
-        contentType: info.contentType,
+        fieldName: info.name, filename: info.filename, contentType: info.contentType
       )
     )
   elif info.hasFilename and state.options.storage == UploadStorage.Disk:
     try:
-      (output.file, output.path) = createTempFile(
-        "fastnim-upload-", ".tmp", state.options.uploadDir
-      )
+      (output.file, output.path) =
+        createTempFile("fastnim-upload-", ".tmp", state.options.uploadDir)
       state.createdPaths.add(output.path)
     except CatchableError as exc:
       raise newException(IOError, "unable to create upload file: " & exc.msg)
@@ -437,20 +431,20 @@ proc consumePart(
       let delimiterAt = state.buffer.find(delimiter)
       if delimiterAt >= 0:
         await state.writePartChunk(
-          info, state.buffer[0..<delimiterAt], sink, output, fileSizeLimit
+          info, state.buffer[0 ..< delimiterAt], sink, output, fileSizeLimit
         )
-        state.buffer = state.buffer[delimiterAt + delimiter.len..^1]
+        state.buffer = state.buffer[delimiterAt + delimiter.len ..^ 1]
         while state.buffer.len < 2 and not state.eof:
           await state.readMore()
         if state.buffer.startsWith("--"):
-          state.buffer = state.buffer[2..^1]
+          state.buffer = state.buffer[2 ..^ 1]
           if state.buffer.len < 2 and not state.eof:
             await state.readMore()
           if state.buffer.startsWith("\r\n"):
-            state.buffer = state.buffer[2..^1]
+            state.buffer = state.buffer[2 ..^ 1]
           result.finished = true
         elif state.buffer.startsWith("\r\n"):
-          state.buffer = state.buffer[2..^1]
+          state.buffer = state.buffer[2 ..^ 1]
         else:
           raiseMultipart(400, "malformed multipart boundary terminator")
         break
@@ -459,9 +453,9 @@ proc consumePart(
       if state.buffer.len > keep:
         let writable = state.buffer.len - keep
         await state.writePartChunk(
-          info, state.buffer[0..<writable], sink, output, fileSizeLimit
+          info, state.buffer[0 ..< writable], sink, output, fileSizeLimit
         )
-        state.buffer = state.buffer[writable..^1]
+        state.buffer = state.buffer[writable ..^ 1]
       if state.eof:
         raiseMultipart(400, "multipart request ended before its final boundary")
       await state.readMore()
@@ -488,20 +482,14 @@ proc consumePart(
       filename: info.filename,
       contentType: info.contentType,
       size: output.size,
-      storage:
-        if sink.isNil:
-          state.options.storage
-        else:
-          UploadStorage.External,
+      storage: if sink.isNil: state.options.storage else: UploadStorage.External,
       path: output.path,
       data: output.memoryValue,
       stored: stored,
     )
 
 proc parseMultipart*(
-    request: Request,
-    options = initMultipartOptions(),
-    store: UploadStore = nil,
+    request: Request, options = initMultipartOptions(), store: UploadStore = nil
 ): Future[MultipartForm] {.async: (raises: [CatchableError]).} =
   ## Parses fields and files from a ``multipart/form-data`` request.
   ##
@@ -510,7 +498,9 @@ proc parseMultipart*(
   ## Partial disk files are removed after parse failure or cancellation. When
   ## ``store`` is supplied, files instead stream through its upload sinks;
   ## incomplete sinks are aborted and completed files are rolled back if a
-  ## later part fails.
+  ## later part fails. A handler timeout cancels this future the same way:
+  ## partial disk files are removed and external sinks are aborted. The
+  ## application's ``maxBodySize`` can reject the body before parsing starts.
   let boundary = multipartBoundary(request.headers.getOrDefault("content-type"))
   let contentLength = request.headers.getOrDefault("content-length")
   if contentLength.len > 0:
@@ -537,7 +527,7 @@ proc parseMultipart*(
       await state.readMore()
     if not state.buffer.startsWith(opening):
       raiseMultipart(400, "multipart request has an invalid opening boundary")
-    state.buffer = state.buffer[opening.len..^1]
+    state.buffer = state.buffer[opening.len ..^ 1]
 
     var finished = false
     while not finished:
@@ -562,9 +552,7 @@ proc parseMultipart*(
       await upload.remove()
     raise
 
-proc removeUploads(files: seq[UploadedFile]): Future[void] {.
-    async: (raises: [])
-.} =
+proc removeUploads(files: seq[UploadedFile]): Future[void] {.async: (raises: []).} =
   for file in files:
     if file.storage == UploadStorage.External:
       await file.stored.remove()
@@ -572,9 +560,7 @@ proc removeUploads(files: seq[UploadedFile]): Future[void] {.
       removeCreatedFiles(@[file.path])
 
 proc parseUploads*(
-    request: Request,
-    configs: seq[UploadConfig],
-    store: UploadStore = nil,
+    request: Request, configs: seq[UploadConfig], store: UploadStore = nil
 ): Future[seq[UploadedFile]] {.async: (raises: [CatchableError]).} =
   ## Parses every required file declared by ``configs`` exactly once.
   ##
@@ -588,11 +574,10 @@ proc parseUploads*(
   for index, config in configuredUploads:
     if config.fieldName.len == 0:
       raise newException(ValueError, "upload field name cannot be empty")
-    for previous in 0..<index:
+    for previous in 0 ..< index:
       if configuredUploads[previous].fieldName == config.fieldName:
-        raise newException(
-          ValueError, "duplicate upload field '" & config.fieldName & "'"
-        )
+        raise
+          newException(ValueError, "duplicate upload field '" & config.fieldName & "'")
     if config.uploadDir != shared.uploadDir or config.storage != shared.storage or
         config.memorySizeCap != shared.memorySizeCap or
         config.maxRequestSize != shared.maxRequestSize or
@@ -651,18 +636,13 @@ proc parseUploads*(
   result = form.files
 
 proc parseUpload*(
-    request: Request,
-    config: UploadConfig,
-    store: UploadStore = nil,
+    request: Request, config: UploadConfig, store: UploadStore = nil
 ): Future[UploadedFile] {.async: (raises: [CatchableError]).} =
   ## Parses exactly one required file matching ``config``.
   result = (await request.parseUploads(@[config], store))[0]
 
 proc parseTypedUpload[T](
-    request: Request,
-    configs: seq[UploadConfig],
-    store: UploadStore,
-    _: typedesc[T],
+    request: Request, configs: seq[UploadConfig], store: UploadStore, _: typedesc[T]
 ): Future[T] {.async: (raises: [CatchableError]).} =
   let files = await request.parseUploads(configs, store)
   var configIndex = 0
@@ -706,12 +686,10 @@ proc uploadConfigNode(source: NimNode): NimNode {.compileTime.} =
       result.add(newLit($field))
     else:
       result.add(configuredName)
-    for index in 2..10:
+    for index in 2 .. 10:
       result.add(pragma[index])
 
-proc buildTypedUpload(
-    request, model, store: NimNode
-): NimNode {.compileTime.} =
+proc buildTypedUpload(request, model, store: NimNode): NimNode {.compileTime.} =
   let typeDefinition = model.getImpl
   if typeDefinition.kind != nnkTypeDef or typeDefinition.len != 3:
     error("typed parseUpload expects an object type", model)
@@ -721,23 +699,17 @@ proc buildTypedUpload(
 
   let fields = objectType[^1]
   if fields.kind != nnkRecList or fields.len == 0:
-    error(
-      "typed upload objects must contain at least one UploadedFile field", model
-    )
+    error("typed upload objects must contain at least one UploadedFile field", model)
   var configs = newNimNode(nnkBracket)
   for definition in fields:
     if definition.kind != nnkIdentDefs or definition.len != 3:
-      error(
-        "typed upload fields must be declared one per line", definition
-      )
+      error("typed upload fields must be declared one per line", definition)
     if not eqIdent(definition[^2], "UploadedFile"):
       error("typed upload fields must have type UploadedFile", definition)
     configs.add(uploadConfigNode(definition[0]))
 
   let configSequence = newTree(nnkPrefix, ident("@"), configs)
-  result = newCall(
-    bindSym"parseTypedUpload", request, configSequence, store, model
-  )
+  result = newCall(bindSym"parseTypedUpload", request, configSequence, store, model)
 
 macro parseUpload*(request: typed, model: typedesc): untyped =
   ## Parses a typed upload object.

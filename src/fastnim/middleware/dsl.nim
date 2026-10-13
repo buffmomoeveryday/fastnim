@@ -6,9 +6,7 @@ import chronos
 
 import fastnim/[context/http, routing/router]
 
-proc replaceMiddlewareNames(
-    node, requestParam, nextParam: NimNode
-): NimNode =
+proc replaceMiddlewareNames(node, requestParam, nextParam: NimNode): NimNode =
   if node.kind == nnkIdent:
     if eqIdent(node, "request"):
       return requestParam
@@ -33,7 +31,7 @@ macro middleware*(name: untyped, body: untyped): untyped =
   let requestParam = genSym(nskParam, "request")
   let nextParam = genSym(nskParam, "next")
   let middlewareBody = replaceMiddlewareNames(body, requestParam, nextParam)
-  result = quote do:
+  result = quote:
     let `name`: Middleware = proc(
         `requestParam`: Request, `nextParam`: NextHandler
     ): Future[Response] {.async: (raises: [CatchableError]), gcsafe.} =

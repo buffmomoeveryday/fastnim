@@ -9,7 +9,6 @@ middleware addResponseHeadersMiddleware:
   response.setHeader("x-powered-by", "fastnim")
   response
 
-
 type
   CreateUser = object
     name: string
@@ -25,17 +24,13 @@ type
 
 var users: seq[User] = @[]
 
-
-
 let app = initFastNim()
 
 app.install:
   rateLimitPlugin(initRateLimitOptions(limit = 5, windowSeconds = 60))
 
-
 app.middlewares:
   addResponseHeadersMiddleware
-
 
 app.delete(
   "/users/{id}",
@@ -59,8 +54,6 @@ app.delete(
     users.del index
     noContent void
 
-
-
 app.get(
   "/users",
   responses = @[(200, seq[User])],
@@ -70,9 +63,6 @@ app.get(
   operationId = "getUsers",
 ):
   ok users
-
-
-
 
 app.post(
   "/users",
@@ -91,8 +81,6 @@ app.post(
       users.add user
     created user
 
-
-
 let clients = newWebSocketGroup()
 app.websocket("/chat"):
   await websocket.accept()
@@ -106,9 +94,6 @@ app.websocket("/chat"):
   finally:
     {.gcsafe.}:
       discard clients.removeWebSocket(websocket)
-
-
-
 
 when isMainModule:
   waitFor app.serve(port = 8000).join()

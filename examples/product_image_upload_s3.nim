@@ -35,31 +35,35 @@ app.install:
 
 type
   ProductImageForm = object
-    image* {.upload(
-      contentTypes = ["image/jpeg", "image/png"],
-      maxRequestSize = 11 * 1024 * 1024,
-      maxFileSize = 10 * 1024 * 1024,
-    ).}: UploadedFile
+    image* {.
+      upload(
+        contentTypes = ["image/jpeg", "image/png"],
+        maxRequestSize = 11 * 1024 * 1024,
+        maxFileSize = 10 * 1024 * 1024,
+      )
+    .}: UploadedFile
 
   ProductAssetsForm = object
-    image* {.upload(
-      contentTypes = ["image/jpeg", "image/png"],
-      maxRequestSize = 16 * 1024 * 1024,
-      maxFileSize = 10 * 1024 * 1024,
-    ).}: UploadedFile
-    manual* {.upload(
-      contentTypes = ["application/pdf"],
-      maxRequestSize = 16 * 1024 * 1024,
-      maxFileSize = 5 * 1024 * 1024,
-    ).}: UploadedFile
+    image* {.
+      upload(
+        contentTypes = ["image/jpeg", "image/png"],
+        maxRequestSize = 16 * 1024 * 1024,
+        maxFileSize = 10 * 1024 * 1024,
+      )
+    .}: UploadedFile
+    manual* {.
+      upload(
+        contentTypes = ["application/pdf"],
+        maxRequestSize = 16 * 1024 * 1024,
+        maxFileSize = 5 * 1024 * 1024,
+      )
+    .}: UploadedFile
 
 app.post("/products/{productId}/image"):
   let productId = request.pathParam("productId")
-  
+
   let image = await s3.upload(
-    request,
-    ProductImageForm,
-    key = "products/" & productId & "/primary",
+    request, ProductImageForm, key = "products/" & productId & "/primary"
   )
 
   return json(

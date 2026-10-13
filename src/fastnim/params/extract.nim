@@ -19,9 +19,7 @@ import fastnim/private/jsonmetadata
 
 export validationtypes
 
-template effectiveInputName(
-    field: untyped, defaultName: static[string]
-): string =
+template effectiveInputName(field: untyped, defaultName: static[string]): string =
   when field.hasCustomPragma(jsonName):
     const customName = field.getCustomPragmaVal(jsonName).name
     when customName.len == 0:
@@ -62,14 +60,16 @@ proc parseQueryScalar[T](raw: string, value: var T): bool {.raises: [].} =
         return false
       value = parsed
     else:
-      {.error: "typed query parameters support string, int, bool, enum, Option[T], and seq[T]".}
+      {.
+        error:
+          "typed query parameters support string, int, bool, enum, Option[T], and seq[T]"
+      .}
     true
   except ValueError:
     false
 
 proc addQueryValueError[T](
-    validation: var ValidationResult,
-    location: openArray[string],
+    validation: var ValidationResult, location: openArray[string]
 ) {.raises: [].} =
   when T is int:
     validation.addError(location, "integer", "must be an integer")
@@ -135,10 +135,7 @@ proc queryParam*[T](
   extractQueryParam(request, name, validation, false, default(T))
 
 proc queryParam*[T](
-    request: Request,
-    name: string,
-    validation: var ValidationResult,
-    default: T,
+    request: Request, name: string, validation: var ValidationResult, default: T
 ): T {.raises: [].} =
   ## Extracts a typed value from the URL query string with a missing-value default.
   ##
@@ -164,10 +161,7 @@ proc objectType(node: NimNode): NimNode {.compileTime.} =
     newEmptyNode()
 
 macro parseQueryParams*(
-    model: typedesc,
-    request: Request,
-    value: untyped,
-    validation: untyped,
+    model: typedesc, request: Request, value: untyped, validation: untyped
 ): untyped =
   ## Populates an object model from URL query parameters.
   ##
@@ -185,8 +179,7 @@ macro parseQueryParams*(
     let access = newDotExpr(value, ident(field.nimName))
     let extractor = newTree(nnkBracketExpr, bindSym("queryParam"), field.fieldType)
     let assignment = newAssignment(
-      access,
-      newCall(extractor, request, newLit(field.jsonName), validation),
+      access, newCall(extractor, request, newLit(field.jsonName), validation)
     )
     if field.defaultValue.kind == nnkEmpty:
       result.add(assignment)

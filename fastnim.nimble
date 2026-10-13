@@ -21,6 +21,7 @@ task docs, "Generate HTML API documentation with nim doc":
   for module in [
     "src/fastnim.nim",
     "src/fastnim/routing/router.nim",
+    "src/fastnim/core/limits.nim",
     "src/fastnim/core/server.nim",
     "src/fastnim/context/http.nim",
     "src/fastnim/context/state.nim",

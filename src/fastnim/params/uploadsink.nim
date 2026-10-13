@@ -7,19 +7,15 @@
 import chronos
 
 type
-  UploadMetadata* = object
-    ## Metadata known before a file's content is consumed.
+  UploadMetadata* = object ## Metadata known before a file's content is consumed.
     fieldName*: string ## Multipart form field name.
     filename*: string ## Client filename retained only as metadata.
     contentType*: string ## Declared file content type.
 
-  UploadRemoveProc* = proc(): Future[void] {.
-    closure, gcsafe, async: (raises: [])
-  .}
+  UploadRemoveProc* = proc(): Future[void] {.closure, gcsafe, async: (raises: []).}
     ## Removes a completed upload during rollback or explicit cleanup.
 
-  StoredUpload* = object
-    ## Storage-neutral identity returned after an upload completes.
+  StoredUpload* = object ## Storage-neutral identity returned after an upload completes.
     provider*: string ## Backend name, such as ``s3``.
     key*: string ## Backend-specific stable object key.
     location*: string ## URI or other displayable object location.
@@ -28,15 +24,11 @@ type
 
   UploadWriteProc* = proc(data: string): Future[void] {.
     closure, gcsafe, async: (raises: [CatchableError])
-  .}
-    ## Writes the next binary-safe upload chunk.
-  UploadCompleteProc* = proc(): Future[StoredUpload] {.
-    closure, gcsafe, async: (raises: [CatchableError])
-  .}
+  .} ## Writes the next binary-safe upload chunk.
+  UploadCompleteProc* =
+    proc(): Future[StoredUpload] {.closure, gcsafe, async: (raises: [CatchableError]).}
     ## Commits an upload and returns its storage identity.
-  UploadAbortProc* = proc(): Future[void] {.
-    closure, gcsafe, async: (raises: [])
-  .}
+  UploadAbortProc* = proc(): Future[void] {.closure, gcsafe, async: (raises: []).}
     ## Aborts an incomplete upload without raising.
 
   UploadSink* = ref object
@@ -47,32 +39,21 @@ type
 
   UploadBeginProc* = proc(metadata: UploadMetadata): Future[UploadSink] {.
     closure, gcsafe, async: (raises: [CatchableError])
-  .}
-    ## Starts storage for a validated file part.
+  .} ## Starts storage for a validated file part.
 
-  UploadStore* = ref object
-    ## Factory for independent streaming upload sinks.
+  UploadStore* = ref object ## Factory for independent streaming upload sinks.
     begin: UploadBeginProc
 
 proc initStoredUpload*(
-    provider, key: string,
-    location = "",
-    etag = "",
-    remove: UploadRemoveProc = nil,
+    provider, key: string, location = "", etag = "", remove: UploadRemoveProc = nil
 ): StoredUpload =
   ## Creates generic metadata for a completed backend upload.
   StoredUpload(
-    provider: provider,
-    key: key,
-    location: location,
-    etag: etag,
-    remove: remove,
+    provider: provider, key: key, location: location, etag: etag, remove: remove
   )
 
 proc newUploadSink*(
-    write: UploadWriteProc,
-    complete: UploadCompleteProc,
-    abort: UploadAbortProc,
+    write: UploadWriteProc, complete: UploadCompleteProc, abort: UploadAbortProc
 ): UploadSink =
   ## Creates a stateful sink from its lifecycle callbacks.
   if write.isNil or complete.isNil or abort.isNil:
@@ -85,9 +66,9 @@ proc newUploadStore*(begin: UploadBeginProc): UploadStore =
     raise newException(ValueError, "upload store begin callback cannot be nil")
   UploadStore(begin: begin)
 
-proc begin*(store: UploadStore, metadata: UploadMetadata): Future[UploadSink] {.
-    async: (raises: [CatchableError])
-.} =
+proc begin*(
+    store: UploadStore, metadata: UploadMetadata
+): Future[UploadSink] {.async: (raises: [CatchableError]).} =
   ## Starts a sink for ``metadata``.
   if store.isNil:
     raise newException(ValueError, "upload store cannot be nil")
@@ -95,17 +76,17 @@ proc begin*(store: UploadStore, metadata: UploadMetadata): Future[UploadSink] {.
   if result.isNil:
     raise newException(ValueError, "upload store returned a nil sink")
 
-proc write*(sink: UploadSink, data: string): Future[void] {.
-    async: (raises: [CatchableError])
-.} =
+proc write*(
+    sink: UploadSink, data: string
+): Future[void] {.async: (raises: [CatchableError]).} =
   ## Writes one binary-safe chunk to ``sink``.
   if sink.isNil:
     raise newException(ValueError, "upload sink cannot be nil")
   await sink.write(data)
 
-proc complete*(sink: UploadSink): Future[StoredUpload] {.
-    async: (raises: [CatchableError])
-.} =
+proc complete*(
+    sink: UploadSink
+): Future[StoredUpload] {.async: (raises: [CatchableError]).} =
   ## Commits ``sink`` and returns its storage identity.
   if sink.isNil:
     raise newException(ValueError, "upload sink cannot be nil")

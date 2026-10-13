@@ -12,15 +12,13 @@ type
   RateLimitClock* = proc(): float {.closure, gcsafe, raises: [].}
     ## Clock used by the in-memory store, primarily for deterministic tests.
 
-  RateLimitResult* = object
-    ## Result of one atomic fixed-window increment.
+  RateLimitResult* = object ## Result of one atomic fixed-window increment.
     count*: int ## Counter value after incrementing.
     resetAt*: float ## Unix time at which the bucket expires.
 
-  RateLimitIncrement* = proc(
-    key: string, windowSeconds: int
-  ): Future[RateLimitResult] {.closure, async: (raises: [CatchableError]).}
-    ## Async atomic increment-with-expiry backend operation.
+  RateLimitIncrement* = proc(key: string, windowSeconds: int): Future[RateLimitResult] {.
+    closure, async: (raises: [CatchableError])
+  .} ## Async atomic increment-with-expiry backend operation.
 
   RateLimitStore* = ref object of RootObj
     ## Store interface shared by all rate-limit middleware instances.
@@ -54,10 +52,10 @@ proc newInMemoryRateLimitStore*(clock: RateLimitClock = nil): RateLimitStore =
   ## Creates a process-local rate-limit store for development or one instance.
   var selectedClock: RateLimitClock = clock
   if selectedClock.isNil:
-    selectedClock = proc(): float {.gcsafe, raises: [].} = epochTime()
+    selectedClock = proc(): float {.gcsafe, raises: [].} =
+      epochTime()
   let state = InMemoryRateLimitState(
-    buckets: initTable[string, RateLimitBucket](),
-    clock: selectedClock,
+    buckets: initTable[string, RateLimitBucket](), clock: selectedClock
   )
   initLock(state.lock)
   let increment: RateLimitIncrement = proc(
@@ -101,16 +99,12 @@ proc initRateLimitOptions*(
     raise newException(ValueError, "rate limit must be positive")
   if windowSeconds <= 0:
     raise newException(ValueError, "rate limit window must be positive")
-  RateLimitOptions(
-    limit: limit, windowSeconds: windowSeconds, key: key, store: store
-  )
+  RateLimitOptions(limit: limit, windowSeconds: windowSeconds, key: key, store: store)
 
 proc defaultKey(request: Request): string =
   request.header("x-forwarded-for", "anonymous").split(',')[0].strip()
 
-proc rateLimitMiddleware(
-    options: RateLimitOptions, store: RateLimitStore
-): Middleware =
+proc rateLimitMiddleware(options: RateLimitOptions, store: RateLimitStore): Middleware =
   result = proc(
       request: Request, next: NextHandler
   ): Future[Response] {.async: (raises: [CatchableError]).} =
