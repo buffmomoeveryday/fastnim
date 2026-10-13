@@ -47,6 +47,11 @@ task docs, "Generate HTML API documentation with nim doc":
     "src/fastnim/plugins/auth/session.nim",
     "src/fastnim/plugins/s3.nim",
     "src/fastnim/plugins/openapi.nim",
+    "src/fastnim/plugins/mqtt.nim",
+    "src/fastnim/mqtt/types.nim",
+    "src/fastnim/mqtt/codec.nim",
+    "src/fastnim/mqtt/topics.nim",
+    "src/fastnim/mqtt/broker.nim",
     "src/fastnim/websocket.nim",
     "src/fastnim/logging.nim",
   ]:
