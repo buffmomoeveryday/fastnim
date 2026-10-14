@@ -2,8 +2,9 @@
 ##
 ## Generates a Nim server (FastNim + ``inertiaPlugin``) and a Vite client
 ## (Svelte or React, Tailwind v4 or plain CSS). The client is TypeScript;
-## production builds use fixed ``app.js``/``app.css`` filenames so the
-## server needs no manifest parsing.
+## its tooling config and ``node_modules`` sit in the project root while
+## sources live in ``client/src``. Production builds use fixed
+## ``app.js``/``app.css`` filenames so the server needs no manifest parsing.
 
 import std/[os, strutils]
 
@@ -46,7 +47,7 @@ proc writeScaffoldFile(path, content: string) =
   createDir(path.parentDir())
   writeFile(path, content)
 
-proc nimbleFile(name: string): string =
+proc nimbleFile(name: string, commands: tuple[install, dev, build: string]): string =
   """# Package
 
 version = "0.1.0"
@@ -55,6 +56,8 @@ description = """" & name &
     """ - FastNim + Inertia application"
 license = "MIT"
 srcDir = "src"
+bin = @["main"]
+binDir = "bin"
 
 # Dependencies
 
@@ -62,10 +65,142 @@ requires "nim >= 2.2.12"
 requires "chronos >= 4.0.0"
 # Install fastnim from its repository until it is published on nimble.
 requires "fastnim >= 0.1.0"
+
+# Tasks
+
+before build:
+  # `nimble build` and `nimble run` bundle the client into client/dist first.
+  if not dirExists("node_modules"):
+    exec """" & commands.install & """"
+  exec """" & commands.build & """"
+
+task dev, "Run Vite and the Nim server, rebuilding the server on changes":
+  exec "nim r --hints:off tools/dev.nim"
+"""
+
+const DevRunnerTemplate = """## Development runner for this project (`nimble dev`).
+##
+## Starts the Vite dev server, builds and runs the Nim server with
+## INERTIA_DEV=1, and rebuilds/restarts the server whenever a `.nim` file
+## under `src/` changes. Vite hot-reloads the client on its own.
+
+import std/[os, osproc, strutils, tables, times]
+when not defined(windows):
+  from std/posix import Pid, SIGTERM, kill
+
+const
+  InstallCommand = "{{install}}"
+  ViteCommand = "{{dev}}"
+  ServerSource = "src" / "main.nim"
+  PollInterval = 300 # milliseconds
+
+let
+  serverBinary = absolutePath("bin" / addFileExt("main_dev", ExeExt))
+  stagedBinary = absolutePath("bin" / addFileExt("main_dev_next", ExeExt))
+
+var
+  vite: Process
+  server: Process
+  stopRequested = false
+
+proc descendants(pid: int): seq[int] =
+  when not defined(windows):
+    let (output, code) = execCmdEx("pgrep -P " & $pid)
+    if code == 0:
+      for line in output.splitLines():
+        if line.strip().len > 0:
+          let child = parseInt(line.strip())
+          result.add(child)
+          result.add(descendants(child))
+
+proc stop(process: var Process) =
+  ## Stops ``process`` and everything it spawned: pnpm, for one, does not
+  ## forward termination signals to Vite.
+  if process != nil:
+    if process.running:
+      when defined(windows):
+        discard execCmdEx("taskkill /T /F /PID " & $process.processID)
+      else:
+        for pid in descendants(process.processID):
+          discard posix.kill(Pid(pid), SIGTERM)
+        process.terminate()
+      discard process.waitForExit()
+    process.close()
+    process = nil
+
+proc requestStop() {.noconv.} =
+  stopRequested = true
+
+proc sourceTimes(): Table[string, Time] =
+  for path in walkDirRec("src"):
+    if path.endsWith(".nim"):
+      try:
+        result[path] = getLastModificationTime(path)
+      except OSError:
+        discard
+
+proc buildServer(): bool =
+  ## Compiles to a staging path so a running server binary is never overwritten.
+  echo "[dev] building server..."
+  var compiler = startProcess(
+    "nim", args = ["c", "--hints:off", "-o:" & stagedBinary, ServerSource],
+    options = {poUsePath, poParentStreams},
+  )
+  result = compiler.waitForExit() == 0
+  compiler.close()
+
+proc restartServer() =
+  stop(server)
+  moveFile(stagedBinary, serverBinary)
+  server = startProcess(serverBinary, options = {poParentStreams})
+
+when isMainModule:
+  if not dirExists("node_modules") and execCmd(InstallCommand) != 0:
+    quit("[dev] '" & InstallCommand & "' failed", 1)
+  createDir("bin")
+  putEnv("INERTIA_DEV", "1")
+  setControlCHook(requestStop)
+  vite = startProcess(ViteCommand, options = {poEvalCommand, poParentStreams})
+  if buildServer() and not stopRequested:
+    restartServer()
+  var known = sourceTimes()
+  var exitReported = false
+  while not stopRequested:
+    sleep(PollInterval)
+    if not vite.running:
+      echo "[dev] Vite exited; stopping."
+      break
+    if server != nil and not server.running and not exitReported:
+      echo "[dev] server exited; waiting for changes..."
+      exitReported = true
+    let current = sourceTimes()
+    if current != known:
+      known = current
+      if buildServer() and not stopRequested:
+        restartServer()
+        exitReported = false
+      elif not stopRequested:
+        echo "[dev] build failed; keeping the previous server running."
+  stop(server)
+  stop(vite)
+"""
+
+proc devRunner(commands: tuple[install, dev, build: string]): string =
+  DevRunnerTemplate.multiReplace(
+    ("{{install}}", commands.install), ("{{dev}}", commands.dev)
+  )
+
+const GitIgnore = """node_modules/
+client/dist/
+bin/
+nimcache/
+*.log
 """
 
 proc devTemplateLines(vite, entry: string, react: bool): seq[string] =
   ## Nim source lines for the dev root template (Vite serves the assets).
+  ## ``vite`` must include the Vite ``base`` path, since the dev server
+  ## serves every module (including ``@vite/client``) under it.
   result = @[
     "proc devRootTemplate(pageJson: string): string =",
     "  \"<!doctype html><html><head>\" &", "    \"<meta charset='utf-8'>\" &",
@@ -84,7 +219,10 @@ proc devTemplateLines(vite, entry: string, react: bool): seq[string] =
       ]
     )
   result.add(
-    "    \"<script type='module' src='" & vite & "/" & entry & "'></script>\" &"
+    [
+      "    \"<script type='module' src='" & vite & "/@vite/client'></script>\" &",
+      "    \"<script type='module' src='" & vite & "/" & entry & "'></script>\" &",
+    ]
   )
   result.add(
     [
@@ -94,18 +232,21 @@ proc devTemplateLines(vite, entry: string, react: bool): seq[string] =
     ]
   )
 
+proc clientEntryPath(choices: InertiaChoices): string =
+  ## Client entry module, relative to the project root (the Vite root).
+  if choices.frontend == feReact: "client/src/main.tsx" else: "client/src/main.ts"
+
 proc serverMain(name: string, choices: InertiaChoices): string =
-  let entry = if choices.frontend == feReact: "src/main.tsx" else: "src/main.ts"
+  let entry = clientEntryPath(choices)
   let framework = if choices.frontend == feReact: "React" else: "Svelte"
   """## """ & name & """ - FastNim + Inertia + """ & framework & """.
 
-## Development (Vite dev server feeds client assets to the Nim server):
-##   cd client && <install> && <dev>
-##   INERTIA_DEV=1 nim c -r --path:src src/main.nim
+## Development (Vite dev server feeds client assets to the Nim server,
+## which is rebuilt and restarted when files under src/ change):
+##   nimble dev
 ##
-## Production (serve the built bundle from the Nim server):
-##   cd client && <install> && <build>
-##   APP_VERSION=$(date +%s) nim c -r --path:src src/main.nim
+## Production (bundle the client, then serve it from the Nim server):
+##   APP_VERSION=$(date +%s) nimble run
 
 import std/[json, os, times]
 
@@ -116,7 +257,7 @@ import fastnim/plugins/inertia
 import routes/pages
 
 """ &
-    devTemplateLines("http://localhost:5173", entry, choices.frontend == feReact).join(
+    devTemplateLines("http://localhost:5173/assets", entry, choices.frontend == feReact).join(
       "\n"
     ) & "\n" & """
 
@@ -213,7 +354,7 @@ proc clientPackageJson(name: string, choices: InertiaChoices): string =
   elif choices.pkgManager == "npm":
     managerField = ",\n  \"packageManager\": \"npm@11.0.0\""
   """{
-  "name": """" & name & """-client",
+  "name": """" & name & """",
   "private": true,
   "version": "0.1.0",
   "type": "module"""" &
@@ -234,7 +375,7 @@ proc clientPackageJson(name: string, choices: InertiaChoices): string =
 """
 
 proc viteConfig(choices: InertiaChoices): string =
-  let entry = if choices.frontend == feReact: "src/main.tsx" else: "src/main.ts"
+  let entry = clientEntryPath(choices)
   var imports = "import { defineConfig } from \"vite\";\n"
   var plugins = ""
   if choices.frontend == feReact:
@@ -249,9 +390,9 @@ proc viteConfig(choices: InertiaChoices): string =
   imports & """
 export default defineConfig({
   base: "/assets/",
-  server: { port: 5173, strictPort: true },
+  server: { port: 5173, strictPort: true, origin: "http://localhost:5173" },
   build: {
-    outDir: "dist",
+    outDir: "client/dist",
     emptyOutDir: true,
     rollupOptions: {
       input: """" &
@@ -268,22 +409,6 @@ export default defineConfig({
 });
 """
 
-proc clientIndexHtml(name: string): string =
-  """<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>""" &
-    name & """</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
-</html>
-"""
-
 proc tsConfig(choices: InertiaChoices): string =
   var jsx = ""
   if choices.frontend == feReact:
@@ -298,7 +423,7 @@ proc tsConfig(choices: InertiaChoices): string =
     jsx & """,
     "types": ["vite/client"]
   },
-  "include": ["src"]
+  "include": ["client/src"]
 }
 """
 
@@ -563,38 +688,39 @@ FastNim + Inertia.js application (""" & framework &
 - Node.js with `""" &
     choices.pkgManager & """` on your PATH
 
+## Layout
+
+The client's `package.json`, `vite.config.ts`, `tsconfig.json`, and
+`node_modules/` live in the project root next to the `.nimble` file; client
+source lives in `client/src/` and the server in `src/`.
+
 ## Development
 
 ```sh
-cd client
-""" &
-    commands.install & """
-""" & commands.dev &
-    """      # Vite dev server on http://localhost:5173
+nimble dev
 ```
 
-In another terminal, from the project root:
-
-```sh
-INERTIA_DEV=1 nim c -r --path:src src/main.nim
-```
+This installs client dependencies on first run (`""" &
+    commands.install & """`), starts the Vite dev server
+(`""" & commands.dev &
+    """`) on http://localhost:5173, and builds and runs the Nim server with
+`INERTIA_DEV=1`. Saving any `.nim` file under `src/` rebuilds and restarts
+the server; Vite hot-reloads client changes.
 
 Open http://127.0.0.1:8000. The Nim server renders the HTML shell and
-serves Inertia JSON; Vite supplies the client bundle with hot reload.
+serves Inertia JSON; Vite supplies the client bundle.
 
 ## Production
 
 ```sh
-cd client
-""" &
-    commands.install & """
-""" & commands.build & """
-cd ..
-APP_VERSION=$(date +%s) nim c -r --path:src src/main.nim
+APP_VERSION=$(date +%s) nimble run
 ```
 
-The server serves `client/dist` at `/assets`. Bump `APP_VERSION` on every
-deploy so Inertia clients pick up fresh assets.
+`nimble build` and `nimble run` first bundle the client (`""" &
+    commands.build & """`) into
+`client/dist`, then compile the server into `bin/`. The server serves
+`client/dist` at `/assets`. Bump `APP_VERSION` on every deploy so Inertia
+clients pick up fresh assets.
 
 ## Pages
 
@@ -611,14 +737,15 @@ proc scaffoldInertiajs*(dir, name: string, choices: InertiaChoices) =
   let entry = clientEntry(choices)
   let dashboard = dashboardPage(choices)
   let users = usersPage(choices)
-  writeScaffoldFile(dir / name & ".nimble", nimbleFile(name))
+  writeScaffoldFile(dir / name & ".nimble", nimbleFile(name, commands))
   writeScaffoldFile(dir / "config.nims", "switch(\"path\", \"src\")\n")
+  writeScaffoldFile(dir / ".gitignore", GitIgnore)
+  writeScaffoldFile(dir / "tools" / "dev.nim", devRunner(commands))
   writeScaffoldFile(dir / "src" / "main.nim", serverMain(name, choices))
   writeScaffoldFile(dir / "src" / "routes" / "pages.nim", serverPages(name))
-  writeScaffoldFile(dir / "client" / "package.json", clientPackageJson(name, choices))
-  writeScaffoldFile(dir / "client" / "vite.config.ts", viteConfig(choices))
-  writeScaffoldFile(dir / "client" / "index.html", clientIndexHtml(name))
-  writeScaffoldFile(dir / "client" / "tsconfig.json", tsConfig(choices))
+  writeScaffoldFile(dir / "package.json", clientPackageJson(name, choices))
+  writeScaffoldFile(dir / "vite.config.ts", viteConfig(choices))
+  writeScaffoldFile(dir / "tsconfig.json", tsConfig(choices))
   writeScaffoldFile(dir / "client" / entry.path, entry.content)
   writeScaffoldFile(dir / "client" / "src" / "app.css", clientCss(choices))
   writeScaffoldFile(dir / "client" / dashboard.path, dashboard.content)

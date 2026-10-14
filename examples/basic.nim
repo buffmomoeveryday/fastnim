@@ -18,8 +18,17 @@ type
 
 let app = initFastNim()
 
+
+
+middleware helloMiddleware:
+  echo "hello"
+  var response = await next(request)
+  response
+
 app.middlewares:
   requestId()
+  helloMiddleware
+
 
 app.get("/"):
   ok (%*{"message": "Hello from FastNim"})

@@ -41,12 +41,13 @@ proc expectedFiles(box, name, entry: string): seq[string] =
   @[
     root / name & ".nimble",
     root / "config.nims",
+    root / ".gitignore",
+    root / "tools" / "dev.nim",
     root / "src" / "main.nim",
     root / "src" / "routes" / "pages.nim",
-    root / "client" / "package.json",
-    root / "client" / "vite.config.ts",
-    root / "client" / "index.html",
-    root / "client" / "tsconfig.json",
+    root / "package.json",
+    root / "vite.config.ts",
+    root / "tsconfig.json",
     root / "client" / entry,
     root / "client" / "src" / "app.css",
     root / "README.md",
@@ -72,8 +73,11 @@ block scaffoldSvelteTailwind:
     doAssert fileExists(path), path
   doAssert fileExists(root / "client" / "src" / "pages" / "Dashboard.svelte")
   doAssert fileExists(root / "client" / "src" / "pages" / "Users.svelte")
+  for stale in ["package.json", "vite.config.ts", "tsconfig.json", "index.html"]:
+    doAssert not fileExists(root / "client" / stale), stale
 
-  let manifest = parseJson(readFile(root / "client" / "package.json"))
+  let manifest = parseJson(readFile(root / "package.json"))
+  doAssert manifest["name"].getStr() == "shop"
   doAssert "svelte" in manifest["dependencies"]
   doAssert "@inertiajs/svelte" in manifest["dependencies"]
   doAssert "tailwindcss" in manifest["devDependencies"]
@@ -85,16 +89,42 @@ block scaffoldSvelteTailwind:
   doAssert "inertiaPlugin" in main
   doAssert "INERTIA_DEV" in main
   doAssert "serveStatic" in main
-  doAssert "src/main.ts" in main
+  doAssert "http://localhost:5173/assets/client/src/main.ts" in main
+  doAssert "http://localhost:5173/assets/@vite/client" in main
   doAssert "@react-refresh" notin main
+  doAssert "nimble dev" in main
 
   let pages = readFile(root / "src" / "routes" / "pages.nim")
   doAssert "pageRouter" in pages
   doAssert "inertia(\"Dashboard\"" in pages
   doAssert "inertia(\"Users\"" in pages
 
-  let vite = readFile(root / "client" / "vite.config.ts")
+  let nimble = readFile(root / "shop.nimble")
+  doAssert "bin = @[\"main\"]" in nimble
+  doAssert "before build:" in nimble
+  doAssert "exec \"pnpm install\"" in nimble
+  doAssert "exec \"pnpm build\"" in nimble
+  doAssert "task dev," in nimble
+  doAssert "tools/dev.nim" in nimble
+
+  let runner = readFile(root / "tools" / "dev.nim")
+  doAssert "InstallCommand = \"pnpm install\"" in runner
+  doAssert "ViteCommand = \"pnpm dev\"" in runner
+  doAssert "INERTIA_DEV" in runner
+  doAssert nimCheck([root / "tools"], root / "tools" / "dev.nim") == ""
+
+  let ignored = readFile(root / ".gitignore")
+  doAssert "node_modules/" in ignored
+  doAssert "client/dist/" in ignored
+
+  let tsconfig = parseJson(readFile(root / "tsconfig.json"))
+  doAssert tsconfig["include"][0].getStr() == "client/src"
+
+  let vite = readFile(root / "vite.config.ts")
+  doAssert "client/src/main.ts" in vite
+  doAssert "outDir: \"client/dist\"" in vite
   doAssert "strictPort" in vite
+  doAssert "origin: \"http://localhost:5173\"" in vite
   doAssert "@sveltejs/vite-plugin-svelte" in vite
   doAssert "tailwindcss" in vite
 
@@ -116,7 +146,7 @@ block scaffoldReactPlain:
   doAssert fileExists(root / "client" / "src" / "pages" / "Dashboard.tsx")
   doAssert fileExists(root / "client" / "src" / "pages" / "Users.tsx")
 
-  let manifest = parseJson(readFile(root / "client" / "package.json"))
+  let manifest = parseJson(readFile(root / "package.json"))
   doAssert "react" in manifest["dependencies"]
   doAssert "react-dom" in manifest["dependencies"]
   doAssert "@inertiajs/react" in manifest["dependencies"]
@@ -124,14 +154,21 @@ block scaffoldReactPlain:
   doAssert manifest["packageManager"].getStr() == "npm@11.0.0"
 
   let main = readFile(root / "src" / "main.nim")
-  doAssert "src/main.tsx" in main
-  doAssert "@react-refresh" in main
+  doAssert "http://localhost:5173/assets/client/src/main.tsx" in main
+  doAssert "http://localhost:5173/assets/@vite/client" in main
+  doAssert "http://localhost:5173/assets/@react-refresh" in main
 
-  let vite = readFile(root / "client" / "vite.config.ts")
+  let nimble = readFile(root / "blog.nimble")
+  doAssert "exec \"npm install\"" in nimble
+  doAssert "exec \"npm run build\"" in nimble
+  doAssert "ViteCommand = \"npm run dev\"" in readFile(root / "tools" / "dev.nim")
+
+  let vite = readFile(root / "vite.config.ts")
+  doAssert "client/src/main.tsx" in vite
   doAssert "@vitejs/plugin-react" in vite
   doAssert "tailwindcss" notin vite
 
-  let tsconfig = parseJson(readFile(root / "client" / "tsconfig.json"))
+  let tsconfig = parseJson(readFile(root / "tsconfig.json"))
   doAssert tsconfig["compilerOptions"]["jsx"].getStr() == "react-jsx"
 
   let entry = readFile(root / "client" / "src" / "main.tsx")
@@ -145,12 +182,12 @@ block scaffoldReactPlain:
 block scaffoldBunAndDenoManagers:
   let box = sandbox("managers")
   let bunRoot = scaffoldCombo(box, "bunapp", feSvelte, "bun", cssNone)
-  let bunManifest = parseJson(readFile(bunRoot / "client" / "package.json"))
+  let bunManifest = parseJson(readFile(bunRoot / "package.json"))
   doAssert "packageManager" notin bunManifest
   doAssert "bun run dev" in readFile(bunRoot / "README.md")
 
   let denoRoot = scaffoldCombo(box, "denoapp", feReact, "deno", cssNone)
-  let denoManifest = parseJson(readFile(denoRoot / "client" / "package.json"))
+  let denoManifest = parseJson(readFile(denoRoot / "package.json"))
   doAssert "packageManager" notin denoManifest
   doAssert "deno task dev" in readFile(denoRoot / "README.md")
 
@@ -187,7 +224,7 @@ block cliInitScaffoldsProject:
   doAssert code == 0
   doAssert fileExists(box / "demo" / "src" / "main.nim")
   doAssert fileExists(box / "demo" / "client" / "src" / "main.tsx")
-  let manifest = parseJson(readFile(box / "demo" / "client" / "package.json"))
+  let manifest = parseJson(readFile(box / "demo" / "package.json"))
   doAssert "@inertiajs/react" in manifest["dependencies"]
 
 block cliUsesSensibleDefaults:
@@ -198,7 +235,7 @@ block cliUsesSensibleDefaults:
   )
   doAssert code == 0
   let manifest =
-    parseJson(readFile(box / "plain" / "client" / "package.json"))
+    parseJson(readFile(box / "plain" / "package.json"))
   doAssert "@inertiajs/svelte" in manifest["dependencies"]
   doAssert "tailwindcss" in manifest["devDependencies"]
   doAssert manifest["packageManager"].getStr() == "pnpm@10.0.0"

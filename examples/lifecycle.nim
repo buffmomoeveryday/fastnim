@@ -61,7 +61,7 @@ api.get("/users", responses = @[(200, seq[User])]):
   let db = ctx.get("db")
   ok getAllUsers(db)
 
-let server = api.serve(port = 8000)
+let server = api.serve(port = 8009)
 echo "Listening at http://127.0.0.1:8000"
 try:
   waitFor server.join()

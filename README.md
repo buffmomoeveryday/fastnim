@@ -342,16 +342,16 @@ Available templates:
   nim c -r --path:src src/main.nim
   ```
 - `inertiajs` — FastNim + Inertia server with a Vite client (Svelte or React,
-  Tailwind v4 or plain CSS). After scaffolding, the CLI can run the client
-  install for you, then:
+  Tailwind v4 or plain CSS). The client's `package.json`, Vite/TypeScript
+  config, and `node_modules/` live in the project root; sources live in
+  `client/src/`. After scaffolding:
   ```sh
-  cd shop/client && pnpm dev          # Vite on http://localhost:5173
-  INERTIA_DEV=1 nim c -r --path:src src/main.nim   # Nim server on :8000
+  cd shop && nimble dev   # Vite on :5173 + Nim server on :8000, rebuilt on save
   ```
-  For production, build the client and serve `client/dist` from Nim:
+  For production, `nimble build`/`nimble run` bundle the client into
+  `client/dist` before compiling the server:
   ```sh
-  cd shop/client && pnpm build
-  APP_VERSION=$(date +%s) nim c -r --path:src src/main.nim
+  APP_VERSION=$(date +%s) nimble run
   ```
 
 ## Application lifecycle and context

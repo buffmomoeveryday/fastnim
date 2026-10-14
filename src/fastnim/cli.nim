@@ -193,20 +193,19 @@ proc runInertiaInit(
   let commands = pkgCommands(choices.pkgManager)
   echo "Created '" & target & "' (inertiajs + " & Frontends[choices.frontend.ord] & ")."
   echo "Next steps:"
-  echo "  cd " & target / "client"
-  echo "  " & commands.install
-  echo "  " & commands.dev & "      # Vite dev server in one terminal"
-  echo "  INERTIA_DEV=1 nim c -r --path:src src/main.nim   # Nim server in another"
+  echo "  cd " & target
+  echo "  nimble dev   # Vite + Nim server, rebuilt on changes"
+  echo "  nimble run   # production: bundle client, build and run server"
 
   if interactive and terminal.isatty(stdin):
     if promptYesNo("Run '" & commands.install & "' now?"):
       let code = execShellCmd(
-        "cd " & quoteShell(target / "client") & " && " &
+        "cd " & quoteShell(target) & " && " &
           quoteShell(commands.install.split(' ')[0]) & " install"
       )
       if code != 0:
         echo "Install failed (exit " & $code & "). Run '" & commands.install &
-          "' manually inside " & target / "client" & "."
+          "' manually inside " & target & "."
   0
 
 proc normalizeParams(params: seq[string]): seq[string] =
