@@ -4,7 +4,7 @@
 ## route handlers. The plugin emits HTML for initial visits and Inertia page
 ## JSON for requests carrying ``X-Inertia: true``.
 
-import std/[json, strutils, tables, uri]
+import std/[json, strutils, uri]
 
 import chronos
 

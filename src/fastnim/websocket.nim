@@ -20,13 +20,28 @@ type
   WebSocket* = ref object ## An accepted WebSocket connection.
     session: rawWs.WSSession
     state: WebSocketState
+    maxMessageSize: int
+    idleTimeout: Duration
 
   WebSocketGroup* = ref object ## A set of WebSocket clients for group broadcasts.
     connections: seq[WebSocket]
 
-proc newWebSocket*(session: rawWs.WSSession): WebSocket =
+proc newWebSocket*(
+    session: rawWs.WSSession,
+    maxMessageSize = 1024 * 1024,
+    idleTimeout = 30.seconds,
+): WebSocket =
   ## Wraps an accepted nim-websock session.
-  WebSocket(session: session, state: WebSocketState.Connecting)
+  if maxMessageSize <= 0:
+    raise newException(ValueError, "WebSocket maximum message size must be positive")
+  if not idleTimeout.isInfinite() and idleTimeout <= ZeroDuration:
+    raise newException(ValueError, "WebSocket idle timeout must be positive or infinite")
+  WebSocket(
+    session: session,
+    state: WebSocketState.Connecting,
+    maxMessageSize: maxMessageSize,
+    idleTimeout: idleTimeout,
+  )
 
 proc newWebSocketGroup*(): WebSocketGroup =
   ## Creates an empty group of WebSocket connections.
@@ -35,6 +50,27 @@ proc newWebSocketGroup*(): WebSocketGroup =
 proc ensureConnected(websocket: WebSocket) =
   if websocket.state != WebSocketState.Connected:
     raise newException(WebSocketDisconnectError, "WebSocket is not connected")
+
+proc raiseDisconnect(message: string, code: int) {.noreturn.} =
+  var exc = newException(WebSocketDisconnectError, message)
+  exc.code = code
+  raise exc
+
+proc waitForIo(
+    websocket: WebSocket, pending: rawWs.WSSendFuture
+): Future[void] {.
+    async: (
+      raises: [CancelledError, AsyncStreamError, rawWs.WebSocketError,
+        WebSocketDisconnectError]
+    )
+.} =
+  if websocket.idleTimeout.isInfinite():
+    await pending
+    return
+  try:
+    await pending.wait(websocket.idleTimeout)
+  except AsyncTimeoutError:
+    raiseDisconnect("WebSocket I/O timed out", 1001)
 
 proc addWebSocket*(group: WebSocketGroup, websocket: WebSocket) =
   ## Adds an accepted connection to a group if it is not already present.
@@ -76,7 +112,9 @@ proc sendText*(
 .} =
   ## Sends a UTF-8 text message.
   websocket.ensureConnected()
-  await websocket.session.send(data)
+  if data.len > websocket.maxMessageSize:
+    raiseDisconnect("WebSocket message exceeds configured limit", 1009)
+  await websocket.waitForIo(websocket.session.send(data))
 
 proc broadcastText*(
     group: WebSocketGroup, data: string
@@ -113,7 +151,9 @@ proc sendBytes*(
 .} =
   ## Sends a binary message.
   websocket.ensureConnected()
-  await websocket.session.send(data, rawWs.Opcode.Binary)
+  if data.len > websocket.maxMessageSize:
+    raiseDisconnect("WebSocket message exceeds configured limit", 1009)
+  await websocket.waitForIo(websocket.session.send(data, rawWs.Opcode.Binary))
 
 proc sendJson*[T](
     websocket: WebSocket, value: T
@@ -138,7 +178,23 @@ proc receiveBytes*(
 .} =
   ## Receives the next complete message as bytes.
   websocket.ensureConnected()
-  result = await websocket.session.recvMsg()
+  let pending = websocket.session.recvMsg(websocket.maxMessageSize)
+  if websocket.idleTimeout.isInfinite():
+    return await pending
+  try:
+    return await pending.wait(websocket.idleTimeout)
+  except AsyncTimeoutError:
+    raiseDisconnect("WebSocket I/O timed out", 1001)
+
+proc sendHeartbeat*(websocket: WebSocket): Future[void] {.
+    async: (
+      raises: [CancelledError, AsyncStreamError, rawWs.WebSocketError,
+        WebSocketDisconnectError]
+    )
+.} =
+  ## Sends one WebSocket ping frame, subject to the connection idle timeout.
+  websocket.ensureConnected()
+  await websocket.waitForIo(websocket.session.ping())
 
 proc receiveText*(
     websocket: WebSocket
