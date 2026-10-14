@@ -65,6 +65,39 @@ block statusHelpersOutsideTypedRoutes:
   doAssert hello.status == 200
   doAssert hello.body == """{"message":"hello"}"""
 
+block responseHeadersRetainRepeatedValues:
+  var response = text("cookies")
+  response.addHeader("Set-Cookie", "theme=dark; Path=/")
+  response.addHeader("set-cookie", "session=abc; HttpOnly")
+  doAssert response.headers["SET-COOKIE"] == "session=abc; HttpOnly"
+  doAssert response.getAllHeaders("Set-Cookie") == @[
+    "theme=dark; Path=/", "session=abc; HttpOnly"
+  ]
+  var cookies: seq[string]
+  for name, value in response.headers:
+    if name == "set-cookie":
+      cookies.add(value)
+  doAssert cookies == @["theme=dark; Path=/", "session=abc; HttpOnly"]
+
+  response.setHeader("SET-cookie", "consent=yes; Secure")
+  doAssert response.getAllHeaders("set-cookie") == @["consent=yes; Secure"]
+
+block requestHeadersRetainRepeatedValues:
+  var headers = initHeaders()
+  headers.addHeader("Warning", "199 first warning")
+  headers.addHeader("warning", "299 second warning")
+  let request = initRequest(HttpMethod.Get, "/", headers)
+  doAssert request.headers["WARNING"] == "299 second warning"
+  doAssert request.getAllHeaders("Warning") == @[
+    "199 first warning", "299 second warning"
+  ]
+
+block legacyHeaderTablesRemainAccepted:
+  var headers = initTable[string, string]()
+  headers["X-Trace"] = "abc"
+  let request = initRequest(HttpMethod.Get, "/", headers)
+  doAssert request.headers["x-trace"] == "abc"
+
 block typedRouteStatusHelpers:
   let helper = initFastNim(logs = false)
   helper.get("/denied", responses = @[(401, Failure)]):

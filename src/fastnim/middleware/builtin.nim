@@ -1,6 +1,6 @@
 ## Built-in HTTP middleware for FastNim applications.
 
-import std/[monotimes, sequtils, strutils, tables, times]
+import std/[monotimes, sequtils, strutils, times]
 
 import chronos
 

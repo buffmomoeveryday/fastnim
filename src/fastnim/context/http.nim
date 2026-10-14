@@ -98,7 +98,9 @@ type
     statusNotExtended = 510
     statusNetworkAuthenticationRequired = 511
 
-  Headers* = Table[string, string] ## HTTP header mapping with lowercase names.
+  Headers* = object
+    ## Case-insensitive HTTP headers that retain repeated field values.
+    values: Table[string, seq[string]]
 
   ApiError* = object
     ## Standard JSON error returned by FastNim applications.
@@ -158,6 +160,73 @@ type
     event*: string ## Optional event name, omitted when empty.
     id*: string ## Optional event ID for client-side replay, omitted when empty.
     retry*: int ## Reconnection delay in milliseconds, omitted when negative.
+
+proc initHeaders*(): Headers {.inline, raises: [].} =
+  ## Creates an empty collection of HTTP headers.
+  Headers(values: initTable[string, seq[string]]())
+
+converter toHeaders*(headers: Table[string, string]): Headers {.raises: [].} =
+  ## Converts a single-value table to case-insensitive HTTP headers.
+  result = initHeaders()
+  for name, value in headers:
+    result.values[name.toLowerAscii()] = @[value]
+
+proc `[]`*(headers: Headers, name: string): string {.inline.} =
+  ## Returns the last value for ``name`` or raises ``KeyError`` when absent.
+  headers.values[name.toLowerAscii()][^1]
+
+proc `[]=`*(headers: var Headers, name, value: string) {.inline, raises: [].} =
+  ## Sets ``name`` to one value, replacing all values already stored for it.
+  headers.values[name.toLowerAscii()] = @[value]
+
+proc getOrDefault*(
+    headers: Headers, name: string, default = ""
+): string {.inline, raises: [].} =
+  ## Returns the last value for ``name``, or ``default`` when it is absent.
+  let values = headers.values.getOrDefault(name.toLowerAscii())
+  if values.len > 0:
+    values[^1]
+  else:
+    default
+
+proc getAllHeaders*(headers: Headers, name: string): seq[string] {.
+    inline, raises: []
+.} =
+  ## Returns every value for ``name`` in insertion order.
+  let values = headers.values.getOrDefault(name.toLowerAscii())
+  result = newSeqOfCap[string](values.len)
+  for value in values:
+    result.add(value)
+
+proc addHeader*(headers: var Headers, name, value: string) {.raises: [].} =
+  ## Appends a value for ``name`` without replacing existing values.
+  headers.values.mgetOrPut(name.toLowerAscii(), @[]).add(value)
+
+proc del*(headers: var Headers, name: string) {.inline, raises: [].} =
+  ## Removes every value stored for ``name``.
+  headers.values.del(name.toLowerAscii())
+
+proc clear*(headers: var Headers) {.inline, raises: [].} =
+  ## Removes all headers.
+  headers.values.clear()
+
+proc hasKey*(headers: Headers, name: string): bool {.inline, raises: [].} =
+  ## Returns whether at least one value is stored for ``name``.
+  headers.values.hasKey(name.toLowerAscii())
+
+proc contains*(headers: Headers, name: string): bool {.inline, raises: [].} =
+  ## Returns whether at least one value is stored for ``name``.
+  headers.hasKey(name)
+
+proc len*(headers: Headers): int {.inline, raises: [].} =
+  ## Returns the number of distinct header names.
+  headers.values.len
+
+iterator pairs*(headers: Headers): tuple[key, value: string] =
+  ## Yields every header field, including one pair for each repeated value.
+  for name, values in headers.values:
+    for value in values:
+      yield (name, value)
 
 proc initApiError*(
     code, message: string,
@@ -484,8 +553,24 @@ proc eventStream*(status: HttpStatus, events: openArray[ServerSentEvent]): Respo
   result.status = statusCode(status)
 
 proc setHeader*(response: var Response, name, value: string) {.raises: [].} =
-  ## Sets a response header before the response is returned.
+  ## Sets a response header, replacing all existing values for ``name``.
   response.headers[name.toLowerAscii()] = value
+
+proc addHeader*(response: var Response, name, value: string) {.raises: [].} =
+  ## Appends a response header value without replacing existing values.
+  response.headers.addHeader(name, value)
+
+proc getAllHeaders*(request: Request, name: string): seq[string] {.
+    inline, raises: []
+.} =
+  ## Returns every request header value for ``name`` in wire order.
+  request.headers.getAllHeaders(name)
+
+proc getAllHeaders*(response: Response, name: string): seq[string] {.
+    inline, raises: []
+.} =
+  ## Returns every response header value for ``name`` in insertion order.
+  response.headers.getAllHeaders(name)
 
 proc text*(body: string): Response =
   ## Creates a UTF-8 plain-text response.

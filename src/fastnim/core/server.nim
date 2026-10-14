@@ -1,9 +1,10 @@
 ## Chronos HTTP server adapter for fastnim applications.
 
-import std/[json, logging, monotimes, strutils, tables, times, uri]
+import std/[json, logging, monotimes, strutils, times, uri]
 
 import chronos/apps/http/httpserver as chronosHttp
 import chronos/streams/asyncstream
+import chronos/timer as chronosTimer
 import websock/websock as rawWs
 
 import fastnim/routing/router
@@ -42,10 +43,72 @@ type IncomingRequest = object
   status: int
   detail: string
 
+type BodyReadBudget = ref object
+  startedAt: chronosTimer.Moment
+  bytesRead: int
+
+proc raiseBodyReadLimit(detail: string) {.noreturn.} =
+  var exc = newException(BodyReadLimitError, detail)
+  exc.detail = detail
+  raise exc
+
+proc bodyReadWait(
+    budget: BodyReadBudget, limits: RequestLimits
+): tuple[timeout: chronosTimer.Duration, detail: string] =
+  let elapsed = chronosTimer.Moment.now() - budget.startedAt
+  result.timeout =
+    if limits.bodyReadTimeout.isInfinite():
+      chronosTimer.InfiniteDuration
+    else:
+      limits.bodyReadTimeout - elapsed
+  result.detail = BodyReadTimeoutDetail
+  if limits.minBodyBytesPerSecond > 0:
+    let rateAllowance =
+      limits.bodyReadGracePeriod +
+      chronosTimer.milliseconds(
+        (int64(budget.bytesRead) + 1) * 1000 div
+          int64(limits.minBodyBytesPerSecond)
+      )
+    let rateRemaining = rateAllowance - elapsed
+    if result.timeout.isInfinite() or rateRemaining < result.timeout:
+      result.timeout = rateRemaining
+      result.detail = BodyRateTooLowDetail
+  if result.timeout <= chronosTimer.ZeroDuration:
+    raiseBodyReadLimit(result.detail)
+
+proc readBodyChunk(
+    reader: chronosHttp.HttpBodyReader,
+    budget: BodyReadBudget,
+    limits: RequestLimits,
+    maxBytes: int,
+): Future[string] {.
+    async: (
+      raises: [CancelledError, AsyncStreamError, BodyReadLimitError]
+    )
+.} =
+  if maxBytes <= 0:
+    return ""
+  var chunk = newString(maxBytes)
+  let allowance = budget.bodyReadWait(limits)
+  let pending = reader.readOnce(addr chunk[0], maxBytes)
+  if not await pending.withTimeout(allowance.timeout):
+    raiseBodyReadLimit(allowance.detail)
+  let count = await pending
+  chunk.setLen(count)
+  budget.bytesRead += count
+  if limits.minBodyBytesPerSecond > 0:
+    let measured =
+      (chronosTimer.Moment.now() - budget.startedAt) - limits.bodyReadGracePeriod
+    if measured > chronosTimer.ZeroDuration and
+        int64(budget.bytesRead) * 1000 <
+          int64(limits.minBodyBytesPerSecond) * measured.milliseconds:
+      raiseBodyReadLimit(BodyRateTooLowDetail)
+  chunk
+
 proc copyHeaders(request: chronosHttp.HttpRequestRef): fastnimHttp.Headers =
-  result = initTable[string, string]()
+  result = initHeaders()
   for key, value in request.headers.stringItems():
-    result[key.toLowerAscii()] = value
+    result.addHeader(key, value)
 
 proc transportStatus(code: chronosHttp.HttpCode): int =
   parseInt(($code)[0 .. 2])
@@ -55,7 +118,8 @@ proc toFastnimRequest(
 ): Future[IncomingRequest] {.
     async: (
       raises:
-        [CancelledError, chronosHttp.HttpTransportError, chronosHttp.HttpProtocolError]
+        [CancelledError, chronosHttp.HttpTransportError,
+          chronosHttp.HttpProtocolError, BodyReadLimitError]
     )
 .} =
   let headers = copyHeaders(request)
@@ -77,7 +141,30 @@ proc toFastnimRequest(
   let streamsMultipart =
     request.hasBody() and contentType.startsWith("multipart/form-data")
   if request.hasBody() and not streamsMultipart:
-    let body = bytesToString(await request.getBody())
+    let bodyResult = request.getBodyReader()
+    if bodyResult.isErr():
+      raise newException(
+        chronosHttp.HttpProtocolError,
+        "Unable to open request body: " & $bodyResult.error,
+      )
+    let reader = bodyResult.get()
+    let budget = BodyReadBudget(startedAt: chronosTimer.Moment.now())
+    var body = ""
+    try:
+      await request.handleExpect()
+      while true:
+        let chunk = await readBodyChunk(reader, budget, app.requestLimits, 65536)
+        if chunk.len == 0:
+          break
+        body.add(chunk)
+      if reader.hasOverflow():
+        chronosHttp.raiseHttpRequestBodyTooLargeError()
+    except AsyncStreamError as exc:
+      raise newException(
+        chronosHttp.HttpReadError, "Unable to read request body: " & exc.msg
+      )
+    finally:
+      await reader.closeWait()
     let bodyDetail = bodyLimitDetail(headers, body, app.requestLimits)
     if bodyDetail.len > 0:
       result.status = 413
@@ -92,14 +179,13 @@ proc toFastnimRequest(
         "Unable to open multipart request body: " & $bodyResult.error,
       )
     let reader = bodyResult.get()
+    let budget = BodyReadBudget(startedAt: chronosTimer.Moment.now())
     await request.handleExpect()
     let read: fastnimHttp.BodyReadProc = proc(
         maxBytes: int
     ): Future[string] {.async: (raises: [CatchableError]).} =
-      var chunk = newString(maxBytes)
       try:
-        let count = await reader.readOnce(addr chunk[0], maxBytes)
-        chunk.setLen(count)
+        let chunk = await readBodyChunk(reader, budget, app.requestLimits, maxBytes)
         if reader.hasOverflow():
           chronosHttp.raiseHttpRequestBodyTooLargeError()
         return chunk
@@ -118,7 +204,7 @@ proc toChronosResponse(
 .} =
   var headers = chronosHttp.HttpTable.init()
   for key, value in response.headers:
-    headers.set(key, value)
+    headers.add(key, value)
   result =
     await request.respond(toChronosStatus(response.status), response.body, headers)
 
@@ -144,7 +230,7 @@ proc sendStaticFile(
   cresp.status = toChronosStatus(response.status)
   for key, value in response.headers:
     if key.toLowerAscii() != "content-length":
-      cresp.setHeader(key, value)
+      cresp.addHeader(key, value)
   try:
     await cresp.prepareChunked()
     setFilePos(opened, response.fileOffset)
@@ -175,6 +261,7 @@ proc sendSse(
     app: Application,
     request: fastnimHttp.Request,
     chronosRequest: chronosHttp.HttpRequestRef,
+    limits: SseLimits,
 ): Future[chronosHttp.HttpResponseRef] {.
     async: (raises: [CancelledError, chronosHttp.HttpWriteError, ValueError])
 .} =
@@ -182,21 +269,59 @@ proc sendSse(
   response.setHeader("content-type", "text/event-stream; charset=utf-8")
   response.setHeader("cache-control", "no-cache")
   await response.prepareSSE()
+  let writeLock = newAsyncLock()
+  proc sendPayload(payload: string): Future[void] {.
+      async: (raises: [CancelledError, chronosHttp.HttpWriteError])
+  .} =
+    await writeLock.acquire()
+    try:
+      if response.getResponseState() notin
+          {chronosHttp.HttpResponseState.Prepared, chronosHttp.HttpResponseState.Sending}:
+        raise newException(chronosHttp.HttpWriteError, "SSE connection is closed")
+      try:
+        if limits.idleTimeout.isInfinite():
+          await response.send(payload)
+        else:
+          await response.send(payload).wait(limits.idleTimeout)
+      except AsyncTimeoutError:
+        raise newException(chronosHttp.HttpWriteError, "SSE write timed out")
+    finally:
+      try:
+        writeLock.release()
+      except AsyncLockError:
+        raiseAssert "SSE write lock was released unexpectedly"
+
   let eventSender: SseSend = proc(
       event: ServerSentEvent
   ): Future[void] {.async: (raises: [CancelledError, chronosHttp.HttpWriteError]).} =
-    if response.getResponseState() notin
-        {chronosHttp.HttpResponseState.Prepared, chronosHttp.HttpResponseState.Sending}:
-      # The peer went away after an earlier write failed. Report it as a
-      # regular write error (which callers and `process` handle by dropping
-      # the connection) instead of letting Chronos trip its internal response
-      # state assertion, which would crash the whole server.
-      raise newException(chronosHttp.HttpWriteError, "SSE connection is closed")
-    await response.send(formatSseEvent(event))
+    let payload = formatSseEvent(event)
+    if payload.len > limits.maxEventSize:
+      raise newException(chronosHttp.HttpWriteError, "SSE event exceeds configured limit")
+    await sendPayload(payload)
+  var active = true
+  proc heartbeat() {.async: (raises: []).} =
+    while active:
+      try:
+        await sleepAsync(limits.heartbeatInterval)
+        if active:
+          await sendPayload(": heartbeat\n\n")
+      except CancelledError:
+        return
+      except CatchableError:
+        active = false
+        return
+  var heartbeatFuture: Future[void]
+  if not limits.heartbeatInterval.isInfinite():
+    heartbeatFuture = heartbeat()
+    asyncSpawn heartbeatFuture
   try:
     await app.handleSse(request, eventSender)
-  except chronosHttp.HttpWriteError as exc:
+  except chronosHttp.HttpWriteError:
     return chronosHttp.dropResponse()
+  finally:
+    active = false
+    if not heartbeatFuture.isNil and not heartbeatFuture.finished():
+      heartbeatFuture.cancelSoon()
   if response.getResponseState() in
       {chronosHttp.HttpResponseState.Prepared, chronosHttp.HttpResponseState.Sending}:
     await response.finish()
@@ -222,6 +347,7 @@ proc serveWebSocket(
     app: Application,
     request: fastnimHttp.Request,
     chronosRequest: chronosHttp.HttpRequestRef,
+    limits: WebSocketLimits,
 ): Future[chronosHttp.HttpResponseRef] {.
     async: (
       raises: [
@@ -231,11 +357,35 @@ proc serveWebSocket(
     )
 .} =
   let rawRequest = chronosRequest.toWebSocketRequest()
-  let session = await rawWs.WSServer.new().handleRequest(rawRequest)
-  let websocket = newWebSocket(session)
+  let frameSize = min(limits.maxMessageSize, 64 * 1024)
+  let session = await rawWs.WSServer.new(frameSize = frameSize).handleRequest(rawRequest)
+  let websocket = newWebSocket(session, limits.maxMessageSize, limits.idleTimeout)
+  var active = true
+  proc heartbeat() {.async: (raises: []).} =
+    while active:
+      try:
+        await sleepAsync(limits.heartbeatInterval)
+        if active:
+          await websocket.sendHeartbeat()
+      except CancelledError:
+        return
+      except CatchableError:
+        active = false
+        try:
+          await websocket.close(1001, "heartbeat failed")
+        except CancelledError:
+          discard
+        return
+  var heartbeatFuture: Future[void]
+  if not limits.heartbeatInterval.isInfinite():
+    heartbeatFuture = heartbeat()
+    asyncSpawn heartbeatFuture
   try:
     await app.handleWebSocket(request, websocket)
   finally:
+    active = false
+    if not heartbeatFuture.isNil and not heartbeatFuture.finished():
+      heartbeatFuture.cancelSoon()
     await websocket.close()
   chronosRequest.getResponse()
 
@@ -283,14 +433,15 @@ proc serve*(
   ## overrides ``maxBodySize`` for this server. Zero uses the application limit.
   ## Bodies above the cap return ``413`` before parsing. Header name, value,
   ## count, and raw block limits return ``431``. A client that stalls while
-  ## sending headers returns ``408``. A handler that exceeds ``handlerTimeout``
-  ## returns ``503`` and is cancelled. Malformed requests return ``400``.
+  ## sending headers or a body returns ``408``. Slow body rates also return
+  ## ``408``. A handler that exceeds ``handlerTimeout`` returns ``503`` and is
+  ## cancelled; excess concurrent handlers are rejected with ``503``.
   ##
-  ## Server-sent events and WebSocket routes are not subject to
-  ## ``handlerTimeout``. Blocking calls such as ``os.sleep`` cannot be
-  ## cancelled. Multipart ``maxRequestSize`` must be less than or equal to
-  ## ``maxBodySize``; the smaller cap rejects the upload first, and a handler
-  ## deadline cancels parsing and removes partial uploads.
+  ## Accepted connections and the TCP backlog are bounded at server startup.
+  ## The effective wait for any header block, including keep-alive requests,
+  ## is the lower of ``headersTimeout`` and ``keepAliveTimeout``. SSE and
+  ## WebSocket routes use their separate connection, idle, size, and heartbeat
+  ## limits. Multipart body deadlines remain active while the handler parses.
   if maxRequestBodySize < 0:
     raise newException(ValueError, "maxRequestBodySize must be positive")
   if maxRequestBodySize > 0:
@@ -300,6 +451,9 @@ proc serve*(
   echo fastNimStartupBanner
   app.load()
   let limits = app.requestLimits
+  let handlerSlots = newAsyncSemaphore(limits.maxConcurrentHandlers)
+  var activeSseConnections = 0
+  var activeWebSocketConnections = 0
   proc process(
       requestFence: chronosHttp.RequestFence
   ): Future[chronosHttp.HttpResponseRef] {.async: (raises: [CancelledError]).} =
@@ -319,20 +473,49 @@ proc serve*(
           )
         let request = incoming.request
         if app.isWebSocketRoute(request):
-          let response = await serveWebSocket(app, request, chronosRequest)
-          app.logRequest(request, 101, (getMonoTime() - startedAt).inMicroseconds)
-          return response
+          if activeWebSocketConnections >= limits.websocket.maxConnections:
+            return await sendLimit(
+              app, chronosRequest, request, 503, WebSocketCapacityDetail, startedAt
+            )
+          inc activeWebSocketConnections
+          try:
+            let response = await serveWebSocket(
+              app, request, chronosRequest, limits.websocket
+            )
+            app.logRequest(request, 101, (getMonoTime() - startedAt).inMicroseconds)
+            return response
+          finally:
+            dec activeWebSocketConnections
         if app.isSseRoute(request):
-          let response = await sendSse(app, request, chronosRequest)
-          app.logRequest(request, 200, (getMonoTime() - startedAt).inMicroseconds)
-          return response
+          if activeSseConnections >= limits.sse.maxConnections:
+            return await sendLimit(
+              app, chronosRequest, request, 503, SseCapacityDetail, startedAt
+            )
+          inc activeSseConnections
+          try:
+            let response = await sendSse(app, request, chronosRequest, limits.sse)
+            app.logRequest(request, 200, (getMonoTime() - startedAt).inMicroseconds)
+            return response
+          finally:
+            dec activeSseConnections
         when defined(fastnimTiming):
           let handlerStartedAt = getMonoTime()
+        if not handlerSlots.tryAcquire():
+          await request.closeBodySource()
+          return await sendLimit(
+            app, chronosRequest, request, 503, HandlerCapacityDetail, startedAt
+          )
         let response =
           try:
-            await app.safeHandle(request)
+            try:
+              await app.safeHandle(request)
+            finally:
+              await request.closeBodySource()
           finally:
-            await request.closeBodySource()
+            try:
+              handlerSlots.release()
+            except AsyncSemaphoreError:
+              raiseAssert "HTTP handler slot was released unexpectedly"
         when defined(fastnimTiming):
           echo "[fastnim timing] handler ",
             (getMonoTime() - handlerStartedAt).inMicroseconds, " us"
@@ -353,6 +536,15 @@ proc serve*(
         return await sendLimit(
           app, chronosRequest, request, 413, BodyTooLargeDetail, startedAt
         )
+      except BodyReadLimitError as exc:
+        let request = fastnimHttp.initRequest(
+          toFastnimMethod(chronosRequest.meth),
+          chronosRequest.rawPath,
+          copyHeaders(chronosRequest),
+        )
+        return await sendLimit(
+          app, chronosRequest, request, 408, exc.detail, startedAt
+        )
     except CancelledError as exc:
       raise exc
     except chronosHttp.HttpWriteError:
@@ -361,17 +553,50 @@ proc serve*(
       app.logError("Unhandled server error: " & exc.msg)
       return chronosHttp.defaultResponse(exc)
 
+  let effectiveHeadersTimeout =
+    if limits.headersTimeout.isInfinite():
+      limits.keepAliveTimeout
+    elif limits.keepAliveTimeout.isInfinite():
+      limits.headersTimeout
+    else:
+      min(limits.headersTimeout, limits.keepAliveTimeout)
   result = chronosHttp.HttpServerRef
     .new(
       initTAddress(address, Port(port)),
       process,
       serverFlags = {chronosHttp.HttpServerFlags.Http11Pipeline},
       socketFlags = {chronosHttp.ReuseAddr, chronosHttp.TcpNoDelay},
-      httpHeadersTimeout = limits.headersTimeout,
+      httpHeadersTimeout = effectiveHeadersTimeout,
       maxHeadersSize = limits.maxHeadersSize,
       maxRequestBodySize = limits.maxBodySize,
+      maxConnections = limits.maxConnections,
+      backlogSize = limits.backlog,
     )
     .get()
+  let createConnection = result.createConnCallback
+  var activeConnections = 0
+  result.createConnCallback = proc(
+      server: chronosHttp.HttpServerRef, transport: StreamTransport
+  ): Future[chronosHttp.HttpConnectionRef] {.
+      async: (raises: [CancelledError, chronosHttp.HttpConnectionError])
+  .} =
+    if activeConnections >= limits.maxConnections:
+      await transport.closeWait()
+      raise newException(
+        chronosHttp.HttpConnectionError, "maximum HTTP connections reached"
+      )
+    let connection = await createConnection(server, transport)
+    inc activeConnections
+    let closeConnection = connection.closeCb
+    var counted = true
+    connection.closeCb = proc(
+        closing: chronosHttp.HttpConnectionRef
+    ): Future[void] {.async: (raises: []).} =
+      if counted:
+        counted = false
+        dec activeConnections
+      await closeConnection(closing)
+    connection
   result.start()
   let baseUrl = "http://" & address & ":" & $port
   app.log(lvlInfo, "Listening at " & baseUrl)

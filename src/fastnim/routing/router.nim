@@ -241,12 +241,9 @@ proc requestLimits*(app: Application): lent RequestLimits =
 proc configureRequestLimits*(app: Application, limits: RequestLimits) =
   ## Replaces this application's request limits.
   ##
-  ## ``serve`` copies ``maxBodySize``, ``maxHeadersSize``, and
-  ## ``headersTimeout`` into Chronos when the server starts. Header name,
-  ## value, and count limits, plus ``handlerTimeout``, are read on each
-  ## request. ``limits`` must be valid for ``initRequestLimits``: positive
-  ## sizes, header name and value limits that fit in the header block, and
-  ## timeouts that are positive or infinite.
+  ## ``serve`` captures transport, capacity, body-rate, and protocol-specific
+  ## limits when the server starts. Configure them before serving. Values must
+  ## satisfy the validation contract documented by ``initRequestLimits``.
   validateRequestLimits(limits)
   app.limits = limits
 
@@ -1873,6 +1870,8 @@ proc handle*(
     raise exc
   except HttpRequestBodyTooLargeError:
     result = app.limitResponse(contextualRequest, 413, BodyTooLargeDetail)
+  except BodyReadLimitError as exc:
+    result = app.limitResponse(contextualRequest, 408, exc.detail)
   except ApiErrorException as exc:
     let status = exc.apiErrorStatus().statusCode()
     if status == 500:

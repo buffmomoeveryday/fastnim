@@ -9,6 +9,8 @@ when defined(websocketIntegration):
 
   import fastnim
 
+  var rejectedOversizedMessage {.global.}: bool
+
   proc serveForTest(
       app: Application, port: uint16
   ): chronosHttp.HttpServerRef {.gcsafe, raises: [Exception].} =
@@ -61,5 +63,38 @@ when defined(websocketIntegration):
         await second.close()
       await chronosHttp.stop(server)
 
+  proc exerciseMessageLimit() {.async: (raises: [CancelledError, Exception]).} =
+    rejectedOversizedMessage = false
+    let wsLimits = initWebSocketLimits(
+      maxMessageSize = 4,
+      idleTimeout = 1.seconds,
+      heartbeatInterval = InfiniteDuration,
+    )
+    let app = initFastNim(
+      logs = false, limits = initRequestLimits(websocket = wsLimits)
+    )
+    app.websocket("/limited"):
+      await websocket.accept()
+      try:
+        discard await websocket.receiveText()
+      except rawWs.WebSocketError:
+        rejectedOversizedMessage = true
+
+    let server = serveForTest(app, 18083)
+    var client: rawWs.WSSession
+    try:
+      client = await rawWs.WebSocket.connect("127.0.0.1:18083", path = "/limited")
+      await client.send("hello")
+      await sleepAsync(100.milliseconds)
+      doAssert rejectedOversizedMessage
+    finally:
+      if not client.isNil:
+        try:
+          await client.close()
+        except CatchableError:
+          discard
+      await chronosHttp.stop(server)
+
   waitFor exerciseWebSocket()
   waitFor exerciseBroadcast()
+  waitFor exerciseMessageLimit()

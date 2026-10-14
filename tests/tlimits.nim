@@ -11,6 +11,8 @@ var handlerCancelled {.global.}: bool
 var loggedTimeout {.global.}: bool
 var loggedElapsed {.global.}: bool
 var sawUploadCancel {.global.}: bool
+var concurrentHandlers {.global.}: int
+var peakConcurrentHandlers {.global.}: int
 
 proc timeoutLogger(level: Level, message: string) {.gcsafe, raises: [].} =
   discard level
@@ -234,6 +236,175 @@ proc exchange(port: Port, raw: string): Future[string] {.async.} =
       copyMem(addr result[0], addr chunk[0], count)
   finally:
     await connection.closeWait()
+
+proc stalledBodyExchange(
+    port: Port, path: string
+): Future[string] {.async.} =
+  let connection = await connect(initTAddress("127.0.0.1", port))
+  try:
+    discard await connection.write(
+      "POST " & path & " HTTP/1.1\r\nHost: 127.0.0.1\r\n" &
+        "Content-Length: 5\r\nConnection: close\r\n\r\na"
+    )
+    var chunk = newSeq[byte](4096)
+    let count = await connection.readOnce(addr chunk[0], chunk.len)
+    result = newString(count)
+    if count > 0:
+      copyMem(addr result[0], addr chunk[0], count)
+  finally:
+    await connection.closeWait()
+
+block validatesNetworkAndProtocolLimits:
+  doAssertRaises ValueError:
+    discard initRequestLimits(maxConnections = 0)
+  doAssertRaises ValueError:
+    discard initRequestLimits(maxConcurrentHandlers = 0)
+  doAssertRaises ValueError:
+    discard initRequestLimits(backlog = 0)
+  doAssertRaises ValueError:
+    discard initRequestLimits(minBodyBytesPerSecond = -1)
+  doAssertRaises ValueError:
+    discard initSseLimits(maxEventSize = 0)
+  doAssertRaises ValueError:
+    discard initWebSocketLimits(maxMessageSize = 0)
+
+block loopbackRejectsStalledAndSlowBodies:
+  let app = initFastNim(
+    logs = false,
+    limits = initRequestLimits(
+      bodyReadTimeout = 150.milliseconds,
+      minBodyBytesPerSecond = 1000,
+      bodyReadGracePeriod = 100.milliseconds,
+      keepAliveTimeout = 2.seconds,
+      maxConnections = 12,
+      maxConcurrentHandlers = 3,
+      backlog = 7,
+    ),
+  )
+  app.post("/body"):
+    text(request.body)
+  let server = app.serve(port = 0)
+  doAssert server.maxConnections == 12
+  doAssert server.backlogSize == 7
+  doAssert server.headersTimeout == 2.seconds
+  try:
+    let response = waitFor stalledBodyExchange(server.address.port, "/body")
+    doAssert response.startsWith("HTTP/1.1 408"), response
+    doAssert BodyRateTooLowDetail in response, response
+  finally:
+    waitFor server.stop()
+
+block loopbackAppliesTotalBodyReadDeadline:
+  let app = initFastNim(
+    logs = false,
+    limits = initRequestLimits(
+      bodyReadTimeout = 100.milliseconds,
+      minBodyBytesPerSecond = 0,
+    ),
+  )
+  app.post("/body"):
+    text(request.body)
+  let server = app.serve(port = 0)
+  try:
+    let response = waitFor stalledBodyExchange(server.address.port, "/body")
+    doAssert response.startsWith("HTTP/1.1 408"), response
+    doAssert BodyReadTimeoutDetail in response, response
+  finally:
+    waitFor server.stop()
+
+block loopbackCapsConcurrentHandlers:
+  concurrentHandlers = 0
+  peakConcurrentHandlers = 0
+  let app = initFastNim(
+    logs = false,
+    limits = initRequestLimits(maxConcurrentHandlers = 1),
+  )
+  app.get("/hold"):
+    inc concurrentHandlers
+    peakConcurrentHandlers = max(peakConcurrentHandlers, concurrentHandlers)
+    try:
+      await sleepAsync(250.milliseconds)
+      text("done")
+    finally:
+      dec concurrentHandlers
+  let server = app.serve(port = 0)
+  proc exercise(port: Port) {.async.} =
+    let first = exchange(
+      port, "GET /hold HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    await sleepAsync(25.milliseconds)
+    let second = await exchange(
+      port, "GET /hold HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    let completed = await first
+    doAssert completed.startsWith("HTTP/1.1 200"), completed
+    doAssert second.startsWith("HTTP/1.1 503"), second
+    doAssert peakConcurrentHandlers == 1
+  try:
+    waitFor exercise(server.address.port)
+  finally:
+    waitFor server.stop()
+
+block loopbackCapsSseConnectionsSeparately:
+  let sseLimits = initSseLimits(
+    maxConnections = 1,
+    idleTimeout = 1.seconds,
+    heartbeatInterval = InfiniteDuration,
+  )
+  let app = initFastNim(
+    logs = false, limits = initRequestLimits(sse = sseLimits)
+  )
+  app.sse("/events"):
+    await sleepAsync(2.seconds)
+  let server = app.serve(port = 0)
+  proc exercise(port: Port) {.async.} =
+    let first = await connect(initTAddress("127.0.0.1", port))
+    try:
+      discard await first.write(
+        "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+      )
+      await sleepAsync(50.milliseconds)
+      let second = await exchange(
+        port,
+        "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+      )
+      doAssert second.startsWith("HTTP/1.1 503"), second
+    finally:
+      await first.closeWait()
+  try:
+    waitFor exercise(server.address.port)
+  finally:
+    waitFor server.stop()
+
+block loopbackCapsAcceptedConnections:
+  let app = initFastNim(
+    logs = false,
+    limits = initRequestLimits(maxConnections = 1, headersTimeout = 1.seconds),
+  )
+  app.get("/health"):
+    text("ok")
+  let server = app.serve(port = 0)
+  proc exercise(port: Port) {.async.} =
+    let held = await connect(initTAddress("127.0.0.1", port))
+    try:
+      await sleepAsync(25.milliseconds)
+      let rejected = await exchange(
+        port,
+        "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+      )
+      doAssert rejected.len == 0, rejected
+    finally:
+      await held.closeWait()
+    await sleepAsync(25.milliseconds)
+    let accepted = await exchange(
+      port,
+      "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    )
+    doAssert accepted.startsWith("HTTP/1.1 200"), accepted
+  try:
+    waitFor exercise(server.address.port)
+  finally:
+    waitFor server.stop()
 
 block loopbackEnforcesTransportLimitsAndKeepsServing:
   handlerCancelled = false
