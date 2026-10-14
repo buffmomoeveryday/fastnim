@@ -322,6 +322,17 @@ flag, so runs stay scriptable:
 fastnim init shop --template:inertiajs --frontend:react --pkgmanager:bun --css:none
 ```
 
+Add `--auth` to generate a complete starter login flow. The `api` and
+`karax_csr` templates use HS256 bearer JWTs; `inertiajs` and `karax_ssr` use
+HttpOnly server-side sessions. Every authenticated scaffold includes the
+development account `ada` / `s3cret` and notes showing what to replace before
+deployment.
+
+```sh
+fastnim init shop --template:inertiajs --auth
+fastnim init service --template:api --auth
+```
+
 Available templates:
 
 - `api` (default) — versioned JSON API: typed models, a users router with

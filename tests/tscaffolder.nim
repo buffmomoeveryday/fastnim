@@ -369,3 +369,44 @@ block cliScaffoldsEveryTemplate:
     @["init", "old", "--template:api", "--frontend:svelte", "--dir=" & box],
     interactive = false) == 0
   doAssert fileExists(box / "old" / "src" / "main.nim")
+
+block cliScaffoldsAuthForEveryTemplate:
+  let box = sandbox("cli-auth")
+  for (name, templateName, scheme) in [
+    ("apiapp", "api", "AuthScheme.Jwt"),
+    ("ssrapp", "karax_ssr", "AuthScheme.Session"),
+    ("csrapp", "karax_csr", "AuthScheme.Jwt"),
+    ("inertiaapp", "inertiajs", "AuthScheme.Session"),
+  ]:
+    let code = cliMain(
+      @["init", name, "--template:" & templateName, "--auth", "--dir=" & box],
+      interactive = false,
+    )
+    doAssert code == 0
+    let root = box / name
+    let src = root / "src"
+    doAssert fileExists(src / "auth.nim")
+    doAssert fileExists(src / "routes" / "auth.nim")
+    doAssert scheme in readFile(src / "auth.nim")
+    doAssert "authentication()" in readFile(src / "main.nim")
+    doAssert nimCheck([src], src / "main.nim") == ""
+
+  doAssert fileExists(
+    box / "inertiaapp" / "client" / "src" / "pages" / "Login.svelte"
+  )
+  doAssert "JWT_SECRET" in readFile(box / "apiapp" / "README.md")
+  doAssert "localstorage" in readFile(box / "csrapp" / "client" / "app.nim")
+
+  let csrRoot = box / "csrapp"
+  let jsLog = csrRoot / "client" / "auth_app.js.log"
+  let jsCode = execShellCmd(
+    "nim js --hints:off -o:" & quoteShell(csrRoot / "public" / "assets" / "app.js") &
+      " " & quoteShell(csrRoot / "client" / "app.nim") & " > " & quoteShell(jsLog) &
+      " 2>&1"
+  )
+  doAssert jsCode == 0, readFile(jsLog)
+
+block authFlagIsOptIn:
+  let box = sandbox("auth-opt-in")
+  doAssert cliMain(@["init", "plain", "--dir=" & box], interactive = false) == 0
+  doAssert not fileExists(box / "plain" / "src" / "auth.nim")
