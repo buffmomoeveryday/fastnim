@@ -25,8 +25,8 @@ import std/[os, strutils, tables, times, uri]
 
 import chronos
 
-import fastnim/context/http
-import fastnim/routing/router
+import ../context/http
+import ../routing/router
 
 type EmbeddedFile* = object ## A file baked into the binary at compile time.
   content*: string ## Raw file bytes served from memory.

@@ -9,9 +9,9 @@ import std/[locks, strutils, sysrand, tables, times]
 
 import chronos
 
-import fastnim/[context/http, params/extract]
+import ../../context/http, ../../params/extract
 
-import fastnim/plugins/auth/schemes
+import ../../plugins/auth/schemes
 
 type
   SessionData* = ref object of RootObj ## Server-side record for one login.

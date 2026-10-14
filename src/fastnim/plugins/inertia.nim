@@ -8,7 +8,7 @@ import std/[json, strutils, uri]
 
 import chronos
 
-import fastnim/[context/http, params/extract, plugin, routing/router]
+import ../context/http, ../params/extract, ../plugin, ../routing/router
 
 const
   InertiaHeader* = "x-inertia" ## Identifies Inertia requests and responses.

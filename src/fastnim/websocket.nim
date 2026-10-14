@@ -3,7 +3,7 @@
 import std/json
 
 import chronos/[asyncloop, futures]
-import fastnim/private/jsonconversion
+import ./private/jsonconversion
 import stew/byteutils
 import websock/websock as rawWs
 

@@ -35,8 +35,8 @@ import std/[json, strutils, tables]
 
 import chronos
 
-import fastnim/[context/http, params/extract, plugin, routing/router]
-import fastnim/plugins/auth/[patterns, schemes, session]
+import ../context/http, ../params/extract, ../plugin, ../routing/router
+import ../plugins/auth/[patterns, schemes, session]
 
 export schemes, patterns, session
 

@@ -842,11 +842,7 @@ Run [`examples/websocket_echo.nim`](examples/websocket_echo.nim) with
 `ws://127.0.0.1:8000/echo`.
 
 The adapter uses [nim-websock](https://github.com/status-im/nim-websock) and
-retains Chronos as the HTTP server. WebSocket upgrades currently require the
-small `HttpRequestRef.upgradeStream` Chronos extension in
-[`patches/chronos-upgrade-stream.patch`](patches/chronos-upgrade-stream.patch).
-Apply it to Chronos 4.4.x until that API is available in the installed Chronos
-release.
+retains Chronos as the HTTP server.
 
 ## Typed responses
 

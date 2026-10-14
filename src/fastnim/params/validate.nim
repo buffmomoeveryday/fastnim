@@ -26,10 +26,10 @@
 
 import std/[json, macros, math, options, strutils]
 
-import fastnim/context/http
-import fastnim/jsonfields
-import fastnim/params/extract
-import fastnim/params/validationtypes
+import ../context/http
+import ../jsonfields
+import ../params/extract
+import ../params/validationtypes
 
 export validationtypes
 

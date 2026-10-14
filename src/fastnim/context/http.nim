@@ -4,8 +4,8 @@ import std/[json, macros, strutils, tables, uri]
 
 import chronos
 
-import fastnim/context/state
-import fastnim/private/jsonconversion
+import ../context/state
+import ../private/jsonconversion
 
 export tables
 

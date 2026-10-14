@@ -4,8 +4,8 @@ import std/[options, tables, uri]
 
 import chronos
 
-import fastnim/context/state
-import fastnim/grpc/protobuf
+import ../context/state
+import ../grpc/protobuf
 
 type
   GrpcStatus* {.pure.} = enum ## Standard gRPC status codes.

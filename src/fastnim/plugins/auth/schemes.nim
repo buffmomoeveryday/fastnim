@@ -13,7 +13,7 @@ import std/[base64, json, strutils, tables, times]
 
 import nimcrypto/[hmac, sha2]
 
-import fastnim/[context/http, params/extract]
+import ../../context/http, ../../params/extract
 
 type
   AuthScheme* {.pure.} = enum

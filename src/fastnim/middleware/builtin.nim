@@ -4,7 +4,7 @@ import std/[monotimes, sequtils, strutils, times]
 
 import chronos
 
-import fastnim/[context/http, params/extract, routing/router]
+import ../context/http, ../params/extract, ../routing/router
 
 type
   CorsOptions* = object ## Configuration for Cross-Origin Resource Sharing middleware.

@@ -24,8 +24,8 @@ import chronos/asyncsync
 from chronos/apps/http/httpserver import HttpWriteError
 import std/[json, locks, strutils, tables]
 
-import fastnim/[context/http, params/extract, plugin, routing/router]
-import fastnim/private/jsonconversion
+import ../context/http, ../params/extract, ../plugin, ../routing/router
+import ../private/jsonconversion
 
 const
   DatastarKey* = "datastar"

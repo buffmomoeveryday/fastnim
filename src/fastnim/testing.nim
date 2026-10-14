@@ -21,8 +21,8 @@ import std/[json, tables]
 
 import chronos
 
-import fastnim/context/http
-import fastnim/routing/router
+import ./context/http
+import ./routing/router
 
 type TestClient* = ref object
   ## Drives an application in-process. Create one per test app with

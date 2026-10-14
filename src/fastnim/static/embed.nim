@@ -7,7 +7,7 @@
 
 import std/[macros, os, strutils, tables]
 
-import fastnim/static/files
+import ../static/files
 
 const defaultDenyExts* =
   [".mp4", ".mov", ".avi", ".mkv", ".webm", ".mp3", ".wav", ".flac", ".ogg", ".opus"]

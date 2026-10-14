@@ -17,7 +17,7 @@
 import std/[parseutils, strutils]
 
 import chronos
-import fastnim/context/http
+import ../context/http
 
 const
   BodyTooLargeDetail* = "request body exceeds the size limit"

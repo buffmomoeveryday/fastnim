@@ -7,8 +7,8 @@ import std/[macros, os, parseutils, strutils, tables, tempfiles]
 
 import chronos
 
-import fastnim/context/http
-import fastnim/params/uploadsink
+import ../context/http
+import ../params/uploadsink
 
 const
   DefaultChunkSize = 64 * 1024

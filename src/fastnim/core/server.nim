@@ -7,10 +7,10 @@ import chronos/streams/asyncstream
 import chronos/timer as chronosTimer
 import websock/websock as rawWs
 
-import fastnim/routing/router
-import fastnim/context/http as fastnimHttp
-import fastnim/core/limits
-import fastnim/websocket
+import ../routing/router
+import ../context/http as fastnimHttp
+import ../core/limits
+import ../websocket
 
 const fastNimStartupBanner = """
 ----------------------------------------
@@ -332,13 +332,22 @@ proc sendSse(
     return chronosHttp.dropResponse()
   response
 
+proc takeUpgradeStream(request: chronosHttp.HttpRequestRef): AsyncStream =
+  ## Detaches the raw connection stream from Chronos for a protocol upgrade.
+  ## Chronos closes the connection once the handler returns instead of trying
+  ## to read another HTTP request from it.
+  let response = request.getResponse()
+  response.keepalive = false
+  response.state = chronosHttp.HttpResponseState.Finished
+  AsyncStream(reader: request.connection.reader, writer: request.connection.writer)
+
 proc toWebSocketRequest(request: chronosHttp.HttpRequestRef): rawWs.HttpRequest =
   var headers = rawWs.HttpTable.init()
   for key, value in request.headers.stringItems():
     headers.add(key, value)
   rawWs.HttpRequest(
     headers: headers,
-    stream: request.upgradeStream(),
+    stream: request.takeUpgradeStream(),
     uri: parseUri(request.rawPath),
     meth: rawWs.MethodGet,
   )

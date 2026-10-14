@@ -11,11 +11,11 @@
 
 import std/[json, macros, options, strutils, tables]
 
-import fastnim/context/http
-import fastnim/jsonfields
-import fastnim/params/validationtypes
-import fastnim/private/jsonconversion
-import fastnim/private/jsonmetadata
+import ../context/http
+import ../jsonfields
+import ../params/validationtypes
+import ../private/jsonconversion
+import ../private/jsonmetadata
 
 export validationtypes
 

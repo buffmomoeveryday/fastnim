@@ -2,7 +2,7 @@
 
 import std/macros
 
-import fastnim/private/jsonmetadata
+import ./private/jsonmetadata
 
 template jsonName*(name: static[string]) {.pragma.}
   ## Renames an object field when FastNim encodes, decodes, or documents JSON.

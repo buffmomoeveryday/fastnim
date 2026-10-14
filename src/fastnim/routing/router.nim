@@ -6,15 +6,15 @@ import chronos/[asyncloop, futures, timer, transport]
 from chronos/apps/http/httpserver import HttpRequestBodyTooLargeError, HttpWriteError
 from websock/websock import WebSocketError
 
-import fastnim/context/http
-import fastnim/context/state
-import fastnim/core/limits
-import fastnim/logging
-import fastnim/openapi/spec
-import fastnim/params/extract
-import fastnim/params/multipart
-import fastnim/params/validate
-import fastnim/websocket
+import ../context/http
+import ../context/state
+import ../core/limits
+import ../logging
+import ../openapi/spec
+import ../params/extract
+import ../params/multipart
+import ../params/validate
+import ../websocket
 
 type
   RouteHandler* = proc(request: Request): Future[Response] {.

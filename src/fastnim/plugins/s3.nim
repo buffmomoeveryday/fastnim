@@ -9,8 +9,8 @@ import chronos/apps/http/httpclient
 import nimcrypto/[sha2, hmac]
 
 import
-  fastnim/[context/state, params/multipart, params/uploadsink, plugin, routing/router]
-from fastnim/context/http import Request
+  ../context/state, ../params/multipart, ../params/uploadsink, ../plugin, ../routing/router
+from ../context/http import Request
 
 const
   MinimumS3PartSize* = 5 * 1024 * 1024 ## Smallest non-final part accepted by Amazon S3.

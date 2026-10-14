@@ -2,7 +2,7 @@
 
 import std/[json, macros, strutils]
 
-import fastnim/private/jsonmetadata
+import ../private/jsonmetadata
 
 type
   OpenApiSettings* = object

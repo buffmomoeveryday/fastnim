@@ -4,7 +4,7 @@ import std/tables
 
 import chronos
 
-import fastnim/context/state
+import ../context/state
 
 type
   MqttVersion* {.pure.} = enum ## MQTT protocol version negotiated by a connection.

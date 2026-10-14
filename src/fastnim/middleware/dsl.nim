@@ -4,7 +4,7 @@ import std/macros
 
 import chronos
 
-import fastnim/[context/http, routing/router]
+import ../context/http, ../routing/router
 
 proc replaceMiddlewareNames(node, requestParam, nextParam: NimNode): NimNode =
   if node.kind == nnkIdent:

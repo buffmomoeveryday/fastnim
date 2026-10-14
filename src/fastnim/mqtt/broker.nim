@@ -4,7 +4,7 @@ import std/tables
 
 import chronos
 
-import fastnim/mqtt/[codec, topics, types]
+import ../mqtt/[codec, topics, types]
 
 type
   MqttSubscription* = object ## One active protocol subscription.

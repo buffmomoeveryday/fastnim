@@ -9,8 +9,8 @@ import std/[macros, options, strutils, tables]
 import chronos
 import chronos/streams/[asyncstream, tlsstream]
 
-import fastnim/[context/state, plugin, routing/router]
-import fastnim/grpc/[hpack, protobuf, schema, types]
+import ../context/state, ../plugin, ../routing/router
+import ../grpc/[hpack, protobuf, schema, types]
 
 export protobuf, types
 

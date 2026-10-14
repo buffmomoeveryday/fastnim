@@ -7,10 +7,10 @@
 
 import std/[os, parseopt, strutils, terminal]
 
-import fastnim/scaffolder/api
-import fastnim/scaffolder/inertiajs
-import fastnim/scaffolder/karax_csr
-import fastnim/scaffolder/karax_ssr
+import ./scaffolder/api
+import ./scaffolder/inertiajs
+import ./scaffolder/karax_csr
+import ./scaffolder/karax_ssr
 
 const
   Templates* = ["api", "karax_ssr", "karax_csr", "inertiajs"]

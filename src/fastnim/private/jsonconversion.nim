@@ -2,7 +2,7 @@
 
 import std/[json, jsonutils, macros, options]
 
-import fastnim/jsonfields
+import ../jsonfields
 
 export jsonutils
 

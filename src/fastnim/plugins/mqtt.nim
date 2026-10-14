@@ -8,8 +8,8 @@ import std/[macros, tables]
 
 import chronos
 
-import fastnim/[context/state, plugin, routing/router]
-import fastnim/mqtt/[broker, codec, topics, types]
+import ../context/state, ../plugin, ../routing/router
+import ../mqtt/[broker, codec, topics, types]
 
 export codec, types
 
