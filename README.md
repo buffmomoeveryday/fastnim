@@ -35,6 +35,121 @@ The current foundation includes route registration for `GET`, `POST`, `PUT`,
 parameters, request bodies and headers, text/JSON/HTML responses, 404 handling, and
 the Chronos HTTP server adapter.
 
+## Native gRPC
+
+FastNim includes an optional native gRPC listener with unary, server-streaming,
+client-streaming, and bidirectional RPCs. It implements HTTP/2 framing, HPACK,
+protobuf framing, metadata, and standard gRPC status trailers without a
+runtime dependency on nghttp2, OpenSSL, or another system protocol library.
+Import and install the plugin, then register a method with the same typed-block
+shape as an HTTP route. A complete protobuf service definition is available in
+[`examples/hello.proto`](examples/hello.proto):
+
+```nim
+import std/options
+
+import chronos
+import fastnim
+import fastnim/plugins/grpc
+
+type
+  HelloRequest = object
+    name: string
+
+  HelloReply = object
+    message: string
+
+let app = initFastNim()
+app.install(grpcPlugin())
+
+app.grpc(
+  "/hello.Greeter/SayHello",
+  proto = "examples/hello.proto",
+  request = HelloRequest,
+  responses = HelloReply,
+):
+  if request.name.len == 0:
+    raise grpcError(GrpcStatus.InvalidArgument, "name is required")
+  HelloReply(message: "Hello, " & request.name)
+
+waitFor app.serveGrpc().join()
+```
+
+Streaming routes expose a typed `stream` value. The dedicated macros enforce
+the request and response cardinality of each RPC shape:
+
+```nim
+app.grpcServerStream(
+  "/hello.Greeter/SayHelloManyTimes",
+  proto = "examples/hello.proto",
+  request = HelloRequest,
+  responses = HelloReply,
+):
+  for index in 0 ..< 3:
+    await stream.send(HelloReply(message: request.name & " " & $index))
+
+app.grpcClientStream(
+  "/hello.Greeter/CollectHello",
+  proto = "examples/hello.proto",
+  request = HelloRequest,
+  responses = HelloReply,
+):
+  var count = 0
+  while (await stream.receive()).isSome:
+    inc count
+  HelloReply(message: "received " & $count)
+
+app.grpcStream(
+  "/hello.Greeter/Chat",
+  proto = "examples/hello.proto",
+  request = HelloRequest,
+  responses = HelloReply,
+):
+  while true:
+    let request = await stream.receive()
+    if request.isNone:
+      break
+    await stream.send(HelloReply(message: "Hello, " & request.get().name))
+```
+
+The `proto` path is resolved relative to the Nim source file. FastNim reads it
+at compile time and rejects a route when its RPC path, streaming shape, request
+object, response object, field order, or field types differ from the protobuf
+contract. The built-in codec therefore requires protobuf field numbers to be
+sequential from `1` in the same order as the Nim object fields.
+
+Configure direct TLS termination with PEM certificate material. The listener
+requires ALPN negotiation of `h2` and permits TLS 1.2:
+
+```nim
+let tls = initGrpcTlsConfig(
+  readFile("certs/server-cert.pem"),
+  readFile("certs/server-key.pem"),
+)
+app.install(grpcPlugin(initGrpcOptions(
+  address = "0.0.0.0",
+  port = 443,
+  tls = tls,
+)))
+```
+
+Fields in the built-in protobuf codec use their Nim declaration order as field
+numbers (`1`, `2`, and so on). This works directly with matching `.proto`
+messages. For schemas with reserved or non-sequential numbers, overload
+`encodeProtobuf` and the typedesc form of `decodeProtobuf` for the message
+types. The codec supports scalar values, enums, strings, bytes, nested objects,
+and packed or unpacked repeated scalar fields.
+
+The HTTP/2, HPACK, gRPC, and protobuf layers are implemented in Nim. TLS uses
+Chronos's BearSSL backend, whose sources are compiled into the application;
+it does not dynamically load OpenSSL (`libssl`/`libcrypto`). Omitting `tls`
+selects cleartext HTTP/2 (h2c). Message compression is not currently enabled,
+so the listener advertises and accepts identity encoding.
+
+RPC shapes, protobuf checking, status trailers, metadata, and listener
+configuration are documented in [`docs/grpc.md`](docs/grpc.md). The runnable
+service is [`examples/grpc.nim`](examples/grpc.nim).
+
 ## Async handlers
 
 Route blocks run asynchronously on the Chronos event loop, so they can await
