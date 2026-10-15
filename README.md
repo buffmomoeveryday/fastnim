@@ -35,6 +35,69 @@ The current foundation includes route registration for `GET`, `POST`, `PUT`,
 parameters, request bodies and headers, text/JSON/HTML responses, 404 handling, and
 the Chronos HTTP server adapter.
 
+## Request-response lifecycle
+
+FastNim keeps network I/O on the Chronos event loop. Chronos accepts and
+parses the HTTP/1.1 request, then the server adapter converts it into
+FastNim's `Request` type. Regular request bodies are buffered at this point;
+multipart bodies remain a one-shot stream for the route's parser.
+
+```mermaid
+flowchart TD
+    Client([Client]) --> Chronos[Chronos HTTP server<br/>accept and parse request]
+    Chronos --> Convert[Build FastNim Request<br/>method, path, query, headers, and body]
+    Convert --> TransportLimits{Transport limits pass?}
+    TransportLimits -- No --> LimitResponse[Create 408, 413, 431, or 503<br/>ApiError response]
+    TransportLimits -- Yes --> SpecialRoute{Special route?}
+
+    SpecialRoute -- WebSocket --> WebSocket[Upgrade connection<br/>run WebSocket handler]
+    SpecialRoute -- SSE --> SSE[Prepare event stream<br/>run SSE handler]
+    SpecialRoute -- Regular HTTP --> Capacity{Handler slot available?}
+    Capacity -- No --> LimitResponse
+    Capacity -- Yes --> AppLimits{Application limits pass?}
+    AppLimits -- No --> LimitResponse
+    AppLimits -- Yes --> AppMiddleware[Application middleware<br/>in registration order]
+
+    AppMiddleware --> Dispatch{Route match?}
+    Dispatch -- OpenAPI paths --> OpenAPI[Generate schema or Swagger UI response]
+    Dispatch -- No --> NotFound[Create 404 ApiError response]
+    Dispatch -- Yes --> PathParams[Attach path parameters<br/>and application context]
+    PathParams --> RouterMiddleware[Router middleware<br/>in registration order]
+    RouterMiddleware --> Inputs[Route adapter parses and validates<br/>typed query, JSON, or form input]
+    Inputs --> Valid{Input valid?}
+    Valid -- No --> Validation[Create 400 or 422 ApiError response]
+    Valid -- Yes --> Handler[Await route handler<br/>with configured timeout]
+    Handler -- Returns --> Response[Convert handler result to Response]
+
+    AppMiddleware -. Raises .-> ErrorResponse[Translate known API errors<br/>sanitize unexpected errors as 500]
+    RouterMiddleware -. Raises .-> ErrorResponse
+    Inputs -. Raises .-> ErrorResponse
+    Handler -. Raises .-> ErrorResponse
+
+    OpenAPI --> Unwind[Return through middleware]
+    NotFound --> Unwind
+    Validation --> Unwind
+    Response --> Unwind
+    Unwind --> Log[Log status and elapsed time]
+    ErrorResponse --> Log
+    LimitResponse --> Log
+    Log --> CloseBody[Close a body stream if present<br/>release an acquired handler slot]
+    CloseBody --> ResponseKind{Response kind?}
+    ResponseKind -- File --> StreamFile[Stream file in chunks]
+    ResponseKind -- Inline or HEAD --> Write[Write status, headers, and body<br/>through Chronos]
+    StreamFile --> Client
+    Write --> Client
+    WebSocket --> Client
+    SSE --> Client
+```
+
+Application middleware wraps dispatch and therefore sees the response while
+the middleware stack unwinds. Router middleware runs only after a route is
+matched and wraps that route's handler. A middleware can short-circuit either
+stack by returning a `Response` without calling `next`. WebSocket and SSE
+routes use their own streaming lifecycles and bypass HTTP middleware and the
+ordinary handler timeout.
+
 ## Native gRPC
 
 FastNim includes an optional native gRPC listener with unary, server-streaming,
@@ -60,7 +123,7 @@ type
     message: string
 
 let app = initFastNim()
-app.install(grpcPlugin())
+app.installPlugin(grpcPlugin())
 
 app.grpc(
   "/hello.Greeter/SayHello",
@@ -126,7 +189,7 @@ let tls = initGrpcTlsConfig(
   readFile("certs/server-cert.pem"),
   readFile("certs/server-key.pem"),
 )
-app.install(grpcPlugin(initGrpcOptions(
+app.installPlugin(grpcPlugin(initGrpcOptions(
   address = "0.0.0.0",
   port = 443,
   tls = tls,
@@ -322,6 +385,17 @@ flag, so runs stay scriptable:
 fastnim init shop --template:inertiajs --frontend:react --pkgmanager:bun --css:none
 ```
 
+Add `--auth` to generate a complete starter login flow. The `api` and
+`karax_csr` templates use HS256 bearer JWTs; `inertiajs` and `karax_ssr` use
+HttpOnly server-side sessions. Every authenticated scaffold includes the
+development account `ada` / `s3cret` and notes showing what to replace before
+deployment.
+
+```sh
+fastnim init shop --template:inertiajs --auth
+fastnim init service --template:api --auth
+```
+
 Available templates:
 
 - `api` (default) — versioned JSON API: typed models, a users router with
@@ -398,7 +472,7 @@ let app = initFastNim(logs = false)
 
 ## Middleware
 
-Register HTTP middleware with `app.use`. Middleware runs in registration order;
+Register HTTP middleware with `app.addMiddleware`. Middleware runs in registration order;
 each layer receives the request and `next`, and can modify the downstream
 response or return early to short-circuit it.
 
@@ -413,14 +487,14 @@ middleware requireAuth:
     return json(statusUnauthorized, %*{"detail": "missing credentials"})
   await next(request)
 
-app.use(requireAuth)
+app.addMiddleware(requireAuth)
 ```
 
 Run the complete authorization and response-header example with
 `nim c -r --path:src examples/middleware.nim`.
 
 ```nim
-app.use(proc(
+app.addMiddleware(proc(
     request: Request, next: NextHandler
 ): Future[Response] {.async: (raises: [CatchableError]).} =
   var response = await next(request)
@@ -429,11 +503,11 @@ app.use(proc(
 )
 ```
 
-The command style (`app.use:`) accepts one middleware. The plural alias
+The command style (`app.addMiddleware:`) accepts one middleware. The plural alias
 (`app.middlewares:`) accepts a list and registers each middleware in order:
 
 ```nim
-app.use:
+app.addMiddleware:
   proc(
       request: Request, next: NextHandler
   ): Future[Response] {.async: (raises: [CatchableError]).} =
@@ -449,9 +523,9 @@ app.middlewares:
 FastNim includes dependency-free CORS, request-ID, and response-time middleware:
 
 ```nim
-app.use(cors(initCorsOptions(allowOrigins = @["https://app.example.com"])))
-app.use(requestId())
-app.use(responseTime())
+app.addMiddleware(cors(initCorsOptions(allowOrigins = @["https://app.example.com"])))
+app.addMiddleware(requestId())
+app.addMiddleware(responseTime())
 ```
 
 For a custom destination, adapt any `std/logging.Logger` without changing the
@@ -585,7 +659,7 @@ let s3 = s3Plugin(initS3Config(
   sessionToken = getEnv("AWS_SESSION_TOKEN"), # optional
   endpoint = getEnv("S3_ENDPOINT"),           # optional; e.g. MinIO
 ))
-app.install(s3)
+app.installPlugin(s3)
 
 app.post("/products/{id}/image"):
   let productId = request.pathParam("id")
@@ -675,7 +749,7 @@ built-in endpoints with the OpenAPI plugin:
 import fastnim/plugins/openapi
 
 let app = initFastNim()
-app.install:
+app.installPlugin:
   openApiPlugin(initOpenApiSettings(title = "Items API", version = "1.0.0"))
 
 app.get(
@@ -692,7 +766,7 @@ Change their URLs or turn both endpoints off when installing the plugin:
 
 ```nim
 let app = initFastNim()
-app.install:
+app.installPlugin:
   openApiPlugin(initOpenApiSettings(
     schemaPath = "/internal/openapi.json",
     docsPath = "/internal/docs",
@@ -700,7 +774,7 @@ app.install:
 
 # Or disable both built-ins:
 let privateApp = initFastNim()
-privateApp.install:
+privateApp.installPlugin:
   openApiPlugin(initOpenApiSettings(enabled = false))
 ```
 
@@ -716,7 +790,7 @@ proc restrictDocs(request: Request, next: NextHandler): Response =
     return text("Unauthorized", 401)
   next(request)
 
-app.use(restrictDocs)
+app.addMiddleware(restrictDocs)
 ```
 
 Run [`examples/openapi.nim`](examples/openapi.nim) with
@@ -738,10 +812,10 @@ import fastnim
 import fastnim/plugins/ratelimit
 
 let app = initFastNim()
-app.install(rateLimitPlugin(initRateLimitOptions(limit = 100, windowSeconds = 60)))
+app.installPlugin(rateLimitPlugin(initRateLimitOptions(limit = 100, windowSeconds = 60)))
 ```
 
-The command style (`app.install:`) is an equivalent alternative. Each block
+The command style (`app.installPlugin:`) is an equivalent alternative. Each block
 takes a single plugin, so repeat it for additional plugins:
 
 ```nim
@@ -749,13 +823,13 @@ import fastnim/plugins/openapi
 import fastnim/plugins/ratelimit
 
 let app = initFastNim()
-app.install:
+app.installPlugin:
   openApiPlugin(initOpenApiSettings(
     title = "My Users API",
     version = "2.2.0",
     description = "Internal usermanagement",
   ))
-app.install:
+app.installPlugin:
   rateLimitPlugin(initRateLimitOptions(limit = 5, windowSeconds = 60))
 ```
 
@@ -772,7 +846,7 @@ Redis integration pattern, and session cookie/key-rotation guidance are in
 [`examples/ratelimit.nim`](examples/ratelimit.nim).
 
 Third-party packages can define a plugin with `initPlugin(name, version,
-installCallback)` and install middleware via `app.use`, scoped state through
+installCallback)` and install middleware via `app.addMiddleware`, scoped state through
 `app.pluginContext(name)`, and documentation changes through
 `app.addOpenApiContributor`.
 
@@ -789,7 +863,7 @@ import fastnim
 import fastnim/plugins/inertia
 
 let app = initFastNim()
-app.install:
+app.installPlugin:
   inertiaPlugin(initInertiaOptions(
     version = "assets-v1",
     sharedProps = %*{"appName": "FastNim"},
@@ -823,6 +897,9 @@ app.sse("/events"):
   await send(sseEvent("ready"))
 ```
 
+See the [SSE guide](docs/sse.md) for event fields, browser clients, finite
+streams, connection limits, and disconnect handling.
+
 ## WebSockets
 
 WebSocket routes use the same block syntax as HTTP and SSE routes. The
@@ -839,10 +916,20 @@ app.websocket("/echo"):
 
 Run [`examples/websocket_echo.nim`](examples/websocket_echo.nim) with
 `nim c -r --path:src examples/websocket_echo.nim`, then connect to
-`ws://127.0.0.1:8000/echo`.
+`ws://127.0.0.1:8009/echo`.
 
 The adapter uses [nim-websock](https://github.com/status-im/nim-websock) and
 retains Chronos as the HTTP server.
+
+See the [WebSocket guide](docs/websocket.md) for typed JSON, connection groups,
+limits, heartbeats, and authentication guidance.
+
+## MQTT
+
+FastNim includes a Chronos-based MQTT broker plugin with publication routing,
+topic captures, subscriptions, and retained messages. See the
+[MQTT guide](docs/mqtt.md) for installation, routing, protocol support, and
+lifecycle details.
 
 ## Typed responses
 

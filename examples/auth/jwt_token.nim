@@ -36,7 +36,7 @@ const DemoUsers = {"ada": "s3cret"}.toTable
 const TokenTtlSeconds = 3600
 
 let app = initFastNim()
-app.install(
+app.installPlugin(
   authPlugin(
     initAuthOptions(
       schemes = {AuthScheme.Jwt},

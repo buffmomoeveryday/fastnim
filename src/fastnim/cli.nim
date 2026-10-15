@@ -28,6 +28,7 @@ Options:
   --frontend:NAME     inertiajs only: svelte (default), react
   --pkgmanager:NAME   inertiajs only: pnpm (default), bun, npm, deno
   --css:NAME          inertiajs only: tailwind (default), none
+  --auth              add session auth (Inertia/SSR) or JWT auth (API/CSR)
   --dir:PATH          parent directory for the project (default: .)
   --force             scaffold into a non-empty directory
   -h, --help          show this help"""
@@ -74,11 +75,12 @@ proc dirIsEmpty(dir: string): bool =
   true
 
 proc runInertiaInit(
-  target, name, frontend, pkgManager, css: string, force, interactive: bool
+  target, name, frontend, pkgManager, css: string, auth, force, interactive: bool
 ): int
 
 proc runInit(
-    name, dir, templateName, frontend, pkgManager, css: string, force, interactive: bool
+    name, dir, templateName, frontend, pkgManager, css: string,
+    auth, force, interactive: bool,
 ): int =
   if templateName notin Templates:
     stderr.writeLine(
@@ -101,16 +103,18 @@ proc runInit(
     )
     return 1
   if templateName == "inertiajs":
-    return runInertiaInit(target, name, frontend, pkgManager, css, force, interactive)
+    return runInertiaInit(
+      target, name, frontend, pkgManager, css, auth, force, interactive
+    )
   try:
     createDir(target)
     case templateName
     of "api":
-      scaffoldApi(target, name)
+      scaffoldApi(target, name, auth)
     of "karax_ssr":
-      scaffoldKaraxSsr(target, name)
+      scaffoldKaraxSsr(target, name, auth)
     of "karax_csr":
-      scaffoldKaraxCsr(target, name)
+      scaffoldKaraxCsr(target, name, auth)
     else:
       discard
   except OSError as exc:
@@ -124,7 +128,8 @@ proc runInit(
   0
 
 proc runInertiaInit(
-    target, name, frontend, pkgManager, css: string, force, interactive: bool
+    target, name, frontend, pkgManager, css: string,
+    auth, force, interactive: bool,
 ): int =
   ## Resolves Inertia choices, scaffolds, and prints next steps.
   var choices = InertiaChoices(pkgManager: pkgManager, css: cssTailwind)
@@ -182,7 +187,7 @@ proc runInertiaInit(
 
   try:
     createDir(target)
-    scaffoldInertiajs(target, name, choices)
+    scaffoldInertiajs(target, name, choices, auth)
   except OSError as exc:
     stderr.writeLine("fastnim: error: cannot scaffold project: " & exc.msg)
     return 1
@@ -238,6 +243,7 @@ proc cliMain*(params: seq[string], interactive = true): int =
   var frontend = ""
   var pkgManager = ""
   var css = ""
+  var auth = false
   var force = false
   for kind, key, val in parser.getopt():
     case kind
@@ -260,6 +266,8 @@ proc cliMain*(params: seq[string], interactive = true): int =
         dir = val
       of "force":
         force = true
+      of "auth":
+        auth = true
       else:
         stderr.writeLine("fastnim: error: unknown option '--" & key & "'.")
         stderr.writeLine(usage())
@@ -287,4 +295,7 @@ proc cliMain*(params: seq[string], interactive = true): int =
     stderr.writeLine("fastnim: error: --dir needs a value.")
     stderr.writeLine(usage())
     return 2
-  runInit(name, dir, templateName, frontend, pkgManager, css, force, interactive)
+  runInit(
+    name, dir, templateName, frontend, pkgManager, css,
+    auth, force, interactive,
+  )

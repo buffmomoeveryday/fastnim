@@ -186,5 +186,5 @@ proc inertiaPlugin*(
     name,
     version,
     proc(app: Application) =
-      app.use(inertiaMiddleware(options), priority = -50),
+      app.addMiddleware(inertiaMiddleware(options), priority = -50),
   )

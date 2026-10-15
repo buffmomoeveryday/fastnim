@@ -1,2 +1,4 @@
-switch("path", "$projectDir/../src")
-switch("outdir", "$projectDir/../bin")
+import std/os
+
+switch("path", thisDir() / "../src")
+switch("outdir", thisDir() / "../bin")

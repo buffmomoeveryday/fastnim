@@ -5,6 +5,8 @@
 
 import std/os
 
+import ./auth
+
 proc writeSsrFile(path, content: string) =
   createDir(path.parentDir())
   writeFile(path, content)
@@ -67,7 +69,11 @@ pageRouter.get("/users/{name}"):
   html layout("User", $content)
 """
 
-proc ssrMain(name: string): string =
+proc ssrMain(name: string, auth: bool): string =
+  let authImports = if auth: "import auth\nimport routes/auth as auth_routes\n" else: ""
+  let authSetup =
+    if auth: "api.installPlugin(authentication())\napi.addRouter(auth_routes.authRouter)\n"
+    else: ""
   """## """ & name & """ - FastNim + Karax SSR.
 ##
 ## Run with: nim c -r --path:src src/main.nim
@@ -75,14 +81,51 @@ proc ssrMain(name: string): string =
 import chronos
 
 import fastnim
+""" & authImports & """
 import routes/pages
 
 let api = initFastNim()
+""" & authSetup & """
 api.addRouter(pageRouter)
 
 let server = api.serve(port = 8000)
 echo "Listening at http://127.0.0.1:8000"
 waitFor server.join()
+"""
+
+proc ssrAuthRoutes(): string =
+  """## HTML login and logout routes for session authentication.
+
+import fastnim
+import ../auth
+
+let authRouter* = initRouter()
+
+proc redirectTo(path: string): Response =
+  result = initResponse(statusSeeOther)
+  result.setHeader("location", path)
+
+authRouter.get("/login"):
+  html "<!doctype html><html><body><h1>Sign in</h1>" &
+    "<form method='post' action='/login'>" &
+    "<label>Username <input name='username' value='ada'></label>" &
+    "<label>Password <input name='password' type='password'></label>" &
+    "<button type='submit'>Sign in</button></form></body></html>"
+
+authRouter.post(
+  "/login", form = LoginInput, responses = @[(303, void), (401, string)]
+):
+  if not credentialsValid(form):
+    html(statusUnauthorized, "<h1>Invalid credentials</h1>")
+  else:
+    var response = redirectTo("/")
+    discard await loginSession(sessionStore, response, form.username)
+    response
+
+authRouter.post("/logout", responses = @[(303, void)]):
+  var response = redirectTo("/login")
+  await logoutSession(sessionStore, request, response)
+  response
 """
 
 proc ssrTests(name: string): string =
@@ -111,7 +154,18 @@ block userPage:
   doAssert "<h1>Hello, Ada</h1>" in response.body
 """
 
-proc ssrReadme(name: string): string =
+proc ssrReadme(name: string, auth: bool): string =
+  let authDocs =
+    if auth:
+      """
+## Authentication
+
+Pages use an HttpOnly server-side session. Sign in at `/login` with the
+generated development account `ada` / `s3cret`. Replace the demo user table
+and in-memory session store before deploying.
+"""
+    else:
+      ""
   """# """ & name & "\n" & """
 
 FastNim server with server-rendered Karax pages.
@@ -123,6 +177,7 @@ nim c -r --path:src src/main.nim
 ```
 
 Open http://127.0.0.1:8000 and http://127.0.0.1:8000/users/Ada.
+""" & authDocs & """
 
 ## Test
 
@@ -141,14 +196,17 @@ nimble test
   compile the client with `nim js`.
 """
 
-proc scaffoldKaraxSsr*(dir, name: string) =
+proc scaffoldKaraxSsr*(dir, name: string, auth = false) =
   ## Writes a Karax SSR project into ``dir``.
   ##
   ## ``dir`` should be the empty project root; ``name`` is the project and
   ## Nimble package name.
   writeSsrFile(dir / name & ".nimble", ssrNimble(name))
   writeSsrFile(dir / "config.nims", "switch(\"path\", \"src\")\n")
-  writeSsrFile(dir / "src" / "main.nim", ssrMain(name))
+  writeSsrFile(dir / "src" / "main.nim", ssrMain(name, auth))
   writeSsrFile(dir / "src" / "routes" / "pages.nim", ssrPages(name))
+  if auth:
+    writeSsrFile(dir / "src" / "auth.nim", sessionAuthSource(["/login"]))
+    writeSsrFile(dir / "src" / "routes" / "auth.nim", ssrAuthRoutes())
   writeSsrFile(dir / "tests" / "test_pages.nim", ssrTests(name))
-  writeSsrFile(dir / "README.md", ssrReadme(name))
+  writeSsrFile(dir / "README.md", ssrReadme(name, auth))

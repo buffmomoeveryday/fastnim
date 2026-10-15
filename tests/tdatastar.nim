@@ -166,7 +166,7 @@ block datastarStreamResponse:
 
 block pluginInjectsCdnIntoHtml:
   let app = initFastNim(logs = false)
-  app.install(datastarPlugin())
+  app.installPlugin(datastarPlugin())
   app.get("/"):
     html("<html><head></head><body><div>hi</div></body></html>")
   let response = app.handleSync(initRequest(HttpMethod.Get, "/"))
@@ -176,7 +176,7 @@ block pluginInjectsCdnIntoHtml:
 
 block pluginSkipsNonHtmlAndExistingTag:
   let app = initFastNim(logs = false)
-  app.install(datastarPlugin())
+  app.installPlugin(datastarPlugin())
   app.get("/data"):
     json(%*{"a": 1})
   app.get("/manual"):
@@ -188,11 +188,11 @@ block pluginSkipsNonHtmlAndExistingTag:
 
 block pluginInstallTrackedOnce:
   let app = initFastNim(logs = false)
-  app.install(datastarPlugin())
+  app.installPlugin(datastarPlugin())
   doAssert app.installedPlugins.len == 1
   doAssert app.installedPlugins[0].name == "datastar"
   doAssertRaises ValueError:
-    app.install(datastarPlugin())
+    app.installPlugin(datastarPlugin())
 
 block fluentSendInSseRoute:
   let app = initFastNim(logs = false)

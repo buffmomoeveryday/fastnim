@@ -250,7 +250,7 @@ proc usersProps(): JsonNode =
   }
 
 let app = initFastNim()
-app.install:
+app.installPlugin:
   inertiaPlugin(
     initInertiaOptions(
       version = "1",

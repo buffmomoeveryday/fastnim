@@ -9,6 +9,7 @@ type JsonFieldInfo* = object
   fieldType*: NimNode ## Field type AST.
   defaultValue*: NimNode ## Field initializer AST, or ``nnkEmpty`` when absent.
   source*: NimNode ## Source AST used for compiler diagnostics.
+  responseIgnored*: bool ## Whether ``jsonRespIgnore`` omits this response field.
 
 proc bareFieldName(node: NimNode): NimNode {.compileTime.} =
   result = node
@@ -30,6 +31,18 @@ proc renamedFieldName(node: NimNode, defaultName: string): string {.compileTime.
       if result.len == 0:
         error("jsonName cannot be empty", pragma)
 
+proc responseIgnored(node: NimNode): bool {.compileTime.} =
+  if node.kind != nnkPragmaExpr:
+    return false
+  for pragma in node[1]:
+    let name =
+      if pragma.kind in {nnkCall, nnkCommand, nnkExprColonExpr}:
+        pragma[0]
+      else:
+        pragma
+    if eqIdent(name, "jsonRespIgnore"):
+      return true
+
 proc collectFields(node: NimNode, fields: var seq[JsonFieldInfo]) {.compileTime.} =
   case node.kind
   of nnkIdentDefs:
@@ -44,6 +57,7 @@ proc collectFields(node: NimNode, fields: var seq[JsonFieldInfo]) {.compileTime.
           fieldType: fieldType,
           defaultValue: node[^1],
           source: source,
+          responseIgnored: responseIgnored(source),
         )
       )
   of nnkRecList, nnkRecCase, nnkOfBranch, nnkElse:
@@ -62,3 +76,7 @@ proc jsonFields*(objectType: NimNode): seq[JsonFieldInfo] {.compileTime.} =
     if field.jsonName in names:
       error("duplicate JSON field name '" & field.jsonName & "'", field.source)
     names.incl(field.jsonName)
+
+proc jsonFieldsIn*(record: NimNode): seq[JsonFieldInfo] {.compileTime.} =
+  ## Returns JSON field metadata found below an object record node.
+  collectFields(record, result)

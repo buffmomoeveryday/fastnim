@@ -6,7 +6,7 @@ import fastnim
 import fastnim/plugins/inertia
 
 let app = initFastNim()
-app.install:
+app.installPlugin:
   inertiaPlugin(initInertiaOptions(version = "1"))
 
 app.get("/"):

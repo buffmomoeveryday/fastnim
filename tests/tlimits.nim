@@ -125,7 +125,7 @@ block cancelsHandlerThatExceedsTimeout:
     logHandler = timeoutLogger,
     limits = initRequestLimits(handlerTimeout = 100.milliseconds),
   )
-  app.use(responseTime())
+  app.addMiddleware(responseTime())
   app.get("/slow"):
     try:
       await sleepAsync(5.seconds)

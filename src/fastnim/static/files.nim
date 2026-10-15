@@ -396,7 +396,7 @@ proc serveStatic*(
     raise
       newException(ValueError, "static spaFallback must be relative to the directory")
   let absDir = absolutePath(directory)
-  app.use(
+  app.addMiddleware(
     proc(
         request: Request, next: NextHandler
     ): Future[Response] {.async: (raises: [CatchableError]).} =
@@ -442,7 +442,7 @@ proc serveSingleFile*(
   if not fileExists(file):
     raise newException(ValueError, "static file does not exist: " & file)
   let absFile = absolutePath(file)
-  app.use(
+  app.addMiddleware(
     proc(
         request: Request, next: NextHandler
     ): Future[Response] {.async: (raises: [CatchableError]).} =
@@ -466,7 +466,7 @@ proc serveEmbeddedFiles*(
   ## at ``prefix``. This is the runtime half of ``serveStaticEmbedded``.
   let normPrefix = normalizePrefix(prefix)
   checkMaxAge(maxAge)
-  app.use(
+  app.addMiddleware(
     proc(
         request: Request, next: NextHandler
     ): Future[Response] {.async: (raises: [CatchableError]).} =
@@ -497,7 +497,7 @@ proc serveSingleEmbedded*(
   if path.len == 0 or path[0] != '/':
     raise newException(ValueError, "static file path must start with '/'")
   checkMaxAge(maxAge)
-  app.use(
+  app.addMiddleware(
     proc(
         request: Request, next: NextHandler
     ): Future[Response] {.async: (raises: [CatchableError]).} =

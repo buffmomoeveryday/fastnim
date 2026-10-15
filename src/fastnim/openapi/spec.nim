@@ -79,6 +79,11 @@ proc initOpenApiOperation*(
   )
 
 proc typeSchema(node: NimNode): JsonNode {.compileTime.}
+proc responseTypeSchema(
+    node: NimNode,
+    ignoredFields, includedFields: seq[string],
+    root: bool,
+): JsonNode {.compileTime.}
 
 proc isOptionType(node: NimNode): bool {.compileTime.} =
   if node.kind == nnkBracketExpr and node.len == 2 and eqIdent(node[0], "Option"):
@@ -212,6 +217,9 @@ proc typeSchema(node: NimNode): JsonNode {.compileTime.} =
   if current.kind == nnkBracketExpr and current.len == 2 and $current[0] == "typeDesc":
     current = current[1]
   if current.kind == nnkSym:
+    let named = namedTypeSchema($current)
+    if named.len > 0:
+      return named
     let impl = current.getImpl
     if impl.kind == nnkTypeDef:
       return typeSchema(impl[^1])
@@ -247,14 +255,176 @@ proc typeSchema(node: NimNode): JsonNode {.compileTime.} =
     for item in current:
       if item.kind == nnkEnumFieldDef:
         result["enum"].add(newJString($item[0]))
-      elif item.kind == nnkIdent:
+      elif item.kind in {nnkIdent, nnkSym}:
         result["enum"].add(newJString($item))
     return result
   newJObject()
 
+proc selected(fields: seq[string], name: string): bool {.compileTime.} =
+  for field in fields:
+    if field == name:
+      return true
+
+proc responseFieldVisible(
+    field: JsonFieldInfo,
+    ignoredFields, includedFields: seq[string],
+    root: bool,
+): bool {.compileTime.} =
+  let explicitlyIgnored = ignoredFields.selected(field.nimName) or
+    ignoredFields.selected(field.jsonName)
+  let explicitlyIncluded = includedFields.selected(field.nimName) or
+    includedFields.selected(field.jsonName)
+  if root and explicitlyIgnored:
+    return false
+  not field.responseIgnored or (root and explicitlyIncluded)
+
+proc addResponseField(
+    schema: JsonNode,
+    field: JsonFieldInfo,
+    ignoredFields, includedFields: seq[string],
+    root: bool,
+) {.compileTime.} =
+  if not field.responseFieldVisible(ignoredFields, includedFields, root):
+    return
+  var fieldSchema = responseTypeSchema(
+    field.fieldType, ignoredFields, includedFields, false
+  )
+  fieldSchema.applyValidationSchema(field.source)
+  schema["properties"][field.jsonName] = fieldSchema
+  if not field.fieldType.isOptionType():
+    schema["required"].add(newJString(field.jsonName))
+
+proc newObjectSchema(): JsonNode {.compileTime.} =
+  %*{"type": "object", "properties": newJObject(), "required": newJArray()}
+
+proc responseObjectSchema(
+    objectType: NimNode,
+    ignoredFields, includedFields: seq[string],
+    root: bool,
+): JsonNode {.compileTime.} =
+  var variant = newEmptyNode()
+  var commonFields: seq[JsonFieldInfo]
+  for child in objectType[^1]:
+    if child.kind == nnkRecCase:
+      variant = child
+    else:
+      commonFields.add(jsonFieldsIn(child))
+
+  if variant.kind == nnkEmpty:
+    result = newObjectSchema()
+    for field in jsonFields(objectType):
+      result.addResponseField(field, ignoredFields, includedFields, root)
+    return
+
+  let discriminatorFields = jsonFieldsIn(variant[0])
+  result = %*{"oneOf": newJArray()}
+  for index in 1 ..< variant.len:
+    let branch = variant[index]
+    if branch.kind in {nnkOfBranch, nnkElse}:
+      var branchSchema = newObjectSchema()
+      for field in commonFields:
+        branchSchema.addResponseField(field, ignoredFields, includedFields, root)
+      for field in discriminatorFields:
+        branchSchema.addResponseField(field, ignoredFields, includedFields, root)
+      if branch.len > 0:
+        for field in jsonFieldsIn(branch[^1]):
+          branchSchema.addResponseField(field, ignoredFields, includedFields, root)
+      result["oneOf"].add(branchSchema)
+
+proc responseEnumSchema(enumType: NimNode): JsonNode {.compileTime.} =
+  result = %*{"type": "integer", "enum": newJArray()}
+  var ordinal = 0
+  for item in enumType:
+    if item.kind != nnkEmpty:
+      if item.kind == nnkEnumFieldDef and item.len == 2 and
+          item[1].kind in {nnkIntLit .. nnkUInt64Lit}:
+        ordinal = item[1].intVal.int
+      result["enum"].add(newJInt(ordinal))
+      inc ordinal
+
+proc responseTypeSchema(
+    node: NimNode,
+    ignoredFields, includedFields: seq[string],
+    root: bool,
+): JsonNode {.compileTime.} =
+  var current = node
+  if current.kind == nnkBracketExpr and current.len == 2 and
+      eqIdent(current[0], "typeDesc"):
+    current = current[1]
+  if current.kind == nnkSym:
+    let named = namedTypeSchema($current)
+    if named.len > 0:
+      return named
+    let impl = current.getImpl
+    if impl.kind == nnkTypeDef:
+      return responseTypeSchema(
+        impl[^1], ignoredFields, includedFields, root
+      )
+  if current.kind == nnkIdent:
+    return namedTypeSchema($current)
+  if current.kind == nnkBracketExpr:
+    let container = $current[0]
+    if container in ["seq", "array"]:
+      return %*{
+        "type": "array",
+        "items": responseTypeSchema(
+          current[^1], ignoredFields, includedFields, false
+        ),
+      }
+    if container in ["Table", "OrderedTable"] and current.len == 3:
+      return %*{
+        "type": "object",
+        "additionalProperties": responseTypeSchema(
+          current[2], ignoredFields, includedFields, false
+        ),
+      }
+    if container == "Option":
+      result = responseTypeSchema(
+        current[1], ignoredFields, includedFields, false
+      )
+      result["nullable"] = newJBool(true)
+      return
+  if current.kind == nnkRefTy:
+    return responseTypeSchema(current[0], ignoredFields, includedFields, root)
+  if current.kind == nnkObjectTy:
+    return responseObjectSchema(current, ignoredFields, includedFields, root)
+  if current.kind == nnkEnumTy:
+    return responseEnumSchema(current)
+  typeSchema(current)
+
+proc stringLiterals(node: NimNode): seq[string] {.compileTime.} =
+  var values = node
+  if values.kind in {nnkCall, nnkConv} and values.len == 2:
+    values = values[1]
+  if values.kind == nnkPrefix and values.len == 2 and eqIdent(values[0], "@"):
+    values = values[1]
+  if values.kind == nnkNilLit:
+    return
+  if values.kind != nnkBracket:
+    error(
+      "response field overrides must be a sequence literal, got " & values.repr,
+      node,
+    )
+  for value in values:
+    if value.kind notin {nnkStrLit, nnkRStrLit, nnkTripleStrLit}:
+      error("response field override names must be string literals", value)
+    result.add(value.strVal)
+
 macro openApiSchema*(model: typedesc): untyped =
   ## Produces an OpenAPI schema for a typed request or response model.
   let schema = typeSchema(model.getTypeImpl)
+  result = newCall(ident("openApiSchemaJson"), newLit($schema))
+
+macro openApiResponseSchema*(
+    model: typedesc, ignoredFields, includedFields: untyped
+): untyped =
+  ## Produces a response schema honoring response-only field visibility rules.
+  let schema = responseTypeSchema(
+    model.getTypeImpl,
+    stringLiterals(ignoredFields),
+    stringLiterals(includedFields),
+    true,
+  )
   result = newCall(ident("openApiSchemaJson"), newLit($schema))
 
 macro openApiQueryParameters*(model: typedesc): untyped =

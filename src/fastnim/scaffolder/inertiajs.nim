@@ -8,6 +8,8 @@
 
 import std/[os, strutils]
 
+import ./auth
+
 type
   InertiaFrontend* = enum ## Client framework for the generated project.
     feSvelte
@@ -236,9 +238,13 @@ proc clientEntryPath(choices: InertiaChoices): string =
   ## Client entry module, relative to the project root (the Vite root).
   if choices.frontend == feReact: "client/src/main.tsx" else: "client/src/main.ts"
 
-proc serverMain(name: string, choices: InertiaChoices): string =
+proc serverMain(name: string, choices: InertiaChoices, auth: bool): string =
   let entry = clientEntryPath(choices)
   let framework = if choices.frontend == feReact: "React" else: "Svelte"
+  let authImports = if auth: "import auth\nimport routes/auth as auth_routes\n" else: ""
+  let authSetup =
+    if auth: "api.installPlugin(authentication())\napi.addRouter(auth_routes.authRouter)\n"
+    else: ""
   """## """ & name & """ - FastNim + Inertia + """ & framework & """.
 
 ## Development (Vite dev server feeds client assets to the Nim server,
@@ -254,6 +260,7 @@ import chronos
 
 import fastnim
 import fastnim/plugins/inertia
+""" & authImports & """
 import routes/pages
 
 """ &
@@ -285,7 +292,7 @@ proc assetVersion(): string =
 let isDev = getEnv("INERTIA_DEV", "") == "1"
 
 let api = initFastNim()
-api.install:
+api.installPlugin:
   inertiaPlugin(initInertiaOptions(
     version = assetVersion(),
     rootTemplate =
@@ -294,6 +301,7 @@ api.install:
     sharedProps = %*{"appName": """" &
     name & """"},
   ))
+""" & authSetup & """
 api.addRouter(pageRouter)
 if not isDev:
   api.serveStatic("/assets", directory = "client" / "dist")
@@ -301,6 +309,36 @@ if not isDev:
 let server = api.serve(port = 8000)
 echo "Listening at http://127.0.0.1:8000"
 waitFor server.join()
+"""
+
+proc inertiaAuthRoutes(): string =
+  """## Inertia login/logout routes backed by server-side sessions.
+
+import std/json
+
+import fastnim
+import fastnim/plugins/inertia
+import ../auth
+
+let authRouter* = initRouter()
+
+authRouter.get("/login"):
+  inertia("Login")
+
+authRouter.post("/login"):
+  var input: LoginInput
+  if not parseJsonBody(request, input):
+    return json(statusBadRequest, %*{"message": "invalid login request"})
+  if not credentialsValid(input):
+    return json(statusUnauthorized, %*{"message": "invalid credentials"})
+  var response = inertiaLocation("/")
+  discard await loginSession(sessionStore, response, input.username)
+  response
+
+authRouter.post("/logout"):
+  var response = inertiaLocation("/login")
+  await logoutSession(sessionStore, request, response)
+  response
 """
 
 proc serverPages(name: string): string =
@@ -671,12 +709,62 @@ export default function Users({ users = [] }: { users?: User[] }) {
 """,
     )
 
+proc loginPage(choices: InertiaChoices): tuple[path, content: string] =
+  if choices.frontend == feReact:
+    result = (
+      path: "src/pages/Login.tsx",
+      content: """import { Form } from "@inertiajs/react";
+
+export default function Login() {
+  return (
+    <main className="mx-auto max-w-md p-6">
+      <h1>Sign in</h1>
+      <Form action="/login" method="post">
+        <label>Username <input name="username" defaultValue="ada" /></label>
+        <label>Password <input name="password" type="password" /></label>
+        <button type="submit">Sign in</button>
+      </Form>
+    </main>
+  );
+}
+""",
+    )
+  else:
+    result = (
+      path: "src/pages/Login.svelte",
+      content: """<script lang="ts">
+  import { Form } from "@inertiajs/svelte";
+</script>
+
+<main class="mx-auto max-w-md p-6">
+  <h1>Sign in</h1>
+  <Form action="/login" method="post">
+    <label>Username <input name="username" value="ada" /></label>
+    <label>Password <input name="password" type="password" /></label>
+    <button type="submit">Sign in</button>
+  </Form>
+</main>
+""",
+    )
+
 proc projectReadme(
-    name: string, choices: InertiaChoices, commands: tuple[install, dev, build: string]
+    name: string, choices: InertiaChoices, commands: tuple[install, dev, build: string],
+    auth: bool,
 ): string =
   let framework =
     if choices.frontend == feReact: "React 19 + Vite" else: "Svelte 5 + Vite"
   let styling = if choices.css == cssTailwind: "Tailwind CSS v4" else: "plain CSS"
+  let authDocs =
+    if auth:
+      """
+## Authentication
+
+Pages use an HttpOnly server-side session. Sign in at `/login` with the
+generated development account `ada` / `s3cret`. Replace the demo user table
+and in-memory session store before deploying.
+"""
+    else:
+      ""
   """# """ & name & "\n" & """
 
 FastNim + Inertia.js application (""" & framework &
@@ -726,9 +814,9 @@ clients pick up fresh assets.
 
 Server components in `src/routes/pages.nim` (`inertia("Dashboard", ...)`)
 must match files in `client/src/pages/` (`Dashboard`, `Users`).
-"""
+""" & authDocs
 
-proc scaffoldInertiajs*(dir, name: string, choices: InertiaChoices) =
+proc scaffoldInertiajs*(dir, name: string, choices: InertiaChoices, auth = false) =
   ## Writes an Inertia.js project into ``dir``.
   ##
   ## ``dir`` should be the empty project root; ``name`` is the project and
@@ -737,12 +825,18 @@ proc scaffoldInertiajs*(dir, name: string, choices: InertiaChoices) =
   let entry = clientEntry(choices)
   let dashboard = dashboardPage(choices)
   let users = usersPage(choices)
+  let login = loginPage(choices)
   writeScaffoldFile(dir / name & ".nimble", nimbleFile(name, commands))
   writeScaffoldFile(dir / "config.nims", "switch(\"path\", \"src\")\n")
   writeScaffoldFile(dir / ".gitignore", GitIgnore)
   writeScaffoldFile(dir / "tools" / "dev.nim", devRunner(commands))
-  writeScaffoldFile(dir / "src" / "main.nim", serverMain(name, choices))
+  writeScaffoldFile(dir / "src" / "main.nim", serverMain(name, choices, auth))
   writeScaffoldFile(dir / "src" / "routes" / "pages.nim", serverPages(name))
+  if auth:
+    writeScaffoldFile(
+      dir / "src" / "auth.nim", sessionAuthSource(["/login", "/assets/*"])
+    )
+    writeScaffoldFile(dir / "src" / "routes" / "auth.nim", inertiaAuthRoutes())
   writeScaffoldFile(dir / "package.json", clientPackageJson(name, choices))
   writeScaffoldFile(dir / "vite.config.ts", viteConfig(choices))
   writeScaffoldFile(dir / "tsconfig.json", tsConfig(choices))
@@ -750,4 +844,6 @@ proc scaffoldInertiajs*(dir, name: string, choices: InertiaChoices) =
   writeScaffoldFile(dir / "client" / "src" / "app.css", clientCss(choices))
   writeScaffoldFile(dir / "client" / dashboard.path, dashboard.content)
   writeScaffoldFile(dir / "client" / users.path, users.content)
-  writeScaffoldFile(dir / "README.md", projectReadme(name, choices, commands))
+  if auth:
+    writeScaffoldFile(dir / "client" / login.path, login.content)
+  writeScaffoldFile(dir / "README.md", projectReadme(name, choices, commands, auth))

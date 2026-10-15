@@ -377,7 +377,7 @@ proc datastarPlugin*(
     name,
     version,
     proc(app: Application) =
-      app.use(datastarMiddleware(options)),
+      app.addMiddleware(datastarMiddleware(options)),
   )
 
 type LiveFeed* = ref object

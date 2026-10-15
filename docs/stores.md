@@ -73,7 +73,7 @@ let limits = newRateLimitStore(
 let options = initRateLimitOptions(
   limit = 100, windowSeconds = 60, store = limits
 )
-app.install(rateLimitPlugin(options))
+app.installPlugin(rateLimitPlugin(options))
 ```
 
 A SQL driver needs the same guarantee: use a transaction and row-level locking,

@@ -29,6 +29,13 @@ suite "fieldName compile-time validation":
       "tfieldname_unknown.nim", "unknown field 'missing' for Product"
     )
 
+suite "response field compile-time validation":
+  test "rejects unknown response fields":
+    checkCompileFailure(
+      "tjsonresponse_unknown_field.nim",
+      "unknown response field 'missing' for Message",
+    )
+
 suite "model constraint compile-time validation":
   test "rejects constraints on incompatible field types":
     checkCompileFailure(

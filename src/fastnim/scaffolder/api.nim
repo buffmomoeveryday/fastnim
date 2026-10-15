@@ -5,6 +5,8 @@
 
 import std/os
 
+import ./auth
+
 proc writeApiFile(path, content: string) =
   createDir(path.parentDir())
   writeFile(path, content)
@@ -100,7 +102,13 @@ userRouter.delete("/{id}", responses = @[(204, void), (404, ApiError)]):
     noContent void
 """
 
-proc apiMain(name: string): string =
+proc apiMain(name: string, auth: bool): string =
+  let authImports = if auth: "import auth\nimport routes/auth as auth_routes\n" else: ""
+  let authSetup =
+    if auth:
+      "api.installPlugin(authentication())\napi.addRouter(auth_routes.authRouter, prefix = \"/v1\")\n"
+    else:
+      ""
   """## """ & name & """ - FastNim JSON API.
 ##
 ## Run with: nim c -r --path:src src/main.nim
@@ -109,14 +117,38 @@ proc apiMain(name: string): string =
 import chronos
 
 import fastnim
+""" & authImports & """
 import routes/users
 
 let api = initFastNim()
+""" & authSetup & """
 api.addRouter(userRouter, prefix = "/v1")
 
 let server = api.serve(port = 8000)
 echo "Listening at http://127.0.0.1:8000"
 waitFor server.join()
+"""
+
+proc apiAuthRoutes(): string =
+  """## Public endpoint that exchanges credentials for a bearer JWT.
+
+import std/json
+
+import fastnim
+import ../auth
+
+let authRouter* = initRouter(prefix = "/auth", tags = @["auth"])
+
+authRouter.post(
+  "/login", body = LoginInput, responses = @[(200, TokenOutput), (401, ApiError)]
+):
+  if not credentialsValid(body):
+    unauthorized initApiError("invalid_credentials", "invalid credentials")
+  else:
+    ok issueToken(body.username)
+
+authRouter.get("/me"):
+  ok %*{"user": request.authSubject(), "scheme": request.authScheme()}
 """
 
 proc apiTests(): string =
@@ -158,7 +190,24 @@ suite "users":
     check client.get("/users/1").status == 404
 """
 
-proc apiReadme(name: string): string =
+proc apiReadme(name: string, auth: bool): string =
+  let authDocs =
+    if auth:
+      """
+## Authentication
+
+`/v1/*` uses HS256 bearer JWT authentication. The generated development
+account is `ada` / `s3cret`; replace it and set `JWT_SECRET` before deploying.
+
+```sh
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"ada","password":"s3cret"}' | jq -r .token)
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/v1/users/
+```
+"""
+    else:
+      ""
   """# """ & name & "\n" & """
 
 FastNim JSON API with versioned routes (`/v1/users`).
@@ -177,6 +226,7 @@ curl http://127.0.0.1:8000/v1/users/
 curl -X POST http://127.0.0.1:8000/v1/users/ \
   -d '{"name":"Grace","email":"g@example.com"}'
 ```
+""" & authDocs & """
 
 ## Test
 
@@ -193,15 +243,18 @@ nimble test
   `api.onLoad` and exposed through `ctx`.
 """
 
-proc scaffoldApi*(dir, name: string) =
+proc scaffoldApi*(dir, name: string, auth = false) =
   ## Writes a JSON API project into ``dir``.
   ##
   ## ``dir`` should be the empty project root; ``name`` is the project and
   ## Nimble package name.
   writeApiFile(dir / name & ".nimble", apiNimble(name))
   writeApiFile(dir / "config.nims", "switch(\"path\", \"src\")\n")
-  writeApiFile(dir / "src" / "main.nim", apiMain(name))
+  writeApiFile(dir / "src" / "main.nim", apiMain(name, auth))
   writeApiFile(dir / "src" / "models.nim", apiModels())
   writeApiFile(dir / "src" / "routes" / "users.nim", apiUsersRoutes())
+  if auth:
+    writeApiFile(dir / "src" / "auth.nim", jwtAuthSource(["/v1/*"], ["/v1/auth/login"]))
+    writeApiFile(dir / "src" / "routes" / "auth.nim", apiAuthRoutes())
   writeApiFile(dir / "tests" / "test_users.nim", apiTests())
-  writeApiFile(dir / "README.md", apiReadme(name))
+  writeApiFile(dir / "README.md", apiReadme(name, auth))

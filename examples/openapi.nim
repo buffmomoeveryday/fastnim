@@ -21,7 +21,7 @@ let openApiSettings = initOpenApiSettings(
   description = "Documentation generated from typed FastNim routes.",
 )
 
-app.install:
+app.installPlugin:
   openApiPlugin(openApiSettings)
 
 app.get(

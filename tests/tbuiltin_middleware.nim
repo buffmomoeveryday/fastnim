@@ -4,7 +4,7 @@ import fastnim
 
 block handlesCorsPreflight:
   let app = initFastNim(logs = false)
-  app.use(cors(initCorsOptions(allowOrigins = @["https://app.example.com"])))
+  app.addMiddleware(cors(initCorsOptions(allowOrigins = @["https://app.example.com"])))
   let response = app.handleSync(
     initRequest(
       HttpMethod.Options,
@@ -18,7 +18,7 @@ block handlesCorsPreflight:
 
 block appliesCorsToMatchingOrigins:
   let app = initFastNim(logs = false)
-  app.use(cors(initCorsOptions(allowOrigins = @["https://app.example.com"])))
+  app.addMiddleware(cors(initCorsOptions(allowOrigins = @["https://app.example.com"])))
   app.get("/"):
     text("ok")
   let response = app.handleSync(
@@ -28,8 +28,8 @@ block appliesCorsToMatchingOrigins:
 
 block propagatesRequestIdsAndAddsResponseTime:
   let app = initFastNim(logs = false)
-  app.use(requestId())
-  app.use(responseTime())
+  app.addMiddleware(requestId())
+  app.addMiddleware(responseTime())
   app.get("/"):
     text(request.header("x-request-id"))
   let response = app.handleSync(

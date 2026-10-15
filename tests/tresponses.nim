@@ -23,6 +23,18 @@ type
   RenamedEnvelope = object
     profiles: seq[RenamedProfile]
 
+  ValueKind = enum
+    vkBool
+    vkString
+
+  FilteredMessage = object
+    status: string
+    case value {.jsonRespIgnore.}: ValueKind
+    of vkBool:
+      boolVal: bool
+    of vkString:
+      strVal: string
+
 let app = initFastNim()
 app.get("/items", responses = @[(200, Success), (400, Failure)]):
   ok Success(id: 1)
@@ -173,6 +185,51 @@ block jsonNameRejectsAmbiguousInput:
     )
   )
   doAssert response.status == 400
+
+block responseFieldsHonorPragmasAndFluentOverrides:
+  let message = FilteredMessage(status: "ok", value: vkBool, boolVal: true)
+
+  let defaultPayload = parseJson(respondOk(message).body)
+  doAssert "value" notin defaultPayload
+  doAssert defaultPayload["boolVal"].getBool
+
+  let included = ok message.include(FilteredMessage.value)
+  let includedPayload = parseJson(included.body)
+  doAssert includedPayload["value"].getInt == ord(vkBool)
+
+  let overridden = ok message
+    .ignore(FilteredMessage.status, FilteredMessage.boolVal)
+    .include(FilteredMessage.value, FilteredMessage.status)
+  let overriddenPayload = parseJson(overridden.body)
+  doAssert overriddenPayload["status"].getStr == "ok"
+  doAssert overriddenPayload["value"].getInt == ord(vkBool)
+  doAssert "boolVal" notin overriddenPayload
+
+block responseFieldOverridesWorkInTypedRoutes:
+  let helper = initFastNim(logs = false)
+  helper.get("/filtered", responses = @[(200, FilteredMessage)]):
+    let filtered = ok FilteredMessage(status: "ok", value: vkBool, boolVal: true)
+      .ignore(FilteredMessage.boolVal)
+      .include(FilteredMessage.value)
+    return filtered
+
+  let response = helper.handleSync(initRequest(HttpMethod.Get, "/filtered"))
+  let payload = parseJson(response.body)
+  doAssert response.status == 200
+  doAssert payload["value"].getInt == ord(vkBool)
+  doAssert "boolVal" notin payload
+
+  let operation = helper.openApiDocument()["paths"]["/filtered"]["get"]
+  let schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+  doAssert schema["oneOf"].len == 2
+  let boolProperties = schema["oneOf"][0]["properties"]
+  doAssert boolProperties["status"]["type"].getStr == "string"
+  doAssert boolProperties["value"]["type"].getStr == "integer"
+  doAssert "boolVal" notin boolProperties
+  doAssert "strVal" notin boolProperties
+  let stringProperties = schema["oneOf"][1]["properties"]
+  doAssert "boolVal" notin stringProperties
+  doAssert stringProperties["strVal"]["type"].getStr == "string"
 
 type
   Member = object

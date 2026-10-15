@@ -18,47 +18,63 @@ import chronos
 import fastnim
 import fastnim/plugins/auth
 
-type LoginBody = object
-  username: string
-  password: string
-
 const DemoUsers = {"ada": "s3cret"}.toTable
 
 let store = newSessionStore(defaultTtlSeconds = 3600)
 
 let app = initFastNim()
-app.install(
+app.installPlugin(
   authPlugin(
     initAuthOptions(
       schemes = {AuthScheme.Session},
       sessionStore = store,
-      excludePaths = @["/health", "/login"],
+      excludePaths = @["/health", "/login", "/docs", "/openapi.json"],
     )
   )
 )
 
-app.get("/health"):
-  text("ok")
+type
+  LoginBody = object
+    username: string
+    password: string
 
-app.post("/login"):
-  var credentials: LoginBody
-  if not parseJsonBody(request, credentials):
-    return json(statusBadRequest, %*{"detail": "invalid JSON request body"})
-  if not secureCompare(
-    DemoUsers.getOrDefault(credentials.username, ""), credentials.password
-  ):
-    return json(statusUnauthorized, %*{"detail": "invalid credentials"})
-  var response = json(%*{"ok": true})
-  discard await loginSession(store, response, credentials.username)
-  response
+  ValueKind = enum
+    vkBool
+    vkString
+
+  Message = object
+    status: string
+    case value {.jsonRespIgnore.}: ValueKind
+    of vkBool:
+      boolVal: bool
+    of vkString:
+      strVal: string
+
+app.get("/health"):
+  return text("ok")
+
+app.post("/login", body = LoginBody, responses = @[(200, Message), (401, Message)]):
+  if not secureCompare(DemoUsers.getOrDefault(body.username, ""), body.password):
+    return unauthorized Message(
+      status: "detail", value: vkString, strVal: "Invalid credential"
+    )
+
+  var response = ok Message(status: "ok", value: vkBool, boolVal: true)
+  var cookie = await loginSession(store, response, body.username)
+  echo $cookie
+  return response
 
 app.get("/me"):
-  json(%*{"user": request.authSubject(), "scheme": request.authScheme()})
+  return json(
+    %*{"user": request.authSubject().toJson(), "scheme": request.authScheme().toJson()}
+  )
 
-app.post("/logout"):
-  var response = json(%*{"ok": true})
+app.post("/logout", responses = @[(200, Message)]):
+  var response = ok Message(status: "ok", value: vkBool, boolVal: true)
+    .ignore(Message.boolVal)
+    .include(Message.value)
   await logoutSession(store, request, response)
-  response
+  return response
 
 let server = app.serve(port = 8104)
 echo "Session demo: POST /login, then GET /me with the cookie."

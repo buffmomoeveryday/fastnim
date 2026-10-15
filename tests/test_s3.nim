@@ -133,7 +133,7 @@ block pluginRegistersStore:
   let options = initS3UploadOptions("product-assets", productKey)
   let app = initFastNim(logs = false)
   let s3 = s3Plugin(options, fakeTransport(state))
-  app.install(s3)
+  app.installPlugin(s3)
   doAssert not app.s3UploadStore().isNil
 
 block uploadsParsedDiskFile:
@@ -246,5 +246,5 @@ block validatesConfiguration:
   )
   let configuredPlugin = s3Plugin(config)
   let app = initFastNim(logs = false)
-  app.install(configuredPlugin)
+  app.installPlugin(configuredPlugin)
   doAssert not app.s3UploadStore().isNil
