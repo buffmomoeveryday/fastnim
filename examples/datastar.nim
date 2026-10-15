@@ -114,7 +114,7 @@ proc findTodo(id: int): int =
 
 let app = initFastNim()
 
-app.install:
+app.installPlugin:
   datastarPlugin()
 
 # Live feed hub: one post fans out to every connected tab. The hub owns the

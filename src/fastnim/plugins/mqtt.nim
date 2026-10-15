@@ -86,7 +86,7 @@ proc mqttRuntime(app: Application): MqttRuntime =
   if not pluginCtx.has(MqttRuntimeKey):
     raise newException(
       ValueError,
-      "MQTT plugin is not installed; call app.install(mqttPlugin()) first",
+      "MQTT plugin is not installed; call app.installPlugin(mqttPlugin()) first",
     )
   pluginCtx.get(MqttRuntimeKey, MqttRuntime)
 

@@ -156,6 +156,6 @@ proc rateLimitPlugin*(
     version,
     proc(app: Application) =
       app.pluginContext(name).setContext("store", store)
-      app.use(rateLimitMiddleware(options, store), priority = -100)
+      app.addMiddleware(rateLimitMiddleware(options, store), priority = -100)
       app.addOpenApiContributor(contributeRateLimit),
   )

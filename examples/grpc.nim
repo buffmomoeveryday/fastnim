@@ -13,7 +13,7 @@ type
     message: string
 
 let grpcApp = initFastNim()
-grpcApp.install(grpcPlugin())
+grpcApp.installPlugin(grpcPlugin())
 
 grpcApp.grpc(
   "/hello.Greeter/SayHello",

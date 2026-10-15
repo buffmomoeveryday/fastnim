@@ -38,8 +38,8 @@ middleware denyMiddleware:
 block wrapsRoutesInRegistrationOrder:
   stepCount = 0
   let app = initFastNim(logs = false)
-  app.use(firstMiddleware)
-  app.use(secondMiddleware)
+  app.addMiddleware(firstMiddleware)
+  app.addMiddleware(secondMiddleware)
   app.get("/", endpoint)
 
   let response = app.handleSync(initRequest(HttpMethod.Get, "/"))
@@ -58,7 +58,7 @@ block registersMiddlewareWithCommandSyntax:
     var response = await next(request)
     response.setHeader("x-command-style-plural", "true")
     response
-  app.use(commandStyleMiddleware)
+  app.addMiddleware(commandStyleMiddleware)
   app.middlewares(pluralCommandStyleMiddleware)
   app.get("/", endpoint)
 
@@ -81,7 +81,7 @@ block registersMiddlewareListInOrder:
 block canShortCircuitRoutes:
   endpointCalled = false
   let app = initFastNim(logs = false)
-  app.use(denyMiddleware)
+  app.addMiddleware(denyMiddleware)
   app.get(
     "/private",
     proc(request: Request): Response {.gcsafe, raises: [].} =
@@ -96,7 +96,7 @@ block canShortCircuitRoutes:
 
 block declaresMiddlewareWithImplicitRequestAndNext:
   let app = initFastNim(logs = false)
-  app.use(requireAuth)
+  app.addMiddleware(requireAuth)
   app.get("/private"):
     json(%*{"authorized": true})
 

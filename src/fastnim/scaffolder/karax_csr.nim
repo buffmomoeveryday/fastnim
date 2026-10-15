@@ -53,7 +53,7 @@ apiRouter.get("/hello", responses = @[(200, Greeting)]):
 proc csrMain(name: string, auth: bool): string =
   let authImports = if auth: "import auth\nimport routes/auth as auth_routes\n" else: ""
   let authSetup =
-    if auth: "web.install(authentication())\nweb.addRouter(auth_routes.authRouter)\n"
+    if auth: "web.installPlugin(authentication())\nweb.addRouter(auth_routes.authRouter)\n"
     else: ""
   """## """ & name & """ - FastNim + Karax CSR.
 ##

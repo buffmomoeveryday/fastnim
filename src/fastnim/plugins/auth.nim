@@ -10,7 +10,7 @@
 ##   basicUsers = {"ada": "correct horse"}.toTable,
 ##   excludePaths = @["/health", "/openapi.json"],
 ## )
-## app.install(authPlugin(authOpts))
+## app.installPlugin(authPlugin(authOpts))
 ##
 ## app.get("/me"):
 ##   json(%*{"user": request.authSubject()})
@@ -20,7 +20,7 @@
 ## downstream. Those headers are always stripped first, so clients cannot
 ## spoof them — never trust values a client sends directly.
 ##
-## ``app.use`` middleware does not run for SSE or WebSocket routes. Inside
+## ``app.addMiddleware`` middleware does not run for SSE or WebSocket routes. Inside
 ## ``app.sse`` blocks, verify explicitly with ``authenticate`` (wrapping the
 ## call for shared options, as in the websocket broadcast example):
 ##
@@ -287,6 +287,6 @@ proc authPlugin*(
     name,
     version,
     proc(app: Application) =
-      app.use(authMiddleware(options))
+      app.addMiddleware(authMiddleware(options))
       app.addOpenApiContributor(contributeAuth),
   )

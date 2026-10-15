@@ -109,7 +109,7 @@ Install the plugin before registering routes. `grpcPlugin()` listens on
 
 ```nim
 let app = initFastNim()
-app.install(grpcPlugin())
+app.installPlugin(grpcPlugin())
 
 app.grpc(
   "/hello.Greeter/SayHello",
@@ -339,7 +339,7 @@ route checker still requires the `.proto` field numbers to be sequential from
 
 ```nim
 let app = initFastNim()
-app.install(grpcPlugin(initGrpcOptions(
+app.installPlugin(grpcPlugin(initGrpcOptions(
   address = "0.0.0.0",
   port = 50051,
   maxMessageSize = 4 * 1024 * 1024,
@@ -376,7 +376,7 @@ let tls = initGrpcTlsConfig(
   readFile("certs/server-cert.pem"),
   readFile("certs/server-key.pem"),
 )
-app.install(grpcPlugin(initGrpcOptions(
+app.installPlugin(grpcPlugin(initGrpcOptions(
   address = "0.0.0.0",
   port = 443,
   tls = tls,

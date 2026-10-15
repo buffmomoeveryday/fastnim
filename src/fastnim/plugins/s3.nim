@@ -523,7 +523,7 @@ proc s3Plugin*(
 ): S3Client =
   ## Creates an installable S3 plugin and upload handle.
   ##
-  ## Install the returned handle with ``app.install(s3)``. The same handle can
+  ## Install the returned handle with ``app.installPlugin(s3)``. The same handle can
   ## then upload parsed ``UploadedFile`` values with ``s3.upload(file)``.
   result = S3Client(
     options: options, transport: transport, store: newS3UploadStore(options, transport)
@@ -541,11 +541,11 @@ proc s3Plugin*(config: S3Config, name = "s3"): S3Client =
   let options = initS3UploadOptions(config.bucket, config.key, config.partSize)
   result = s3Plugin(options, builtInTransport(config), name)
 
-proc install*(app: Application, client: S3Client) =
+proc installPlugin*(app: Application, client: S3Client) =
   ## Installs an S3 plugin handle returned by ``s3Plugin``.
   if client.isNil:
     raise newException(ValueError, "S3 client cannot be nil")
-  app.install(client.definition)
+  app.installPlugin(client.definition)
 
 proc upload*(
     client: S3Client, file: UploadedFile, key = ""

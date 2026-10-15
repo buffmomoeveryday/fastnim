@@ -217,7 +217,7 @@ proc grpcClientExchange() {.async.} =
 
 block exchangesUnaryGrpcOverHttp2:
   let app = initFastNim(logs = false)
-  app.install(grpcPlugin(initGrpcOptions(port = 50186)))
+  app.installPlugin(grpcPlugin(initGrpcOptions(port = 50186)))
   app.grpc(
     "/hello.Greeter/SayHello",
     proto = "fixtures/grpc.proto",
@@ -298,7 +298,7 @@ block terminatesTlsAndNegotiatesHttp2:
     privateKeyPem = staticRead("fixtures/grpc-key.pem")
   let app = initFastNim(logs = false)
   let tls = initGrpcTlsConfig(certificatePem, privateKeyPem)
-  app.install(grpcPlugin(initGrpcOptions(port = 50187, tls = tls)))
+  app.installPlugin(grpcPlugin(initGrpcOptions(port = 50187, tls = tls)))
   let server = app.serveGrpc()
   try:
     waitFor tlsHandshake(50187)

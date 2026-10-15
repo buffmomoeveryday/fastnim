@@ -17,7 +17,7 @@ import fastnim
 import fastnim/plugins/auth
 
 let app = initFastNim()
-app.install(
+app.installPlugin(
   authPlugin(
     initAuthOptions(
       schemes = {AuthScheme.Basic},

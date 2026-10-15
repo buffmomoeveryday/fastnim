@@ -15,15 +15,15 @@ block installsPluginsAndKeepsStateScoped:
     proc(app: Application) =
       app.pluginContext("marker").setContext("value", Marker(value: "installed")),
   )
-  app.install(plugin)
+  app.installPlugin(plugin)
   doAssert app.installedPlugins.len == 1
   doAssert app.installedPlugins[0].name == "marker"
   doAssert get[Marker](app.pluginContext("marker"), "value").value == "installed"
   doAssertRaises ValueError:
-    app.install(plugin)
+    app.installPlugin(plugin)
   app.load()
   doAssertRaises ValueError:
-    app.install(
+    app.installPlugin(
       initPlugin(
         "late",
         "1.0.0",
@@ -34,14 +34,14 @@ block installsPluginsAndKeepsStateScoped:
 
 block installsPluginsWithCommandSyntax:
   let app = initFastNim(logs = false)
-  app.install:
+  app.installPlugin:
     rateLimitPlugin(initRateLimitOptions(limit = 5, windowSeconds = 60))
   doAssert app.installedPlugins.len == 1
   doAssert app.installedPlugins[0].name == "ratelimit"
 
 block configuresOpenApiAsPlugin:
   let app = initFastNim(logs = false, openApi = initOpenApiSettings(enabled = false))
-  app.install:
+  app.installPlugin:
     openApiPlugin(initOpenApiSettings(title = "Users API", version = "2.2.0"))
   let document = app.openApiDocument()
   doAssert document["info"]["title"].getStr == "Users API"
@@ -58,8 +58,8 @@ block ordersMiddlewareByPhaseAndPriority:
       {.cast(gcsafe).}:
         order.add("first")
       await next(request)
-  app.use(defaultOrderMiddleware)
-  app.use(firstOrderMiddleware, priority = -10)
+  app.addMiddleware(defaultOrderMiddleware)
+  app.addMiddleware(firstOrderMiddleware, priority = -10)
   app.get("/"):
     text("ok")
   discard app.handleSync(initRequest(HttpMethod.Get, "/"))
@@ -67,7 +67,7 @@ block ordersMiddlewareByPhaseAndPriority:
 
 block rateLimitPluginBlocksAndDocuments:
   let app = initFastNim(logs = false)
-  app.install(rateLimitPlugin(initRateLimitOptions(limit = 1, windowSeconds = 60)))
+  app.installPlugin(rateLimitPlugin(initRateLimitOptions(limit = 1, windowSeconds = 60)))
   app.get("/items", responses = @[(200, string)]):
     "ok"
   let first = app.handleSync(initRequest(HttpMethod.Get, "/items"))

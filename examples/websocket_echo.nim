@@ -14,5 +14,5 @@ app.websocket("/echo"):
     await websocket.sendText text
 
 let server = app.serve(port = 8009)
-echo "WebSocket echo endpoint: ws://127.0.0.1:8000/echo"
+echo "WebSocket echo endpoint: ws://127.0.0.1:8009/echo"
 waitFor server.join()

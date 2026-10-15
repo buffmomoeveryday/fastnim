@@ -141,7 +141,7 @@ proc grpcRuntime(app: Application): GrpcRuntime =
   if not pluginCtx.has(GrpcRuntimeKey):
     raise newException(
       ValueError,
-      "gRPC plugin is not installed; call app.install(grpcPlugin()) first",
+      "gRPC plugin is not installed; call app.installPlugin(grpcPlugin()) first",
     )
   pluginCtx.get(GrpcRuntimeKey, GrpcRuntime)
 

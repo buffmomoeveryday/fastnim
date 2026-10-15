@@ -26,7 +26,7 @@ var users: seq[User] = @[]
 
 let app = initFastNim()
 
-app.install:
+app.installPlugin:
   rateLimitPlugin(initRateLimitOptions(limit = 5, windowSeconds = 60))
 
 app.middlewares:

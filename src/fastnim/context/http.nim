@@ -5,6 +5,7 @@ import std/[json, macros, strutils, tables, uri]
 import chronos
 
 import ../context/state
+import ../jsonfields
 import ../private/jsonconversion
 
 export tables
@@ -653,6 +654,17 @@ proc response*[T](status: int, model: T): Response =
   result.status = status
   result.setHeader("content-type", "application/json; charset=utf-8")
 
+proc response*[T](status: int, model: JsonResponseFields[T]): Response =
+  ## Serializes a typed model with per-response field visibility overrides.
+  let node = toJsonValue(model.value, model.ignoredFields, model.includedFields)
+  result = initResponse(body = $node)
+  result.status = status
+  result.setHeader("content-type", "application/json; charset=utf-8")
+
+proc ok*[T](model: JsonResponseFields[T]): Response =
+  ## Creates a filtered 200 JSON response.
+  response(200, model)
+
 proc apiErrorResponse*(
     status: int, error: ApiError
 ): Response {.gcsafe, raises: [].} =
@@ -718,6 +730,8 @@ macro noContent*(value: untyped): untyped =
 template checkedResponse*[T](status: static[int], model: typed): Response =
   ## Creates a response only when ``model`` has the route-declared type ``T``.
   when typeof(model) is T:
+    response(status, model)
+  elif typeof(model) is JsonResponseFields[T]:
     response(status, model)
   else:
     {.error: "response model does not match the type declared for this status".}

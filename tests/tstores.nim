@@ -90,7 +90,7 @@ block customRateLimitStoreIsUsedByPlugin:
 
   let store = newRateLimitStore(increment)
   let app = initFastNim(logs = false)
-  app.install(
+  app.installPlugin(
     rateLimitPlugin(
       initRateLimitOptions(
         limit = 1,

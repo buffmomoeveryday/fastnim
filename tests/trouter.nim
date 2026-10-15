@@ -75,7 +75,7 @@ block routerMiddlewareIsolation:
   let userRouter = initRouter(prefix = "/users")
   userRouter.get("/"):
     %*{"ok": true}
-  userRouter.use(tagUsers)
+  userRouter.addMiddleware(tagUsers)
 
   let plainRouter = initRouter(prefix = "/plain")
   plainRouter.get("/"):

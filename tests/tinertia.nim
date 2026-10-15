@@ -11,7 +11,7 @@ proc inertiaHeaders(version = ""): Headers =
 
 proc newInertiaApp(options = initInertiaOptions(version = "assets-v1")): Application =
   result = initFastNim(logs = false)
-  result.install(inertiaPlugin(options))
+  result.installPlugin(inertiaPlugin(options))
   result.get("/users"):
     inertia("Users/Index", %*{"users": ["Ada", "Linus"], "page": 2})
 
@@ -26,7 +26,7 @@ block rendersInitialHtmlResponse:
 
 block escapesEmbeddedScriptTerminators:
   let app = initFastNim(logs = false)
-  app.install(inertiaPlugin())
+  app.installPlugin(inertiaPlugin())
   app.get("/unsafe"):
     inertia("Unsafe", %*{"value": "</script><script>alert(1)</script>"})
   let response = app.handleSync(initRequest(HttpMethod.Get, "/unsafe"))
@@ -94,7 +94,7 @@ block rejectsStaleAssetVersion:
 
 block convertsPostRedirectToSeeOther:
   let app = initFastNim(logs = false)
-  app.install(inertiaPlugin())
+  app.installPlugin(inertiaPlugin())
   app.post("/users"):
     var response = initResponse(statusFound)
     response.setHeader("location", "/users")

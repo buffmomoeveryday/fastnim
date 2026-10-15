@@ -23,7 +23,7 @@ const DemoUsers = {"ada": "s3cret"}.toTable
 let store = newSessionStore(defaultTtlSeconds = 3600)
 
 let app = initFastNim()
-app.install(
+app.installPlugin(
   authPlugin(
     initAuthOptions(
       schemes = {AuthScheme.Session},
@@ -44,7 +44,7 @@ type
 
   Message = object
     status: string
-    case value: ValueKind
+    case value {.jsonRespIgnore.}: ValueKind
     of vkBool:
       boolVal: bool
     of vkString:
@@ -71,6 +71,8 @@ app.get("/me"):
 
 app.post("/logout", responses = @[(200, Message)]):
   var response = ok Message(status: "ok", value: vkBool, boolVal: true)
+    .ignore(Message.boolVal)
+    .include(Message.value)
   await logoutSession(store, request, response)
   return response
 

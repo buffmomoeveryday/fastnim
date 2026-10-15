@@ -55,7 +55,7 @@ block protectionPrecedence:
 
 block bearerAcceptsKnownTokens:
   let app = initFastNim(logs = false)
-  app.install(
+  app.installPlugin(
     authPlugin(
       initAuthOptions(
         schemes = {AuthScheme.Bearer}, bearerTokens = {"tok-1": "ada"}.toTable
@@ -70,7 +70,7 @@ block bearerAcceptsKnownTokens:
 
 block bearerRejectsUnknownAndMissing:
   let app = initFastNim(logs = false)
-  app.install(
+  app.installPlugin(
     authPlugin(
       initAuthOptions(
         schemes = {AuthScheme.Bearer}, bearerTokens = {"tok-1": "ada"}.toTable
@@ -90,7 +90,7 @@ block bearerRejectsUnknownAndMissing:
 
 block identityHeadersCannotBeSpoofed:
   let app = initFastNim(logs = false)
-  app.install(
+  app.installPlugin(
     authPlugin(
       initAuthOptions(
         schemes = {AuthScheme.Bearer}, bearerTokens = {"tok-1": "ada"}.toTable
@@ -106,7 +106,7 @@ block identityHeadersCannotBeSpoofed:
 
 block basicAcceptsUsers:
   let app = initFastNim(logs = false)
-  app.install(authPlugin(basicOptions()))
+  app.installPlugin(authPlugin(basicOptions()))
   app.get("/me"):
     text(request.authSubject())
   let response = app.handleSync(
@@ -117,7 +117,7 @@ block basicAcceptsUsers:
 
 block basicRejectsWrongPassword:
   let app = initFastNim(logs = false)
-  app.install(authPlugin(basicOptions()))
+  app.installPlugin(authPlugin(basicOptions()))
   app.get("/me"):
     text("unreachable")
   let wrong = app.handleSync(
@@ -134,7 +134,7 @@ block basicRejectsWrongPassword:
 
 block basicSkipsExcludedPaths:
   let app = initFastNim(logs = false)
-  app.install(authPlugin(basicOptions()))
+  app.installPlugin(authPlugin(basicOptions()))
   app.get("/health"):
     text("ok")
   let response = app.handleSync(initRequest(HttpMethod.Get, "/health"))
@@ -143,7 +143,7 @@ block basicSkipsExcludedPaths:
 
 block apiKeyHeaderAndQuery:
   let app = initFastNim(logs = false)
-  app.install(
+  app.installPlugin(
     authPlugin(
       initAuthOptions(
         schemes = {AuthScheme.ApiKey},
@@ -163,7 +163,7 @@ block apiKeyHeaderAndQuery:
 
 block apiKeyQueryDisabledByDefault:
   let app = initFastNim(logs = false)
-  app.install(
+  app.installPlugin(
     authPlugin(
       initAuthOptions(
         schemes = {AuthScheme.ApiKey}, apiKeys = {"key-1": "service-a"}.toTable
@@ -219,7 +219,7 @@ block jwtExpiredRejected:
 block jwtMiddlewareAcceptsBearerJwt:
   let secret = "demo-secret-change-me"
   let app = initFastNim(logs = false)
-  app.install(
+  app.installPlugin(
     authPlugin(
       initAuthOptions(schemes = {AuthScheme.Jwt}, jwtSecrets = @[secret])
     )
@@ -269,7 +269,7 @@ block sessionCookieHelpers:
 block sessionMiddlewareFlow:
   let store = newSessionStore()
   let app = initFastNim(logs = false)
-  app.install(
+  app.installPlugin(
     authPlugin(
       initAuthOptions(
         schemes = {AuthScheme.Session},
@@ -314,7 +314,7 @@ block sseHelperAcceptsAndRejects:
 
 block authDocumentsUnauthorized:
   let app = initFastNim(logs = false)
-  app.install(authPlugin(basicOptions()))
+  app.installPlugin(authPlugin(basicOptions()))
   app.get("/items", responses = @[(200, string)]):
     "ok"
   let document = app.openApiDocument()
@@ -335,15 +335,15 @@ block authPluginValidation:
   doAssertRaises ValueError:
     discard initAuthOptions(schemes = {AuthScheme.Basic}, includePaths = @["nope"])
   let app = initFastNim(logs = false)
-  app.install(authPlugin(basicOptions()))
+  app.installPlugin(authPlugin(basicOptions()))
   doAssert app.installedPlugins[^1].name == "auth"
   doAssertRaises ValueError:
-    app.install(authPlugin(basicOptions()))
+    app.installPlugin(authPlugin(basicOptions()))
 
 block corsPreflightPassesThrough:
   let app = initFastNim(logs = false)
-  app.use(cors())
-  app.install(authPlugin(basicOptions()))
+  app.addMiddleware(cors())
+  app.installPlugin(authPlugin(basicOptions()))
   app.get("/items"):
     text("ok")
   var headers = initTable[string, string]()

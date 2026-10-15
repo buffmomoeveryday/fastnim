@@ -26,7 +26,7 @@ macro middleware*(name: untyped, body: untyped): untyped =
   ##     return json(statusUnauthorized, %*{"detail": "missing credentials"})
   ##   await next(request)
   ##
-  ## app.use(requireAuth)
+  ## app.addMiddleware(requireAuth)
   ## ```
   let requestParam = genSym(nskParam, "request")
   let nextParam = genSym(nskParam, "next")

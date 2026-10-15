@@ -29,7 +29,7 @@ userRouter.post("/", body = CreateUser, responses = @[(201, User)]):
 
 # admin
 let adminRouter = initRouter(prefix = "/admin", tags = @["admin"])
-adminRouter.use(requireAuth)
+adminRouter.addMiddleware(requireAuth)
 
 adminRouter.get("/stats"):
   %*{"uptime": "ok"}

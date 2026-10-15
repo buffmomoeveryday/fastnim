@@ -30,7 +30,7 @@ let s3 = s3ext.s3Plugin(
   )
 )
 
-app.install:
+app.installPlugin:
   s3
 
 type

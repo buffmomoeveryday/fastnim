@@ -28,7 +28,7 @@ block rejectsOversizedPackets:
 
 block routesNamedParametersAndAcceptsFallthrough:
   let app = initFastNim(logs = false)
-  app.install(mqttPlugin())
+  app.installPlugin(mqttPlugin())
   routedDeviceLength = 0
   routedPayloadByte = 0
   app.mqtt("/devices/{deviceId}/telemetry"):
@@ -51,7 +51,7 @@ block routesNamedParametersAndAcceptsFallthrough:
 
 block supportsExplicitRejection:
   let app = initFastNim(logs = false)
-  app.install(mqttPlugin())
+  app.installPlugin(mqttPlugin())
   app.mqtt("/private"):
     return mqttReject(MqttReasonCode.NotAuthorized)
 
@@ -192,7 +192,7 @@ proc mqttSubscriptionClients() {.async.} =
 
 block exchangesMqttPacketsOverTcp:
   let app = initFastNim(logs = false)
-  app.install(mqttPlugin(initMqttOptions(port = 18884)))
+  app.installPlugin(mqttPlugin(initMqttOptions(port = 18884)))
   integrationPayloadByte = 0
   app.mqtt("/route"):
     integrationPayloadByte = message.payload[0]

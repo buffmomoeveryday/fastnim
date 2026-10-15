@@ -56,8 +56,8 @@ block middlewareAwaitsInOrderAndCanShortCircuit:
   proc asyncTest() {.async.} =
     eventCount = 0
     let app = initFastNim(logs = false)
-    app.use(outerMiddleware)
-    app.use(innerMiddleware)
+    app.addMiddleware(outerMiddleware)
+    app.addMiddleware(innerMiddleware)
     app.get("/ordered"):
       events[eventCount] = 3
       inc eventCount
@@ -73,7 +73,7 @@ block middlewareCanShortCircuit:
   let shortCircuit = initFastNim(logs = false)
   middleware shortCircuitMiddleware:
     return json(statusForbidden, %*{"detail": "denied"})
-  shortCircuit.use(shortCircuitMiddleware)
+  shortCircuit.addMiddleware(shortCircuitMiddleware)
   shortCircuit.get("/private"):
     reachedHandler = true
     text("private")

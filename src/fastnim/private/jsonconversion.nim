@@ -6,6 +6,8 @@ import ../jsonfields
 
 export jsonutils
 
+const NoJsonFieldOverrides: array[0, string] = []
+
 proc renameJsonField(node: JsonNode, source, target: string) =
   if node.isNil or node.kind != JObject or source == target or source notin node:
     return
@@ -26,7 +28,18 @@ template effectiveJsonName(field: untyped, defaultName: static[string]): string 
   else:
     defaultName
 
-proc transformJsonFields[T](node: JsonNode, value: T, encode: static[bool]) =
+proc fieldSelected(fields: openArray[string], name: string): bool =
+  for field in fields:
+    if field == name:
+      return true
+
+proc transformJsonFields[T](
+    node: JsonNode,
+    value: T,
+    encode: static[bool],
+    ignoredFields: openArray[string] = NoJsonFieldOverrides,
+    includedFields: openArray[string] = NoJsonFieldOverrides,
+) =
   when T is Option:
     if not node.isNil and node.kind != JNull:
       when encode:
@@ -59,8 +72,18 @@ proc transformJsonFields[T](node: JsonNode, value: T, encode: static[bool]) =
         if not node.isNil and node.kind == JObject and sourceName notin node:
           node[targetName] = newJNull()
       renameJsonField(node, sourceName, targetName)
-      if not node.isNil and node.kind == JObject and childName in node:
-        transformJsonFields(node[childName], field, encode)
+      when encode:
+        const ignoredByDefault = field.hasCustomPragma(jsonRespIgnore)
+        let explicitlyIgnored = ignoredFields.fieldSelected(fieldName)
+        let explicitlyIncluded = includedFields.fieldSelected(fieldName)
+        if not node.isNil and node.kind == JObject and childName in node:
+          if explicitlyIgnored or (ignoredByDefault and not explicitlyIncluded):
+            node.delete(childName)
+          else:
+            transformJsonFields(node[childName], field, encode)
+      else:
+        if not node.isNil and node.kind == JObject and childName in node:
+          transformJsonFields(node[childName], field, encode)
   elif T is seq or T is array:
     type Item = typeof(value[0])
     if not node.isNil and node.kind == JArray:
@@ -74,6 +97,13 @@ template toJsonValue*[T](value: T): JsonNode =
     var jsonResult = toJson(value)
     transformJsonFields(jsonResult, value, true)
     jsonResult
+
+proc toJsonValue*[T](
+    value: T, ignoredFields, includedFields: openArray[string]
+): JsonNode =
+  ## Encodes a value with root-level response field overrides.
+  result = toJson(value)
+  transformJsonFields(result, value, true, ignoredFields, includedFields)
 
 template jsonToValue*[T](node: JsonNode, model: typedesc[T]): T =
   ## Decodes a framework value while applying ``jsonName`` recursively.

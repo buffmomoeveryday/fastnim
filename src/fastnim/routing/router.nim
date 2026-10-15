@@ -1,6 +1,6 @@
 ## Route registration and dispatch for fastnim applications.
 
-import std/[json, logging, macrocache, macros, monotimes, strutils, tables, times]
+import std/[json, logging, macrocache, macros, monotimes, sequtils, strutils, tables, times]
 
 import chronos/[asyncloop, futures, timer, transport]
 from chronos/apps/http/httpserver import HttpRequestBodyTooLargeError, HttpWriteError
@@ -570,7 +570,7 @@ proc errorResponse*(
   ## Builds a standard framework error, honoring ``onError`` overrides.
   app.apiErrorResponse(request, status, defaultApiError(status))
 
-proc use*(
+proc addMiddleware*(
     app: Application,
     middleware: Middleware,
     phase = MiddlewarePhase.BeforeRouting,
@@ -585,7 +585,7 @@ proc use*(
   inc app.middlewareOrder
   insertRegistration(app.middleware, registration)
 
-proc use*(
+proc addMiddleware*(
     router: Router,
     middleware: Middleware,
     phase = MiddlewarePhase.BeforeRouting,
@@ -615,12 +615,12 @@ macro middlewares*(target: Application | Router, body: untyped): untyped =
 
   if body.kind == nnkStmtList:
     for middleware in body:
-      result.add(newCall(bindSym("use"), targetSym, middleware))
+      result.add(newCall(bindSym("addMiddleware"), targetSym, middleware))
   else:
-    result.add(newCall(bindSym("use"), targetSym, body))
+    result.add(newCall(bindSym("addMiddleware"), targetSym, body))
 
 proc initPlugin*(name, version: string, install: PluginInstall): Plugin =
-  ## Creates a plugin definition for use with ``app.install``.
+  ## Creates a plugin definition for use with ``app.installPlugin``.
   Plugin(name: name, version: version, install: install)
 
 proc installedPlugins*(app: Application): lent seq[PluginInfo] {.inline.} =
@@ -637,7 +637,7 @@ proc addOpenApiContributor*(app: Application, contributor: OpenApiContributor) =
   ## Registers an OpenAPI document extension.
   app.openApiContributors.add(contributor)
 
-proc install*(app: Application, plugin: Plugin) =
+proc installPlugin*(app: Application, plugin: Plugin) =
   ## Installs a named plugin before the application starts serving.
   if app.lifecycleLoaded:
     raise
@@ -1005,7 +1005,7 @@ macro query*(app: Application | Router, path: typed, body: untyped): untyped =
     )
 
 proc typedOpenApiOperation(
-    `method`, path, responses, bodyType, queryType, routeDocs: NimNode,
+    `method`, path, responses, bodyType, queryType, routeDocs, routeBody: NimNode,
     contentType: string,
 ): NimNode =
   let operation = genSym(nskVar, "openApiOperation")
@@ -1023,11 +1023,51 @@ proc typedOpenApiOperation(
           `operation`.responses[`status`] = %*{"description": "Response " & `status`}
       )
     else:
+      var ignoredFields: seq[string]
+      var includedFields: seq[string]
+
+      proc collectOverrides(node: NimNode) =
+        for child in node:
+          collectOverrides(child)
+        if node.kind notin {nnkCall, nnkCommand} or node.len < 2:
+          return
+        let callee =
+          if node[0].kind in {nnkIdent, nnkSym}:
+            node[0]
+          elif node[0].kind == nnkDotExpr and node[0].len == 2:
+            node[0][1]
+          else:
+            newEmptyNode()
+        if callee.kind == nnkEmpty or
+            not (eqIdent(callee, "ignore") or eqIdent(callee, "include")):
+          return
+        let firstField = if node[0].kind == nnkDotExpr: 1 else: 2
+        for index in firstField ..< node.len:
+          let selector = node[index]
+          if selector.kind == nnkDotExpr and selector.len == 2 and
+              selector[0].repr == model.repr:
+            let field = $selector[1]
+            if eqIdent(callee, "ignore"):
+              includedFields.keepItIf(it != field)
+              if field notin ignoredFields:
+                ignoredFields.add(field)
+            else:
+              ignoredFields.keepItIf(it != field)
+              if field notin includedFields:
+                includedFields.add(field)
+
+      collectOverrides(routeBody)
+      let ignored = newLit(ignoredFields)
+      let included = newLit(includedFields)
       result[^1].add(
         quote do:
           `operation`.responses[`status`] = %*{
             "description": "Response " & `status`,
-            "content": {"application/json": {"schema": openApiSchema(`model`)}},
+            "content": {
+              "application/json": {
+                "schema": openApiResponseSchema(`model`, `ignored`, `included`)
+              }
+            },
           }
       )
   if bodyType.kind != nnkEmpty:
@@ -1182,7 +1222,7 @@ proc buildTypedRoute(
   let contentType =
     if inputName == "form": "application/x-www-form-urlencoded" else: "application/json"
   let documentation = typedOpenApiOperation(
-    `method`, path, responses, bodyType, queryType, routeDocs, contentType
+    `method`, path, responses, bodyType, queryType, routeDocs, body, contentType
   )
   if bodyType.kind == nnkEmpty and queryType.kind == nnkEmpty:
     result = quote:

@@ -243,7 +243,7 @@ proc serverMain(name: string, choices: InertiaChoices, auth: bool): string =
   let framework = if choices.frontend == feReact: "React" else: "Svelte"
   let authImports = if auth: "import auth\nimport routes/auth as auth_routes\n" else: ""
   let authSetup =
-    if auth: "api.install(authentication())\napi.addRouter(auth_routes.authRouter)\n"
+    if auth: "api.installPlugin(authentication())\napi.addRouter(auth_routes.authRouter)\n"
     else: ""
   """## """ & name & """ - FastNim + Inertia + """ & framework & """.
 
@@ -292,7 +292,7 @@ proc assetVersion(): string =
 let isDev = getEnv("INERTIA_DEV", "") == "1"
 
 let api = initFastNim()
-api.install:
+api.installPlugin:
   inertiaPlugin(initInertiaOptions(
     version = assetVersion(),
     rootTemplate =
