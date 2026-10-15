@@ -5,7 +5,9 @@
 ## not re-exported from ``fastnim`` so CLI dependencies stay out of
 ## library builds.
 
-import std/[os, parseopt, strutils, terminal]
+import std/[os, strutils, terminal]
+
+import cligen
 
 import ./scaffolder/api
 import ./scaffolder/inertiajs
@@ -13,25 +15,23 @@ import ./scaffolder/karax_csr
 import ./scaffolder/karax_ssr
 
 const
+  NimblePkgVersion {.strdefine.} = "0.1.0"
+  FastNimVersion* = NimblePkgVersion
+    ## FastNim package version reported by the command-line interface.
   Templates* = ["api", "karax_ssr", "karax_csr", "inertiajs"]
     ## Project templates accepted by ``fastnim init``.
   Frontends* = ["svelte", "react"] ## Client frameworks accepted by ``--frontend``.
   DefaultTemplate = "api"
-
-proc usage(): string =
-  """Usage: fastnim init [name] [options]
-
-Creates a new FastNim project.
-
+  CliUsage = """Usage:
+  $command init [name] [options]
+  $command --version
+$doc
 Options:
-  --template:NAME     api (default), karax_ssr, karax_csr, inertiajs
-  --frontend:NAME     inertiajs only: svelte (default), react
-  --pkgmanager:NAME   inertiajs only: pnpm (default), bun, npm, deno
-  --css:NAME          inertiajs only: tailwind (default), none
-  --auth              add session auth (Inertia/SSR) or JWT auth (API/CSR)
-  --dir:PATH          parent directory for the project (default: .)
-  --force             scaffold into a non-empty directory
-  -h, --help          show this help"""
+$options"""
+
+proc cliVersion*(): string =
+  ## Returns the version line printed by ``fastnim --version``.
+  "fastnim " & FastNimVersion
 
 proc promptChoice(label: string, options: openArray[string], defaultIx: int): string =
   ## Asks a numbered-menu question on a TTY. Empty input takes the default.
@@ -213,89 +213,92 @@ proc runInertiaInit(
           "' manually inside " & target & "."
   0
 
-proc normalizeParams(params: seq[string]): seq[string] =
-  ## Joins space-separated option values (``--dir PATH``) into the
-  ## ``--dir:PATH`` form parseopt understands.
-  const ValOpts = [
-    "--template", "--frontend", "--pkgmanager", "--pkg-manager", "--package-manager",
-    "--css", "--dir",
-  ]
-  var i = 0
-  while i < params.len:
-    let arg = params[i]
-    if arg.toLowerAscii() in ValOpts and i + 1 < params.len and params[i + 1].len > 0 and
-        not params[i + 1].startsWith("-"):
-      result.add(arg & ":" & params[i + 1])
-      i += 2
-    else:
-      result.add(arg)
-      i += 1
+var cliInteractive {.threadvar.}: bool
+
+proc fastNimCommand(
+    args: seq[string], `template` = DefaultTemplate, frontend = "",
+    pkgManager = "", packageManager = "", css = "", dir = ".",
+    auth = false, force = false,
+): int =
+  ## Creates a new FastNim project.
+  if args.len == 0:
+    stderr.writeLine("fastnim: error: missing command.")
+    return 2
+  if args[0] != "init":
+    stderr.writeLine("fastnim: error: unknown command '" & args[0] & "'.")
+    return 2
+  if args.len > 2:
+    stderr.writeLine("fastnim: error: too many arguments.")
+    return 2
+  if pkgManager.len > 0 and packageManager.len > 0:
+    stderr.writeLine(
+      "fastnim: error: use only one of --pkg-manager and --package-manager."
+    )
+    return 2
+  if dir.len == 0:
+    stderr.writeLine("fastnim: error: --dir needs a value.")
+    return 2
+
+  let name = if args.len == 2: args[1] else: "myapp"
+  let selectedPkgManager =
+    if pkgManager.len > 0: pkgManager
+    else: packageManager
+  runInit(
+    name, dir, `template`.toLowerAscii(), frontend.toLowerAscii(),
+    selectedPkgManager.toLowerAscii(), css.toLowerAscii(), auth, force,
+    cliInteractive,
+  )
+
+proc initCliConfig(): ClCfg =
+  result = clCfg
+  result.version = cliVersion()
+  result.longPfxOk = false
+  result.stopPfxOk = false
+
+let CliConfig = initCliConfig()
+
+dispatchGen(
+  fastNimCommand,
+  cmdName = "fastnim",
+  usage = CliUsage,
+  cf = CliConfig,
+  dispatchName = "dispatchFastNim",
+  help = {
+    "args": "the init command followed by an optional project name",
+    "template": "project template: api, karax_ssr, karax_csr, or inertiajs",
+    "frontend": "Inertia client framework: svelte or react",
+    "pkg-manager": "Inertia package manager: pnpm, bun, npm, or deno",
+    "package-manager": "alias for --pkg-manager",
+    "css": "Inertia CSS setup: tailwind or none",
+    "dir": "parent directory for the project",
+    "auth": "add session auth (Inertia/SSR) or JWT auth (API/CSR)",
+    "force": "scaffold into a non-empty directory",
+    "version": "show the FastNim version",
+    "helpsyntax": "CLIGEN-NOHELP",
+  },
+  short = {
+    "template": '\0',
+    "frontend": '\0',
+    "pkgManager": '\0',
+    "packageManager": '\0',
+    "css": '\0',
+    "dir": '\0',
+    "auth": '\0',
+    "force": '\0',
+    "version": 'v',
+  },
+)
 
 proc cliMain*(params: seq[string], interactive = true): int =
-  ## Runs the FastNim CLI. Returns the process exit code.
+  ## Runs the Cligen-backed FastNim CLI and returns the process exit code.
   ##
   ## Pass ``interactive = false`` (as tests do) to never prompt or install:
   ## missing choices silently fall back to defaults.
-  var parser = initOptParser(normalizeParams(params))
-  var positional: seq[string] = @[]
-  var dir = "."
-  var templateName = DefaultTemplate
-  var frontend = ""
-  var pkgManager = ""
-  var css = ""
-  var auth = false
-  var force = false
-  for kind, key, val in parser.getopt():
-    case kind
-    of cmdArgument:
-      positional.add(key)
-    of cmdLongOption, cmdShortOption:
-      case key.toLowerAscii()
-      of "h", "help":
-        echo usage()
-        return 0
-      of "template":
-        templateName = val.toLowerAscii()
-      of "frontend":
-        frontend = val.toLowerAscii()
-      of "pkgmanager", "pkg-manager", "package-manager":
-        pkgManager = val.toLowerAscii()
-      of "css":
-        css = val.toLowerAscii()
-      of "dir":
-        dir = val
-      of "force":
-        force = true
-      of "auth":
-        auth = true
-      else:
-        stderr.writeLine("fastnim: error: unknown option '--" & key & "'.")
-        stderr.writeLine(usage())
-        return 2
-    of cmdEnd:
-      discard
-
-  if positional.len == 0:
-    echo usage()
-    return 0
-  if positional[0] != "init":
-    stderr.writeLine("fastnim: error: unknown command '" & positional[0] & "'.")
-    stderr.writeLine(usage())
-    return 2
-  if positional.len > 2:
-    stderr.writeLine("fastnim: error: too many arguments.")
-    stderr.writeLine(usage())
-    return 2
-  let name =
-    if positional.len == 2:
-      positional[1]
-    else:
-      "myapp"
-  if dir.len == 0:
-    stderr.writeLine("fastnim: error: --dir needs a value.")
-    stderr.writeLine(usage())
-    return 2
-  runInit(
-    name, dir, templateName, frontend, pkgManager, css,
-    auth, force, interactive,
-  )
+  cliInteractive = interactive
+  let effectiveParams = if params.len == 0: @["--help"] else: params
+  try:
+    result = dispatchFastNim(effectiveParams)
+  except HelpOnly, VersionOnly:
+    result = 0
+  except ParseError:
+    result = 2

@@ -252,6 +252,12 @@ block cliAcceptsSpaceSeparatedValues:
   doAssert code == 0
   doAssert fileExists(box / "spaced" / "src" / "main.nim")
 
+block cliReportsVersion:
+  doAssert FastNimVersion == "0.1.0"
+  doAssert cliVersion() == "fastnim 0.1.0"
+  doAssert cliMain(@["--version"], interactive = false) == 0
+  doAssert cliMain(@["-v"], interactive = false) == 0
+
 block cliRejectsBadInput:
   let box = sandbox("cli-bad")
   doAssert cliMain(@["init", "x", "--template:nope", "--dir=" & box],
