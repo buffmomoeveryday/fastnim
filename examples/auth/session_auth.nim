@@ -28,12 +28,10 @@ app.install(
     initAuthOptions(
       schemes = {AuthScheme.Session},
       sessionStore = store,
-      excludePaths = @["/health", "/login","/docs","/openapi.json"],
+      excludePaths = @["/health", "/login", "/docs", "/openapi.json"],
     )
   )
 )
-
-
 
 type
   LoginBody = object
@@ -41,37 +39,38 @@ type
     password: string
 
   ValueKind = enum
-    vkBool,
+    vkBool
     vkString
 
   Message = object
     status: string
-    case value:ValueKind
+    case value: ValueKind
     of vkBool:
       boolVal: bool
     of vkString:
-      strVal:string
-
+      strVal: string
 
 app.get("/health"):
-  return ok text("ok")
+  return text("ok")
 
-app.post("/login",body=LoginBody,responses= @[(200,Message),(401,Message)]):
-  if not secureCompare(
-    DemoUsers.getOrDefault(body.username, ""), body.password
-  ):
-    return unauthorized Message(status:"detail",value:vkString,strVal:"Invalid credential")
+app.post("/login", body = LoginBody, responses = @[(200, Message), (401, Message)]):
+  if not secureCompare(DemoUsers.getOrDefault(body.username, ""), body.password):
+    return unauthorized Message(
+      status: "detail", value: vkString, strVal: "Invalid credential"
+    )
 
-  var response = ok Message(status:"ok",value:vkBool, boolVal:true)
+  var response = ok Message(status: "ok", value: vkBool, boolVal: true)
   var cookie = await loginSession(store, response, body.username)
   echo $cookie
   return response
 
 app.get("/me"):
-  return ok json(%*{"user": request.authSubject(), "scheme": request.authScheme()})
+  return json(
+    %*{"user": request.authSubject().toJson(), "scheme": request.authScheme().toJson()}
+  )
 
-app.post("/logout",responses = @[(200,Message)]):
-  var response = ok Message(status:"ok",value:vkBool, boolVal:true)
+app.post("/logout", responses = @[(200, Message)]):
+  var response = ok Message(status: "ok", value: vkBool, boolVal: true)
   await logoutSession(store, request, response)
   return response
 
