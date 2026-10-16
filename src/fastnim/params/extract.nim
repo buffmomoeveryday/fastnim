@@ -13,6 +13,7 @@ import std/[json, macros, options, strutils, tables]
 
 import ../context/http
 import ../jsonfields
+import ../params/path
 import ../params/validationtypes
 import ../private/jsonconversion
 import ../private/jsonmetadata
@@ -33,6 +34,29 @@ proc pathParam*(
 ): string {.inline, raises: [].} =
   ## Returns a matched path parameter, or ``default`` when it is absent.
   request.pathParams.getOrDefault(name, default)
+
+proc typedPathParam*[T](request: Request, name: string): T =
+  ## Returns a path parameter converted to the requested route type.
+  ##
+  ## Route blocks declare this conversion with ``{name:type}`` and receive a
+  ## local named ``name``. Supported result types are ``string``, ``int``,
+  ## ``Positive``, ``bool``, and ``seq[string]`` (the ``csv`` converter).
+  ## Callback handlers can call this procedure explicitly; conversion failure
+  ## raises ``ValueError``. Typed route matching validates the value first.
+  let raw = request.pathParam(name)
+  when T is string:
+    result = raw
+  elif T is Positive:
+    result = Positive(parseInt(raw))
+  elif T is int:
+    result = parseInt(raw)
+  elif T is bool:
+    if not parsePathBool(raw, result):
+      raise newException(ValueError, "invalid boolean path parameter: " & name)
+  elif T is seq[string]:
+    result = raw.split(',')
+  else:
+    {.error: "typed path parameters support string, int, Positive, bool, and seq[string]".}
 
 proc queryParam*(
     request: Request, name: string, default = ""

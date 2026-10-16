@@ -135,7 +135,8 @@ type
     ## ``method`` holds the request method.
     `method`*: HttpMethod ## Request method.
     path*: string ## Request path without the query string.
-    pathParams*: Table[string, string] ## ``{name}`` segments matched by the route.
+    pathParams*: Table[string, string]
+      ## Raw values from ``{name}`` and typed ``{name:type}`` route segments.
     queryParams*: Table[string, string]
       ## Decoded query parameters using the last value for repeated names.
     headers*: Headers ## Request headers with lowercase names.
