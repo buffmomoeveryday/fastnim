@@ -60,6 +60,8 @@ proc post*(
     headers: Headers = initTable[string, string](),
 ): Response =
   ## Sends an in-process POST request with an optional raw ``body``.
+  ##
+  ## Build readable JSON request bodies with ``$ %*{"name": "Ada"}``.
   client.request(HttpMethod.Post, target, headers, body)
 
 proc put*(

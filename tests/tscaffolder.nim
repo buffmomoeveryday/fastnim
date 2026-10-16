@@ -437,6 +437,7 @@ block scaffoldInertiaAuthHandlesFailedLogins:
     box / "reactapp" / "client" / "src" / "pages" / "Login.tsx"
   )
   doAssert "errors" in reactLogin
+  doAssert "Invalid credentials" notin reactLogin
 
 block authFlagIsOptIn:
   let box = sandbox("auth-opt-in")

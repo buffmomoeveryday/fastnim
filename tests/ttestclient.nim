@@ -35,7 +35,7 @@ suite "TestClient":
     check response.json()["page"].getStr() == "3"
 
   test "posts a JSON body":
-    let response = testApp().post("/items", """{"id":7,"name":"Widget"}""")
+    let response = testApp().post("/items", $ %*{"id": 7, "name": "Widget"})
     check response.status == 201
     check response.json()["name"].getStr() == "Widget"
 

@@ -178,7 +178,7 @@ suite "users":
 
   test "creates a user":
     let response = client.post(
-      "/users/", "{\"name\":\"Grace\",\"email\":\"g@example.com\"}"
+      "/users/", $ %*{"name": "Grace", "email": "g@example.com"}
     )
     check response.status == 201
     check response.json() ==

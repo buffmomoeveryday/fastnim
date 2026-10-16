@@ -386,7 +386,10 @@ proc staticString(node: NimNode, value: var string): bool {.compileTime.} =
       return true
   false
 
-proc withTypedPathBindings(path, request, body: NimNode): NimNode {.compileTime.} =
+proc withTypedPathBindings(
+    path, request, body: NimNode,
+    additionalBoundNames: openArray[string] = [],
+): NimNode {.compileTime.} =
   result = newStmtList()
   var routePath: string
   if not path.staticString(routePath):
@@ -397,6 +400,20 @@ proc withTypedPathBindings(path, request, body: NimNode): NimNode {.compileTime.
       if ':' in segment:
         var spec: PathParamSpec
         if segment.parsePathParamSegment(spec):
+          for boundName in ["request", "ctx"]:
+            if eqIdent(ident(spec.name), boundName):
+              error(
+                "typed path parameter '" & spec.name &
+                  "' conflicts with framework-bound identifier '" & boundName & "'",
+                path,
+              )
+          for boundName in additionalBoundNames:
+            if eqIdent(ident(spec.name), boundName):
+              error(
+                "typed path parameter '" & spec.name &
+                  "' conflicts with framework-bound identifier '" & boundName & "'",
+                path,
+              )
           let valueType =
             case spec.kind
             of PathParamKind.String:
@@ -851,7 +868,7 @@ macro sse*(app: Application | Router, path: typed, body: untyped): untyped =
       result.add(bindSend(child))
 
   let boundBody = withTypedPathBindings(
-    path, request, bindSend(bindRouteIdentifiers(body, app, request))
+    path, request, bindSend(bindRouteIdentifiers(body, app, request)), ["send"]
   )
   result = quote:
     addSseRoute(
@@ -881,7 +898,10 @@ macro websocket*(app: Application | Router, path: typed, body: untyped): untyped
       result.add(bindWebSocket(child))
 
   let boundBody = withTypedPathBindings(
-    path, request, bindWebSocket(bindRouteIdentifiers(body, app, request))
+    path,
+    request,
+    bindWebSocket(bindRouteIdentifiers(body, app, request)),
+    ["websocket"],
   )
   result = quote:
     addWebSocketRoute(
@@ -1277,6 +1297,11 @@ proc buildTypedRoute(
     else:
       genSym(nskVar, "query")
   let checkedBody = checkedResponses(returnFinalTuple(body))
+  var additionalBoundNames: seq[string]
+  if parsedBody.kind != nnkEmpty:
+    additionalBoundNames.add(inputName)
+  if parsedQuery.kind != nnkEmpty:
+    additionalBoundNames.add(queryInputName)
   let boundBody = withTypedPathBindings(
     path,
     request,
@@ -1289,6 +1314,7 @@ proc buildTypedRoute(
       parsedQuery,
       queryInputName,
     ),
+    additionalBoundNames,
   )
   let contentType =
     if inputName == "form": "application/x-www-form-urlencoded" else: "application/json"
