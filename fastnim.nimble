@@ -1,6 +1,6 @@
 # Package
 
-version = "0.1.2"
+version = "0.1.3"
 author = "Siddhartha Khanal"
 description = "A small FastNim API-inspired web framework for Chronos"
 license = "MIT"
@@ -28,6 +28,7 @@ task docs, "Generate HTML API documentation with nim doc":
     "src/fastnim/context/state.nim",
     "src/fastnim/jsonfields.nim",
     "src/fastnim/params/extract.nim",
+    "src/fastnim/params/path.nim",
     "src/fastnim/params/validationtypes.nim",
     "src/fastnim/params/validate.nim",
     "src/fastnim/params/multipart.nim",

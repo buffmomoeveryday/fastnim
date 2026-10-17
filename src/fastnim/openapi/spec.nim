@@ -2,6 +2,7 @@
 
 import std/[json, macros, strutils]
 
+import ../params/path
 import ../private/jsonmetadata
 
 type
@@ -462,13 +463,26 @@ proc addPathParameters(operation: var JsonNode) =
     else:
       newJArray()
   for segment in operation["x-fastnim-path"].getStr.split('/'):
-    if segment.len > 2 and segment[0] == '{' and segment[^1] == '}':
+    var spec: PathParamSpec
+    if segment.parsePathParamSegment(spec):
+      let schema =
+        case spec.kind
+        of PathParamKind.Int:
+          %*{"type": "integer"}
+        of PathParamKind.PositiveInt:
+          %*{"type": "integer", "minimum": 1}
+        of PathParamKind.Bool:
+          %*{"type": "boolean"}
+        of PathParamKind.Csv:
+          %*{"type": "array", "items": {"type": "string"}}
+        of PathParamKind.String:
+          %*{"type": "string"}
       parameters.add(
         %*{
-          "name": segment[1 .. ^2],
+          "name": spec.name,
           "in": "path",
           "required": true,
-          "schema": {"type": "string"},
+          "schema": schema,
         }
       )
   if parameters.len > 0:
@@ -487,6 +501,7 @@ proc openApiDocument*(
   if settings.description.len > 0:
     result["info"]["description"] = newJString(settings.description)
   for registered in operations:
+    let documentPath = registered.path.normalizedPath()
     var operation = newJObject()
     operation["x-fastnim-path"] = newJString(registered.path)
     if registered.route.summary.len > 0:
@@ -511,9 +526,9 @@ proc openApiDocument*(
       else:
         %*{"200": {"description": "Successful Response"}}
     operation.addPathParameters()
-    if registered.path notin result["paths"]:
-      result["paths"][registered.path] = newJObject()
-    result["paths"][registered.path][registered.`method`] = operation
+    if documentPath notin result["paths"]:
+      result["paths"][documentPath] = newJObject()
+    result["paths"][documentPath][registered.`method`] = operation
 
 proc swaggerUiHtml*(schemaPath: string, title = "FastNim API docs"): string =
   ## Returns a small Swagger UI page backed by the public Swagger CDN.

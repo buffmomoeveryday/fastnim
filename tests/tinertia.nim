@@ -114,3 +114,29 @@ block validatesPublicInputs:
     discard inertia("Users/Index", %*[1, 2])
   doAssertRaises ValueError:
     discard initInertiaOptions(sharedProps = %*[1, 2])
+
+block detectsInertiaRequests:
+  doAssert initRequest(HttpMethod.Post, "/login", inertiaHeaders()).isInertiaRequest()
+  doAssert not initRequest(HttpMethod.Post, "/login").isInertiaRequest()
+
+block failedFormSubmissionReturnsInertiaPage:
+  # Regression test: answering an Inertia form POST (e.g. a failed login)
+  # with plain JSON makes the client show its "must receive a valid Inertia
+  # response" error modal. Failures must re-render the form page with errors.
+  let app = initFastNim(logs = false)
+  app.installPlugin(inertiaPlugin())
+  app.post("/login"):
+    if request.isInertiaRequest():
+      return inertia("Login", %*{"errors": {"username": "Invalid credentials"}})
+    return json(statusUnauthorized, %*{"message": "invalid credentials"})
+  let inertiaRes = app.handleSync(
+    initRequest(HttpMethod.Post, "/login", inertiaHeaders(), body = "{}")
+  )
+  doAssert inertiaRes.headers.getOrDefault("x-inertia") == "true"
+  let page = parseJson(inertiaRes.body)
+  doAssert page["component"].getStr() == "Login"
+  doAssert page["props"]["errors"]["username"].getStr() == "Invalid credentials"
+  let apiRes = app.handleSync(initRequest(HttpMethod.Post, "/login", body = "{}"))
+  doAssert "x-inertia" notin apiRes.headers
+  doAssert apiRes.status == 401
+  doAssert parseJson(apiRes.body)["message"].getStr() == "invalid credentials"

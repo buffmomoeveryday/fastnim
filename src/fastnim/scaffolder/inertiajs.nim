@@ -326,10 +326,16 @@ authRouter.get("/login"):
   inertia("Login")
 
 authRouter.post("/login"):
+  # Inertia form submissions must receive an Inertia page, a redirect, or an
+  # Inertia location: re-render Login with errors instead of plain JSON.
   var input: LoginInput
   if not parseJsonBody(request, input):
+    if request.isInertiaRequest():
+      return inertia("Login", %*{"errors": {"form": "Invalid login request"}})
     return json(statusBadRequest, %*{"message": "invalid login request"})
   if not credentialsValid(input):
+    if request.isInertiaRequest():
+      return inertia("Login", %*{"errors": {"username": "Invalid credentials"}})
     return json(statusUnauthorized, %*{"message": "invalid credentials"})
   var response = inertiaLocation("/")
   discard await loginSession(sessionStore, response, input.username)
@@ -715,13 +721,22 @@ proc loginPage(choices: InertiaChoices): tuple[path, content: string] =
       path: "src/pages/Login.tsx",
       content: """import { Form } from "@inertiajs/react";
 
-export default function Login() {
+type LoginErrors = {
+  form?: string;
+  username?: string;
+  password?: string;
+};
+
+export default function Login({ errors = {} }: { errors?: LoginErrors }) {
   return (
     <main className="mx-auto max-w-md p-6">
       <h1>Sign in</h1>
+      {errors.form && <p role="alert">{errors.form}</p>}
       <Form action="/login" method="post">
         <label>Username <input name="username" defaultValue="ada" /></label>
+        {errors.username && <p role="alert">{errors.username}</p>}
         <label>Password <input name="password" type="password" /></label>
+        {errors.password && <p role="alert">{errors.password}</p>}
         <button type="submit">Sign in</button>
       </Form>
     </main>
@@ -734,13 +749,30 @@ export default function Login() {
       path: "src/pages/Login.svelte",
       content: """<script lang="ts">
   import { Form } from "@inertiajs/svelte";
+
+  type LoginErrors = {
+    form?: string;
+    username?: string;
+    password?: string;
+  };
+
+  let { errors = {} }: { errors?: LoginErrors } = $props();
 </script>
 
 <main class="mx-auto max-w-md p-6">
   <h1>Sign in</h1>
+  {#if errors.form}
+    <p role="alert">{errors.form}</p>
+  {/if}
   <Form action="/login" method="post">
     <label>Username <input name="username" value="ada" /></label>
+    {#if errors.username}
+      <p role="alert">{errors.username}</p>
+    {/if}
     <label>Password <input name="password" type="password" /></label>
+    {#if errors.password}
+      <p role="alert">{errors.password}</p>
+    {/if}
     <button type="submit">Sign in</button>
   </Form>
 </main>

@@ -13,6 +13,7 @@ import ../logging
 import ../openapi/spec
 import ../params/extract
 import ../params/multipart
+import ../params/path
 import ../params/validate
 import ../websocket
 
@@ -82,7 +83,7 @@ type
     ## A registered endpoint and its path template.
     ## ``method`` holds the HTTP method the route answers.
     `method`*: HttpMethod ## HTTP method the route answers.
-    path*: string ## Path template with ``{name}`` segments.
+    path*: string ## Path template with ``{name}`` or ``{name:type}`` segments.
     handler*: RouteHandler ## Handler for regular HTTP routes.
     sseHandler*: SseRouteHandler ## Handler for Server-Sent Events routes.
     websocketHandler*: WebSocketHandler ## Handler for WebSocket routes.
@@ -373,6 +374,71 @@ proc bindRouteIdentifiers(
       )
     )
 
+proc staticString(node: NimNode, value: var string): bool {.compileTime.} =
+  if node.kind in {nnkStrLit, nnkRStrLit, nnkTripleStrLit}:
+    value = node.strVal
+    return true
+  if node.kind == nnkSym:
+    let implementation = node.getImpl()
+    if implementation.kind == nnkConstDef and
+        implementation[^1].kind in {nnkStrLit, nnkRStrLit, nnkTripleStrLit}:
+      value = implementation[^1].strVal
+      return true
+  false
+
+proc withTypedPathBindings(
+    path, request, body: NimNode,
+    additionalBoundNames: openArray[string] = [],
+): NimNode {.compileTime.} =
+  result = newStmtList()
+  var routePath: string
+  if not path.staticString(routePath):
+    result.add(body)
+    return
+  try:
+    for segment in routePath.split('/'):
+      if ':' in segment:
+        var spec: PathParamSpec
+        if segment.parsePathParamSegment(spec):
+          for boundName in ["request", "ctx"]:
+            if eqIdent(ident(spec.name), boundName):
+              error(
+                "typed path parameter '" & spec.name &
+                  "' conflicts with framework-bound identifier '" & boundName & "'",
+                path,
+              )
+          for boundName in additionalBoundNames:
+            if eqIdent(ident(spec.name), boundName):
+              error(
+                "typed path parameter '" & spec.name &
+                  "' conflicts with framework-bound identifier '" & boundName & "'",
+                path,
+              )
+          let valueType =
+            case spec.kind
+            of PathParamKind.String:
+              ident("string")
+            of PathParamKind.Int:
+              ident("int")
+            of PathParamKind.PositiveInt:
+              ident("Positive")
+            of PathParamKind.Bool:
+              ident("bool")
+            of PathParamKind.Csv:
+              newTree(nnkBracketExpr, ident("seq"), ident("string"))
+          let extractor =
+            newTree(nnkBracketExpr, bindSym("typedPathParam"), valueType)
+          let value = newCall(extractor, request, newLit(spec.name))
+          result.add(
+            newTree(
+              nnkLetSection,
+              newIdentDefs(ident(spec.name), newEmptyNode(), value),
+            )
+          )
+  except ValueError as exc:
+    error(exc.msg, path)
+  result.add(body)
+
 proc replaceDependency(
     node: NimNode, name: string, replacement: NimNode
 ): NimNode {.compileTime.} =
@@ -652,6 +718,22 @@ proc installPlugin*(app: Application, plugin: Plugin) =
   plugin.install(app)
   app.plugins.add(PluginInfo(name: plugin.name, version: plugin.version))
 
+proc validateRoutePath(path: string) =
+  if path.len == 0 or path[0] != '/':
+    raise newException(ValueError, "route paths must start with '/'")
+  var names: seq[string] = @[]
+  for segment in path.split('/'):
+    var spec: PathParamSpec
+    let isParam = segment.parsePathParamSegment(spec)
+    if not isParam and ('{' in segment or '}' in segment):
+      raise newException(
+        ValueError, "path parameters must occupy a complete {name} or {name:type} segment"
+      )
+    if isParam:
+      if spec.name in names:
+        raise newException(ValueError, "duplicate path parameter: " & spec.name)
+      names.add(spec.name)
+
 proc addRoute*(
     app: Application,
     `method`: HttpMethod,
@@ -659,9 +741,8 @@ proc addRoute*(
     handler: RouteHandler,
     openApi = OpenApiOperation(),
 ) =
-  ## Registers a route. Path parameters use ``{name}`` segments.
-  if path.len == 0 or path[0] != '/':
-    raise newException(ValueError, "route paths must start with '/'")
+  ## Registers a route. Path parameters use ``{name}`` or ``{name:type}`` segments.
+  validateRoutePath(path)
   var documentation = openApi
   if documentation.path.len == 0:
     documentation = initOpenApiOperation($`method`, path)
@@ -692,8 +773,7 @@ proc addRoute*(
     openApi = OpenApiOperation(),
 ) =
   ## Registers a route on a router. Mount with ``app.addRouter`` to serve it.
-  if path.len == 0 or path[0] != '/':
-    raise newException(ValueError, "route paths must start with '/'")
+  validateRoutePath(path)
   var documentation = openApi
   if documentation.path.len == 0:
     documentation = initOpenApiOperation($`method`, path)
@@ -718,8 +798,7 @@ proc addRoute*(
 
 proc addSseRoute*(app: Application, path: string, handler: SseRouteHandler) =
   ## Registers a GET Server-Sent Events endpoint.
-  if path.len == 0 or path[0] != '/':
-    raise newException(ValueError, "route paths must start with '/'")
+  validateRoutePath(path)
   app.routes.add(
     Route(
       `method`: HttpMethod.Get, path: path, sseHandler: handler, kind: RouteKind.Sse
@@ -728,8 +807,7 @@ proc addSseRoute*(app: Application, path: string, handler: SseRouteHandler) =
 
 proc addSseRoute*(router: Router, path: string, handler: SseRouteHandler) =
   ## Registers a GET Server-Sent Events endpoint on a router.
-  if path.len == 0 or path[0] != '/':
-    raise newException(ValueError, "route paths must start with '/'")
+  validateRoutePath(path)
   router.routes.add(
     Route(
       `method`: HttpMethod.Get, path: path, sseHandler: handler, kind: RouteKind.Sse
@@ -740,8 +818,7 @@ proc addWebSocketRoute*(
     app: Application, path: string, handler: WebSocketHandler
 ) {.raises: [ValueError].} =
   ## Registers a GET endpoint that upgrades to a WebSocket connection.
-  if path.len == 0 or path[0] != '/':
-    raise newException(ValueError, "route paths must start with '/'")
+  validateRoutePath(path)
   app.routes.add(
     Route(
       `method`: HttpMethod.Get,
@@ -755,8 +832,7 @@ proc addWebSocketRoute*(
     router: Router, path: string, handler: WebSocketHandler
 ) {.raises: [ValueError].} =
   ## Registers a WebSocket upgrade endpoint on a router.
-  if path.len == 0 or path[0] != '/':
-    raise newException(ValueError, "route paths must start with '/'")
+  validateRoutePath(path)
   router.routes.add(
     Route(
       `method`: HttpMethod.Get,
@@ -791,7 +867,9 @@ macro sse*(app: Application | Router, path: typed, body: untyped): untyped =
     for child in node:
       result.add(bindSend(child))
 
-  let boundBody = bindSend(bindRouteIdentifiers(body, app, request))
+  let boundBody = withTypedPathBindings(
+    path, request, bindSend(bindRouteIdentifiers(body, app, request)), ["send"]
+  )
   result = quote:
     addSseRoute(
       `app`,
@@ -819,7 +897,12 @@ macro websocket*(app: Application | Router, path: typed, body: untyped): untyped
     for child in node:
       result.add(bindWebSocket(child))
 
-  let boundBody = bindWebSocket(bindRouteIdentifiers(body, app, request))
+  let boundBody = withTypedPathBindings(
+    path,
+    request,
+    bindWebSocket(bindRouteIdentifiers(body, app, request)),
+    ["websocket"],
+  )
   result = quote:
     addWebSocketRoute(
       `app`,
@@ -975,7 +1058,9 @@ macro get*(app: Application | Router, path: typed, body: untyped): untyped =
       addRoute(`app`, HttpMethod.Get, `path`, `body`)
 
   let request = genSym(nskParam, "request")
-  let boundBody = bindRouteIdentifiers(prepareRouteBody(body), app, request)
+  let boundBody = withTypedPathBindings(
+    path, request, bindRouteIdentifiers(prepareRouteBody(body), app, request)
+  )
   result = quote:
     addRoute(
       `app`,
@@ -993,7 +1078,9 @@ macro query*(app: Application | Router, path: typed, body: untyped): untyped =
       addRoute(`app`, HttpMethod.Query, `path`, `body`)
 
   let request = genSym(nskParam, "request")
-  let boundBody = bindRouteIdentifiers(prepareRouteBody(body), app, request)
+  let boundBody = withTypedPathBindings(
+    path, request, bindRouteIdentifiers(prepareRouteBody(body), app, request)
+  )
   result = quote:
     addRoute(
       `app`,
@@ -1210,14 +1297,24 @@ proc buildTypedRoute(
     else:
       genSym(nskVar, "query")
   let checkedBody = checkedResponses(returnFinalTuple(body))
-  let boundBody = bindRouteIdentifiers(
-    prepareRouteBody(checkedBody),
-    app,
+  var additionalBoundNames: seq[string]
+  if parsedBody.kind != nnkEmpty:
+    additionalBoundNames.add(inputName)
+  if parsedQuery.kind != nnkEmpty:
+    additionalBoundNames.add(queryInputName)
+  let boundBody = withTypedPathBindings(
+    path,
     request,
-    parsedBody,
-    inputName,
-    parsedQuery,
-    queryInputName,
+    bindRouteIdentifiers(
+      prepareRouteBody(checkedBody),
+      app,
+      request,
+      parsedBody,
+      inputName,
+      parsedQuery,
+      queryInputName,
+    ),
+    additionalBoundNames,
   )
   let contentType =
     if inputName == "form": "application/x-www-form-urlencoded" else: "application/json"
@@ -1433,7 +1530,9 @@ macro post*(app: Application | Router, path: typed, body: untyped): untyped =
       addRoute(`app`, HttpMethod.Post, `path`, `body`)
 
   let request = genSym(nskParam, "request")
-  let boundBody = bindRouteIdentifiers(prepareRouteBody(body), app, request)
+  let boundBody = withTypedPathBindings(
+    path, request, bindRouteIdentifiers(prepareRouteBody(body), app, request)
+  )
   result = quote:
     addRoute(
       `app`,
@@ -1544,7 +1643,9 @@ proc buildBlockRoute(app, path, body, `method`: NimNode): NimNode {.compileTime.
       addRoute(`app`, `method`, `path`, `body`)
 
   let request = genSym(nskParam, "request")
-  let boundBody = bindRouteIdentifiers(prepareRouteBody(body), app, request)
+  let boundBody = withTypedPathBindings(
+    path, request, bindRouteIdentifiers(prepareRouteBody(body), app, request)
+  )
   result = quote:
     addRoute(
       `app`,
@@ -1784,10 +1885,9 @@ proc splitPath(path: string): seq[string] =
     if segment.len > 0:
       result.add(segment)
 
-proc isParameter(segment: string): bool =
-  segment.len > 2 and segment[0] == '{' and segment[^1] == '}'
-
-proc match(route: Route, request: Request, params: var Table[string, string]): bool =
+proc match(
+    route: Route, request: Request, params: var Table[string, string]
+): bool {.raises: [].} =
   if route.method != request.method:
     return false
 
@@ -1796,15 +1896,18 @@ proc match(route: Route, request: Request, params: var Table[string, string]): b
   if routeParts.len != requestParts.len:
     return false
 
-  for index, routePart in routeParts:
-    if isParameter(routePart):
-      let name = routePart[1 ..^ 2]
-      if name.len == 0:
+  try:
+    for index, routePart in routeParts:
+      var spec: PathParamSpec
+      if routePart.parsePathParamSegment(spec):
+        if not spec.kind.matchesPathParam(requestParts[index]):
+          return false
+        params[spec.name] = requestParts[index]
+      elif routePart != requestParts[index]:
         return false
-      params[name] = requestParts[index]
-    elif routePart != requestParts[index]:
-      return false
-  true
+    true
+  except ValueError:
+    false
 
 proc invokeHandler(
     app: Application, handler: RouteHandler, request: Request

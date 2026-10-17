@@ -412,6 +412,33 @@ block cliScaffoldsAuthForEveryTemplate:
   )
   doAssert jsCode == 0, readFile(jsLog)
 
+block scaffoldInertiaAuthHandlesFailedLogins:
+  # Failed Inertia logins must re-render the Login page with errors; plain
+  # JSON responses trigger the client's "must receive a valid Inertia
+  # response" error modal.
+  let box = sandbox("inertia-auth")
+  for (name, frontend) in [("svelteapp", feSvelte), ("reactapp", feReact)]:
+    let root = box / name
+    scaffoldInertiajs(
+      root, name,
+      InertiaChoices(frontend: frontend, pkgManager: "pnpm", css: cssTailwind),
+      auth = true,
+    )
+    let routes = readFile(root / "src" / "routes" / "auth.nim")
+    doAssert "isInertiaRequest" in routes
+    doAssert "inertia(\"Login\", %*{\"errors\"" in routes
+    doAssert "json(statusUnauthorized" in routes
+  let svelteLogin = readFile(
+    box / "svelteapp" / "client" / "src" / "pages" / "Login.svelte"
+  )
+  doAssert "errors" in svelteLogin
+  doAssert "Invalid credentials" notin svelteLogin
+  let reactLogin = readFile(
+    box / "reactapp" / "client" / "src" / "pages" / "Login.tsx"
+  )
+  doAssert "errors" in reactLogin
+  doAssert "Invalid credentials" notin reactLogin
+
 block authFlagIsOptIn:
   let box = sandbox("auth-opt-in")
   doAssert cliMain(@["init", "plain", "--dir=" & box], interactive = false) == 0

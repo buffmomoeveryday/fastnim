@@ -74,6 +74,15 @@ proc inertia*(component: string, props = newJObject(), status = 200): Response =
   result.setHeader("content-type", "application/json; charset=utf-8")
   result.setHeader("x-fastnim-inertia-page", "true")
 
+proc isInertiaRequest*(request: Request): bool =
+  ## Returns true when ``request`` was made by an Inertia client.
+  ##
+  ## Such requests must receive a valid Inertia response — a page created
+  ## with ``inertia``, a redirect, or ``inertiaLocation``. Answering them
+  ## with plain JSON makes the client show its "must receive a valid Inertia
+  ## response" error modal instead.
+  request.header(InertiaHeader).toLowerAscii() == "true"
+
 proc inertiaLocation*(url: string): Response =
   ## Creates a response that makes the Inertia client perform a full-page visit.
   if url.len == 0:
@@ -104,7 +113,7 @@ proc addVary(response: var Response, name: string) =
 proc requestedProps(request: Request, component: string, props: JsonNode): JsonNode =
   result = newJObject()
   let partialComponent = request.header("x-inertia-partial-component")
-  if request.header(InertiaHeader).toLowerAscii() != "true" or
+  if not request.isInertiaRequest() or
       partialComponent != component:
     return props.copy()
 
@@ -150,7 +159,7 @@ proc inertiaMiddleware(options: InertiaOptions): Middleware =
   result = proc(
       request: Request, next: NextHandler
   ): Future[Response] {.async: (raises: [CatchableError]).} =
-    let isInertia = request.header(InertiaHeader).toLowerAscii() == "true"
+    let isInertia = request.isInertiaRequest()
     let clientVersion = request.header(InertiaVersionHeader)
     if isInertia and request.method == HttpMethod.Get and clientVersion.len > 0 and
         clientVersion != options.version:
