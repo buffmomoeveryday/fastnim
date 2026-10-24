@@ -1015,6 +1015,25 @@ style. See [`tests/ttestclient.nim`](tests/ttestclient.nim) for per-verb
 examples, including headers and query strings.
 
 
+## Agent skill
+
+FastNim ships a portable [Agent Skill](https://github.com/agentskills/agentskills)
+that teaches coding agents the framework's rules: Chronos-only async, route
+macros, path/query/body extraction and validation, middleware and dependency
+injection, OpenAPI metadata, plugins, streaming, and testing.
+
+Install it into a project with the `/fastnim-install` command (Kilo) or
+directly:
+
+```sh
+bash .kilo/skills/fastnim/scripts/install.sh /path/to/project
+```
+
+The installer copies the skill to `.agents/skills/fastnim/` and creates an
+`AGENTS.md` in the project root that points at it. A project that already has a
+`.agents` folder is left untouched.
+
+
 ## API documentation
 
 Every exported symbol is documented with `##` doc comments. Render the full

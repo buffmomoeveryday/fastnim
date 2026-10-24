@@ -46,7 +46,11 @@ fastnim/
 │       └── scaffolder/     # Project scaffolding templates
 ├── tests/                  # Test suite (`t*.nim`, discovered automatically by Nimble)
 │   └── config.nims         # Test runner compiler configurations
-└── examples/               # Standalone runnable user applications (e.g., `basic.nim`)
+├── examples/               # Standalone runnable user applications (e.g., `basic.nim`)
+└── .kilo/
+    ├── command/            # Slash commands (`/fastnim-install`)
+    └── skills/fastnim/     # FastNim agent skill (`SKILL.md`, `references/`) and its installer
+        └── scripts/install.sh # Copies the skill into a project's `.agents` folder
 
 ```
 
@@ -60,6 +64,21 @@ fastnim/
 * `nimble test`: Executes the entire test suite against the minimum supported Nim version (2.2.12+).
 * `nim c -r tests/test_router.nim`: Compiles and runs a single test file immediately for fast feedback loops during macro or engine development.
 * `nim c -r examples/quickstart.nim`: Spins up an example FastNim HTTP server for manual testing and endpoint verification.
+
+---
+
+## Agent Skill & Install Command
+
+The repository ships a portable agent skill for agents that write FastNim code.
+
+* **Skill source**: `.kilo/skills/fastnim/` holds `SKILL.md` plus `references/` (routing, middleware, testing, plugins, streaming) and `scripts/install.sh`.
+* **Slash command**: `/fastnim-install` (`.kilo/command/fastnim-install.md`) installs the skill into the current project.
+* **Install behavior**: the skill is copied to `.agents/skills/fastnim/` and an `AGENTS.md` is created (or extended with a pointer to the skill) in the project root. When the project already has a `.agents` folder, the installer changes nothing and exits successfully.
+* **Test**: `tests/tskillinstall.nim` covers the fresh-project, existing-`.agents`, existing-`AGENTS.md`, and repeat-run cases.
+
+```bash
+bash .kilo/skills/fastnim/scripts/install.sh /path/to/project
+```
 
 ---
 

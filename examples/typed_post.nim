@@ -76,10 +76,11 @@ app.post(
   if body.name.len == 0:
     badRequest ApiError(detail: "name is required")
   else:
+    var user = User(id: users.len + 1, name: body.name, email: body.email)
     {.gcsafe.}:
-      var user = User(id: users.len + 1, name: body.name, email: body.email)
       users.add user
     created user
+
 
 let clients = newWebSocketGroup()
 app.websocket("/chat"):
