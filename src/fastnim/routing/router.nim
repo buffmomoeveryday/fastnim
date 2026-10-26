@@ -1281,6 +1281,27 @@ proc normalizeResponses(responses: NimNode): NimNode {.compileTime.} =
     items.add(newTree(nnkTupleConstr, newLit(status), model))
   newTree(nnkPrefix, ident("@"), items)
 
+var ormInputCount {.compileTime.} = 0
+
+proc modelIgnoreBody(node: NimNode): tuple[
+  model: NimNode, inputType: NimNode, declaration: NimNode
+] {.compileTime.} =
+  ## Recognizes ``Author.ignore(id)`` and declares the plain input object.
+  if node.kind notin {nnkCall, nnkCommand} or node.len < 2 or
+      node[0].kind != nnkDotExpr or node[0].len != 2 or
+      not eqIdent(node[0][1], "ignore"):
+    return (newEmptyNode(), node, newEmptyNode())
+  let model = node[0][0]
+  if model.kind notin {nnkIdent, nnkSym, nnkOpenSymChoice, nnkClosedSymChoice}:
+    error("body model must be a type name, as in `Author.ignore(id)`", node)
+  inc ormInputCount
+  let inputType = ident("FastnimOrmInput" & $ormInputCount)
+  (
+    model,
+    inputType,
+    newCall(ident("typeFrom"), inputType, node),
+  )
+
 proc buildTypedRoute(
     app, path, responses, body, `method`, bodyType: NimNode,
     inputName: string,
@@ -1291,6 +1312,7 @@ proc buildTypedRoute(
     queryType: NimNode = newEmptyNode(),
     queryValidator: NimNode = newEmptyNode(),
     queryInputName = "queryParams",
+    modelType: NimNode = newEmptyNode(),
 ): NimNode =
   let normalizedResponses = normalizeResponses(responses)
   var models = initTable[int, NimNode]()
@@ -1358,6 +1380,11 @@ proc buildTypedRoute(
       newEmptyNode()
     else:
       genSym(nskVar, "body")
+  let boundInput =
+    if modelType.kind == nnkEmpty:
+      parsedBody
+    else:
+      genSym(nskLet, "modelBody")
   let parsedQuery =
     if queryType.kind == nnkEmpty:
       newEmptyNode()
@@ -1376,7 +1403,7 @@ proc buildTypedRoute(
       prepareRouteBody(checkedBody),
       app,
       request,
-      parsedBody,
+      boundInput,
       inputName,
       parsedQuery,
       queryInputName,
@@ -1441,6 +1468,11 @@ proc buildTypedRoute(
       else:
         quote:
           `validation`.mergeErrors(`validator`(`parsedBody`))
+    var adoptModel = newStmtList()
+    if modelType.kind != nnkEmpty:
+      adoptModel.add(
+        newLetStmt(boundInput, newCall(ident("toModel"), parsedBody, modelType))
+      )
     result = quote:
       addRoute(
         `app`,
@@ -1461,6 +1493,7 @@ proc buildTypedRoute(
           `customValidation`
           if not `validation`.isValid():
             return validationResponse(`validation`, source = `source`)
+          `adoptModel`
           {.cast(gcsafe).}:
             `boundBody`,
         `documentation`,
@@ -1701,10 +1734,15 @@ proc buildBodyRoute(
   addOption("operationId", operationId)
   addOption("deprecated", deprecated)
 
+  let ignored = modelIgnoreBody(bodyType)
+  if ignored.declaration.kind != nnkEmpty:
+    bodyType = ignored.inputType
   result = buildTypedRoute(
     app, path, responses, routeBody, `method`, bodyType, inputName, parser,
-    invalidMessage, validator, docs,
+    invalidMessage, validator, docs, modelType = ignored.model,
   )
+  if ignored.declaration.kind != nnkEmpty:
+    result = newStmtList(ignored.declaration, result)
 
 proc buildBlockRoute(app, path, body, `method`: NimNode): NimNode {.compileTime.} =
   if body.kind != nnkStmtList:
@@ -1729,7 +1767,9 @@ macro post*(app: Application | Router, path: typed, args: varargs[untyped]): unt
   ## Registers a typed POST route with inline OpenAPI metadata.
   ##
   ## A ``body = Model`` or ``form = Model`` is decoded and automatically
-  ## validated from its field pragmas before the handler runs. Supply
+  ## validated from its field pragmas before the handler runs.
+  ## ``body = Author.ignore(id)`` decodes the remaining JSON fields and binds
+  ## ``body`` as an ``Author``. Supply
   ## ``validator = validateModelBusinessRules`` to merge cross-field or
   ## domain-specific errors with the declarative constraint errors.
   ##

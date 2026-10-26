@@ -328,8 +328,17 @@ proc dumpJsonInner[T](
     value: T,
     ignoredFields, includedFields: openArray[string],
     root: static[bool],
-) =
-  when T is JsonNode:
+) {.raises: [CatchableError].} =
+  mixin toJsonHook
+  when compiles(toJsonHook(value)):
+    when compiles(value.isNil):
+      if value.isNil:
+        output.add "null"
+      else:
+        output.add $toJsonHook(value)
+    else:
+      output.add $toJsonHook(value)
+  elif T is JsonNode:
     if value.isNil:
       output.add "null"
     else:
@@ -366,7 +375,11 @@ proc dumpJsonInner[T](
         )
         inc written
       output.add '}'
-  elif T is HashSet or T is OrderedSet or T is set:
+  elif T is HashSet:
+    dumpHashSet(output, value)
+  elif T is OrderedSet:
+    dumpOrderedSet(output, value)
+  elif T is set:
     output.add '['
     var written = 0
     for item in value:
@@ -425,25 +438,29 @@ proc dumpJsonInner[T](
     for nimName, field in fieldPairs(value):
       const fieldName = effectiveJsonName(field, nimName)
       const ignoredByDefault = field.hasCustomPragma(jsonRespIgnore)
-      let explicitlyIgnored =
-        when root:
-          ignoredFields.fieldSelected(fieldName)
-        else:
-          false
-      let explicitlyIncluded =
-        when root:
-          includedFields.fieldSelected(fieldName)
-        else:
-          false
-      if not (explicitlyIgnored or (ignoredByDefault and not explicitlyIncluded)):
-        if written > 0:
-          output.add ','
-        jsony.dumpHook(output, fieldName)
-        output.add ':'
-        dumpJsonInner(
-          output, field, NoJsonFieldOverrides, NoJsonFieldOverrides, false
-        )
-        inc written
+      # A nested value cannot bring a jsonRespIgnore field back, so the
+      # serializer for that field is not generated. Model bookkeeping such as
+      # the loaded-column set stays out of response code.
+      when not (ignoredByDefault and not root):
+        let explicitlyIgnored =
+          when root:
+            ignoredFields.fieldSelected(fieldName)
+          else:
+            false
+        let explicitlyIncluded =
+          when root:
+            includedFields.fieldSelected(fieldName)
+          else:
+            false
+        if not (explicitlyIgnored or (ignoredByDefault and not explicitlyIncluded)):
+          if written > 0:
+            output.add ','
+          jsony.dumpHook(output, fieldName)
+          output.add ':'
+          dumpJsonInner(
+            output, field, NoJsonFieldOverrides, NoJsonFieldOverrides, false
+          )
+          inc written
     output.add '}'
   elif T is SomeFloat:
     if value != value or value == Inf or value == -Inf:
@@ -458,9 +475,30 @@ proc dumpJsonInner[T](
   else:
     jsony.dumpHook(output, value)
 
+proc dumpHashSet[A](output: var string, value: HashSet[A]) =
+  ## HashSet's iterator is not visible inside `dumpJsonInner`'s generic branch.
+  output.add '['
+  var written = 0
+  for item in value:
+    if written > 0:
+      output.add ','
+    dumpJsonInner(output, item, NoJsonFieldOverrides, NoJsonFieldOverrides, false)
+    inc written
+  output.add ']'
+
+proc dumpOrderedSet[A](output: var string, value: OrderedSet[A]) =
+  output.add '['
+  var written = 0
+  for item in value:
+    if written > 0:
+      output.add ','
+    dumpJsonInner(output, item, NoJsonFieldOverrides, NoJsonFieldOverrides, false)
+    inc written
+  output.add ']'
+
 proc toJsonValue*[T](
     value: T, ignoredFields, includedFields: openArray[string]
-): JsonNode =
+): JsonNode {.raises: [CatchableError].} =
   ## Encodes a value with root-level response field overrides.
   var encoded = ""
   dumpJsonInner(encoded, value, ignoredFields, includedFields, true)
