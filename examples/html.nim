@@ -1,5 +1,5 @@
 ## Run with: nim c -r --path:src examples/html.nim
-## Serves plain HTML pages with the ``html`` response helper.
+## Serves HTML with both ``html`` helpers: ``html(body)`` and ``html(status, body)``.
 
 import chronos
 import fastnim
@@ -15,15 +15,21 @@ proc layout(title, body: string): string =
 let api = initFastNim()
 
 api.get("/"):
-  html layout("Home", "<h1>Hello from FastNim</h1>")
+  html layout(
+    "Home",
+    """<h1>Hello from FastNim</h1>
+<p>This page is <code>html(body)</code>. <a href="/missing">Missing</a> is <code>html(statusNotFound, body)</code>.</p>""",
+  )
 
 api.get("/users/{name}"):
   let name = request.pathParam("name")
   html layout("User", "<h1>Hello, " & name & "</h1>")
 
-############################# 
-############################# 
+api.get("/missing"):
+  html(statusNotFound, layout("Missing", "<h1>Not found</h1>"))
 
+############################# 
+############################# 
 let userRouter = initRouter()
 
 type User = object
@@ -36,7 +42,6 @@ userRouter.get("/list", responses = @[(200, seq[User])]):
 
 ############################# 
 ############################# 
-
 api.addRouter(prefix = "/user", router = userRouter, tags = @["users"])
 
 let server = api.serve(port = 8090)

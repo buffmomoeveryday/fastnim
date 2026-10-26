@@ -197,16 +197,75 @@ proc toFastnimRequest(
       await reader.closeWait()
     result.request.attachBodySource(newRequestBodySource(read, close))
 
+proc sendCustomStatus(
+    request: chronosHttp.HttpRequestRef, response: fastnimHttp.Response
+): Future[chronosHttp.HttpResponseRef] {.
+    async: (raises: [CancelledError, chronosHttp.HttpWriteError])
+.} =
+  ## Writes a status Chronos has no ``HttpCode`` for, such as HTMX's ``286``.
+  let chronosResponse = request.getResponse()
+  chronosResponse.keepalive = false
+  var raw = $chronosResponse.version & " " & $response.status & " \r\n"
+  var
+    sawDate = false
+    sawType = false
+    sawLength = false
+    sawServer = false
+    sawConnection = false
+  for key, value in response.headers:
+    case key
+    of "date": sawDate = true
+    of "content-type": sawType = true
+    of "content-length": sawLength = true
+    of "server": sawServer = true
+    of "connection": sawConnection = true
+    else: discard
+    raw.add(key)
+    raw.add(": ")
+    raw.add(value)
+    raw.add("\r\n")
+  if not sawDate:
+    raw.add("date: ")
+    raw.add(chronosHttp.httpDate())
+    raw.add("\r\n")
+  if not sawType and response.body.len > 0:
+    raw.add("content-type: text/plain; charset=utf-8\r\n")
+  if not sawLength:
+    raw.add("content-length: ")
+    raw.add($response.body.len)
+    raw.add("\r\n")
+  if not sawServer and chronosResponse.connection.server.serverIdent.len > 0:
+    raw.add("server: ")
+    raw.add(chronosResponse.connection.server.serverIdent)
+    raw.add("\r\n")
+  if not sawConnection:
+    raw.add("connection: close\r\n")
+  raw.add("\r\n")
+  raw.add(response.body)
+  try:
+    await chronosResponse.connection.writer.write(raw)
+  except CancelledError as exc:
+    chronosResponse.state = chronosHttp.HttpResponseState.Cancelled
+    raise exc
+  except AsyncStreamError as exc:
+    chronosResponse.state = chronosHttp.HttpResponseState.Failed
+    chronosHttp.raiseHttpWriteError("Unable to send response body, reason: " & exc.msg)
+  chronosResponse.state = chronosHttp.HttpResponseState.Finished
+  chronosResponse
+
 proc toChronosResponse(
     request: chronosHttp.HttpRequestRef, response: fastnimHttp.Response
 ): Future[chronosHttp.HttpResponseRef] {.
     async: (raises: [CancelledError, chronosHttp.HttpWriteError])
 .} =
+  let known = chronosHttp.toHttpCode(response.status)
+  if known.isNone() and response.status in 100 .. 599:
+    return await sendCustomStatus(request, response)
   var headers = chronosHttp.HttpTable.init()
   for key, value in response.headers:
     headers.add(key, value)
-  result =
-    await request.respond(toChronosStatus(response.status), response.body, headers)
+  let status = if known.isSome(): known.get() else: chronosHttp.Http500
+  result = await request.respond(status, response.body, headers)
 
 proc sendStaticFile(
     app: Application,

@@ -8,5 +8,6 @@ import ./plugins/auth
 import ./plugins/s3
 import ./plugins/mqtt
 import ./plugins/grpc
+import ./plugins/htmx
 
-export inertia, ratelimit, openapi, datastar, auth, s3, mqtt, grpc
+export inertia, ratelimit, openapi, datastar, auth, s3, mqtt, grpc, htmx

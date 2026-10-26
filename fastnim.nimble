@@ -52,6 +52,7 @@ task docs, "Generate HTML API documentation with nim doc":
     "src/fastnim/plugins/openapi.nim",
     "src/fastnim/plugins/mqtt.nim",
     "src/fastnim/plugins/grpc.nim",
+    "src/fastnim/plugins/htmx.nim",
     "src/fastnim/grpc/types.nim",
     "src/fastnim/grpc/protobuf.nim",
     "src/fastnim/grpc/schema.nim",
