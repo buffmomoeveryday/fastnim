@@ -69,6 +69,7 @@ validation and migrations.
 | `URLField(maxLength = 200)` | `string` | `VARCHAR(n)` |
 | `SlugField(maxLength = 50)` | `string` | `VARCHAR(n)` |
 | `ForeignKey(Model, onDelete = Cascade)` | key type of `Model` | key column + `REFERENCES` |
+| `ManyToManyField(Model, relatedName = "")` | relation manager | implicit junction table |
 
 Common options: `primaryKey`, `null` (the Nim type becomes `Option[T]`),
 `unique`, `index`, `column: "name"`, `default: <constant>`, `validator`
@@ -248,6 +249,47 @@ await Book.objects.selectRelated("author").all()
 await Author.objects.prefetchRelated("articles.chapters").all()
 ok await Book.objects.expand(author.publisher).all()
 ```
+
+### Many-to-many relations
+
+`ManyToManyField` creates an implicit junction table and exposes an async
+manager on both sides of the relation. It is virtual: it does not add a column
+to either model.
+
+```nim
+model Author:
+  name:
+    CharField(maxLength: 80)
+
+model Book:
+  title:
+    CharField(maxLength: 200)
+  authors:
+    ManyToManyField(Author, relatedName: "books")
+```
+
+Both objects must be saved before changing the relation:
+
+```nim
+await book.authors.add(ada, grace)       # duplicate pairs are ignored
+let authors = await book.authors.all()
+let books = await ada.books.all()        # reverse manager
+let count = await book.authors.count()
+let hasAda = await book.authors.contains(ada)
+discard await book.authors.remove(ada)   # number of links removed
+discard await book.authors.clear()       # number of links removed
+```
+
+The default junction-table name is `<owner_table>_<field_name>` (for example,
+`book_authors`). Override it with `table: "library_book_authors"`. The table
+contains foreign keys to both models, a unique constraint on the pair, and
+uses `ON DELETE CASCADE`, so deleting either object removes its links. A
+self-relation is directional and receives distinct `from_` and `to_` columns.
+Set `relatedName: ""` to disable the reverse manager. As with foreign keys,
+`{model}` in `relatedName` or `table` is replaced for an inherited relation.
+
+Many-to-many managers currently load through `all()` and are separate from
+the `selectRelated`, `prefetchRelated`, and `expand` path APIs.
 
 ## Connections
 

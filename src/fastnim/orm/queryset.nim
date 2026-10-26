@@ -48,6 +48,14 @@ type
     forUpdate*: bool ## the rows must be read inside a transaction
     columns*: seq[string] ## selected SQL columns; empty means every field
 
+  ManyToManyManager*[Owner, Target] = object
+    ## Bound many-to-many relation returned by a generated model accessor.
+    owner: Owner
+    db: Database
+    table: string
+    ownerColumn: string
+    targetColumn: string
+
   UpdateAssignment* = object
     ## One `SET` clause for `QuerySet.update`. A literal value is `sql = "?"`
     ## plus one parameter; an `F()` expression is parameterized SQL.
@@ -195,6 +203,143 @@ proc initQuerySet*[T](): QuerySet[T] =
   ## Starts from the model's `Meta.ordering` when it declared one.
   mixin modelMeta
   QuerySet[T](limitN: -1, ordering: modelMeta(T).ordering)
+
+proc initManyToManyManager*[Owner, Target](
+    owner: Owner,
+    db: Database,
+    table, ownerColumn, targetColumn: string,
+): ManyToManyManager[Owner, Target] =
+  ## Binds the generated relation metadata to one model instance.
+  ManyToManyManager[Owner, Target](
+    owner: owner,
+    db: db,
+    table: table,
+    ownerColumn: ownerColumn,
+    targetColumn: targetColumn,
+  )
+
+proc requireSaved[T](model: T, role: string) =
+  mixin fastormPkIsSet, modelMeta
+  if model.isNil or not fastormPkIsSet(model):
+    raise newException(
+      QueryError,
+      role & " " & modelMeta(T).name &
+        " must be saved before changing a many-to-many relation",
+    )
+
+proc all*[Owner, Target](
+    relation: ManyToManyManager[Owner, Target]
+): Future[seq[Target]] {.async.} =
+  ## Loads all target models attached to this relation.
+  mixin modelMeta, pkValue
+  requireSaved(relation.owner, "owner")
+  let target = modelMeta(Target)
+  var qs = initQuerySet[Target]()
+  qs.db = relation.db
+  qs.wheres.add Predicate(
+    sql: qcol(target.pkField.column) & " IN (SELECT " &
+      quoteIdent(relation.targetColumn) & " FROM " & quoteIdent(relation.table) &
+      " WHERE " & quoteIdent(relation.ownerColumn) & " = ?)",
+    params: @[toDbValue(pkValue(relation.owner))],
+  )
+  return await qs.all()
+
+proc addMany[Owner, Target](
+    relation: ManyToManyManager[Owner, Target], targets: seq[Target]
+): Future[void] {.async.} =
+  mixin pkValue
+  requireSaved(relation.owner, "owner")
+  if targets.len == 0:
+    return
+  let ownerPk = toDbValue(pkValue(relation.owner))
+  let sql =
+    "INSERT OR IGNORE INTO " & quoteIdent(relation.table) & " (" &
+    quoteIdent(relation.ownerColumn) & ", " & quoteIdent(relation.targetColumn) &
+    ") VALUES (?, ?)"
+  var statements: seq[Statement]
+  for target in targets:
+    requireSaved(target, "target")
+    statements.add Statement(sql: sql, params: @[ownerPk, toDbValue(pkValue(target))])
+  await resolveDb(relation.db).batch(statements)
+
+proc add*[Owner, Target](
+    relation: ManyToManyManager[Owner, Target], targets: varargs[Target]
+): Future[void] =
+  ## Adds targets to the relation. Existing pairs are left unchanged.
+  addMany(relation, @targets)
+
+proc removeMany[Owner, Target](
+    relation: ManyToManyManager[Owner, Target], targets: seq[Target]
+): Future[int] {.async.} =
+  mixin pkValue
+  requireSaved(relation.owner, "owner")
+  if targets.len == 0:
+    return 0
+  var marks: seq[string]
+  var params = @[toDbValue(pkValue(relation.owner))]
+  for target in targets:
+    requireSaved(target, "target")
+    marks.add "?"
+    params.add toDbValue(pkValue(target))
+  let sql =
+    "DELETE FROM " & quoteIdent(relation.table) & " WHERE " &
+    quoteIdent(relation.ownerColumn) & " = ? AND " &
+    quoteIdent(relation.targetColumn) & " IN (" & marks.join(", ") & ")"
+  return int((await resolveDb(relation.db).execute(sql, params)).changes)
+
+proc remove*[Owner, Target](
+    relation: ManyToManyManager[Owner, Target], targets: varargs[Target]
+): Future[int] =
+  ## Removes targets and returns the number of deleted junction rows.
+  removeMany(relation, @targets)
+
+proc clear*[Owner, Target](
+    relation: ManyToManyManager[Owner, Target]
+): Future[int] {.async.} =
+  ## Removes every target from the relation and returns the number removed.
+  mixin pkValue
+  requireSaved(relation.owner, "owner")
+  let sql =
+    "DELETE FROM " & quoteIdent(relation.table) & " WHERE " &
+    quoteIdent(relation.ownerColumn) & " = ?"
+  return int(
+    (await resolveDb(relation.db).execute(
+      sql, @[toDbValue(pkValue(relation.owner))]
+    )).changes
+  )
+
+proc count*[Owner, Target](
+    relation: ManyToManyManager[Owner, Target]
+): Future[int] {.async.} =
+  ## Counts targets attached to this relation.
+  mixin pkValue
+  requireSaved(relation.owner, "owner")
+  let sql =
+    "SELECT COUNT(*) FROM " & quoteIdent(relation.table) & " WHERE " &
+    quoteIdent(relation.ownerColumn) & " = ?"
+  let rows = (await resolveDb(relation.db).query(
+    sql, @[toDbValue(pkValue(relation.owner))]
+  )).rows
+  return int(rows[0][0].i)
+
+proc contains*[Owner, Target](
+    relation: ManyToManyManager[Owner, Target], target: Target
+): Future[bool] {.async.} =
+  ## Tests whether ``target`` belongs to this relation.
+  mixin pkValue
+  requireSaved(relation.owner, "owner")
+  requireSaved(target, "target")
+  let sql =
+    "SELECT 1 FROM " & quoteIdent(relation.table) & " WHERE " &
+    quoteIdent(relation.ownerColumn) & " = ? AND " &
+    quoteIdent(relation.targetColumn) & " = ? LIMIT 1"
+  let rows = (await resolveDb(relation.db).query(
+    sql, @[
+      toDbValue(pkValue(relation.owner)),
+      toDbValue(pkValue(target)),
+    ]
+  )).rows
+  return rows.len > 0
 
 proc withDb*[T](qs: QuerySet[T], db: Database): QuerySet[T] =
   ## Evaluates the query against `db` instead of the default database.

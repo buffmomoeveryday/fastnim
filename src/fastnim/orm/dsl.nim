@@ -14,12 +14,14 @@ import ./[fields, values, uuids, sqlite, queryset]
 const modelCache = CacheTable"fastorm.models"
 const forwardCache = CacheTable"fastorm.forward" ## "Book.author" -> "Author"
 const reverseCache = CacheTable"fastorm.reverse" ## "Author.books" -> "Book"
+const manyCache = CacheTable"fastorm.many" ## "Book.authors" -> "Author"
 const indexCache = CacheTable"fastorm.indexes" ## index name -> owning model
 
 const fieldCtors = [
   "UUIDField", "CharField", "TextField", "IntegerField", "FloatField", "BooleanField",
   "DateTimeField", "DateField", "TimeField", "DurationField", "DecimalField",
   "JSONField", "BinaryField", "EmailField", "URLField", "SlugField", "ForeignKey",
+  "ManyToManyField",
 ]
 const choiceFields =
   ["CharField", "EmailField", "URLField", "SlugField", "IntegerField", "FloatField"]
@@ -45,6 +47,7 @@ type
     null: bool
     relatedName: string
     relatedExplicit: bool
+    throughTable: string
     enumType: string ## `choices: Status` stores the enum's name
     choiceLits: seq[NimNode]
 
@@ -52,6 +55,20 @@ type
     target: string
     name: string
     column: string
+
+  ManySpec = object
+    name: string
+    target: string
+    relatedName: string
+    relatedExplicit: bool
+    table: string
+
+  ManyGen = object
+    target: string
+    name: string
+    table: string
+    ownerColumn: string
+    targetColumn: string
 
   MetaIndexSpec = object
     name: string
@@ -67,6 +84,7 @@ type
     fields: seq[FieldSpec]
     indexes: seq[MetaIndexSpec]
     ordering: seq[string]
+    manyToMany: seq[ManySpec]
 
 # -- compile-time cache encoding ---------------------------------------------
 
@@ -135,6 +153,24 @@ proc decodeIndex(n: NimNode): MetaIndexSpec =
     fields: toSeq(n[3].children).mapIt(it.strVal),
   )
 
+proc encode(m: ManySpec): NimNode =
+  newStmtList(
+    newLit(m.name),
+    newLit(m.target),
+    newLit(m.relatedName),
+    newLit(ord(m.relatedExplicit)),
+    newLit(m.table),
+  )
+
+proc decodeMany(n: NimNode): ManySpec =
+  ManySpec(
+    name: n[0].strVal,
+    target: n[1].strVal,
+    relatedName: n[2].strVal,
+    relatedExplicit: n[3].intVal != 0,
+    table: n[4].strVal,
+  )
+
 proc encode(m: ModelSpec): NimNode =
   newStmtList(
     newLit(m.name),
@@ -144,6 +180,7 @@ proc encode(m: ModelSpec): NimNode =
     newStmtList(m.fields.mapIt(encode(it))),
     newStmtList(m.indexes.mapIt(encode(it))),
     newStmtList(m.ordering.mapIt(newLit(it))),
+    newStmtList(m.manyToMany.mapIt(encode(it))),
   )
 
 proc readModel(name: string): ModelSpec =
@@ -156,12 +193,16 @@ proc readModel(name: string): ModelSpec =
     fields: toSeq(n[4].children).mapIt(decodeField(it)),
     indexes: toSeq(n[5].children).mapIt(decodeIndex(it)),
     ordering: toSeq(n[6].children).mapIt(it.strVal),
+    manyToMany: toSeq(n[7].children).mapIt(decodeMany(it)),
   )
 
 # -- field helpers -----------------------------------------------------------
 
 proc isForeignKey(f: FieldSpec): bool =
   f.ctor == "ForeignKey"
+
+proc isManyToMany(f: FieldSpec): bool =
+  f.ctor == "ManyToManyField"
 
 proc attrName(f: FieldSpec): string =
   ## Foreign keys store the referenced key in `<name>Id`; `<name>` itself is
@@ -242,6 +283,24 @@ proc kindIdent(ctor: string): NimNode =
   else:
     error("fastorm: unsupported field type " & ctor)
 
+proc fieldKind(ctor: string): FieldKind =
+  case ctor
+  of "UUIDField": fkUUID
+  of "CharField", "EmailField", "URLField", "SlugField": fkChar
+  of "TextField": fkText
+  of "IntegerField": fkInteger
+  of "FloatField": fkFloat
+  of "BooleanField": fkBoolean
+  of "DateTimeField": fkDateTime
+  of "DateField": fkDate
+  of "TimeField": fkTime
+  of "DurationField": fkDuration
+  of "DecimalField": fkDecimal
+  of "JSONField": fkJson
+  of "BinaryField": fkBinary
+  else:
+    error("fastorm: unsupported field type " & ctor)
+
 proc arg(f: FieldSpec, key: string): NimNode =
   for a in f.args:
     if a[0].eqIdent(key):
@@ -299,24 +358,41 @@ proc parseField(stmt: NimNode): FieldSpec =
   for i, p in params:
     if p.kind in {nnkExprColonExpr, nnkExprEqExpr}:
       let key = $p[0]
+      if result.isManyToMany and key notin ["relatedName", "table"]:
+        error(
+          "fastorm: unknown ManyToManyField option `" & key &
+            "`; expected relatedName or table",
+          p,
+        )
       case key
       of "validator":
         result.validator = p[1]
       of "default":
         result.default = p[1]
       of "column":
+        if result.isManyToMany:
+          error("fastorm: ManyToManyField uses `table`, not `column`", p)
         if p[1].kind notin {nnkStrLit, nnkTripleStrLit}:
           error("fastorm: `column` must be a string literal", p[1])
         result.column = p[1].strVal
       of "target", "targetTable", "targetColumn", "targetKind":
         error("fastorm: `" & key & "` is set automatically", p)
       of "relatedName":
-        if result.ctor != "ForeignKey":
-          error("fastorm: `relatedName` is only valid on a ForeignKey", p)
+        if result.ctor notin ["ForeignKey", "ManyToManyField"]:
+          error(
+            "fastorm: `relatedName` is only valid on a ForeignKey or ManyToManyField",
+            p,
+          )
         if p[1].kind notin {nnkStrLit, nnkTripleStrLit}:
           error("fastorm: `relatedName` must be a string literal", p[1])
         result.relatedName = p[1].strVal
         result.relatedExplicit = true
+      of "table":
+        if not result.isManyToMany:
+          error("fastorm: `table` is only valid on a ManyToManyField", p)
+        if p[1].kind notin {nnkStrLit, nnkTripleStrLit} or p[1].strVal.len == 0:
+          error("fastorm: ManyToManyField table must be a non-empty string", p[1])
+        result.throughTable = p[1].strVal
       of "choices":
         if result.ctor notin choiceFields:
           error("fastorm: choices are only valid on " & choiceFields.join(", "), p)
@@ -355,16 +431,18 @@ proc parseField(stmt: NimNode): FieldSpec =
         if key == "null":
           result.null = boolLiteral(p[1], key)
         result.args.add nnkExprEqExpr.newTree(ident(key), p[1])
-    elif i == 0 and result.ctor == "ForeignKey" and p.kind == nnkIdent:
+    elif i == 0 and result.ctor in ["ForeignKey", "ManyToManyField"] and
+        p.kind == nnkIdent:
       result.target = $p
     else:
       error("fastorm: field options must be named, e.g. `maxLength: 50`", p)
-  if result.ctor == "ForeignKey" and result.target.len == 0:
+  if result.ctor in ["ForeignKey", "ManyToManyField"] and result.target.len == 0:
     error(
-      "fastorm: ForeignKey needs the referenced model first, e.g. ForeignKey(User)",
+      "fastorm: " & result.ctor &
+        " needs the referenced model first, e.g. " & result.ctor & "(User)",
       ctorNode,
     )
-  if result.column.len == 0:
+  if not result.isManyToMany and result.column.len == 0:
     result.column = toSnakeCase(result.name) & (if result.isForeignKey: "_id" else: "")
 
 proc pkIndex(fields: seq[FieldSpec]): int =
@@ -444,8 +522,46 @@ proc reverseName(owner: string, f: FieldSpec, ownedHere: bool): string =
     return f.relatedName & "_" & toSnakeCase(owner)
   toSnakeCase(owner) & "s"
 
+proc manyReverseName(owner: string, f: ManySpec): string =
+  if f.relatedExplicit:
+    return f.relatedName.replace("{model}", toSnakeCase(owner))
+  toSnakeCase(owner) & "s"
+
+proc resolvedMany(spec: ModelSpec, f: ManySpec): ManyToManyDef =
+  let target =
+    if f.target == spec.name:
+      spec
+    else:
+      readModel(f.target)
+  let ownerPk = spec.fields[pkIndex(spec.fields)]
+  let targetPk = target.fields[pkIndex(target.fields)]
+  result = ManyToManyDef(
+    name: f.name,
+    target: f.target,
+    table:
+      (if f.table.len > 0:
+        f.table.replace("{model}", toSnakeCase(spec.name))
+      else:
+        spec.table & "_" & toSnakeCase(f.name)),
+    ownerColumn: toSnakeCase(spec.name) & "_id",
+    targetColumn: toSnakeCase(f.target) & "_id",
+    ownerTable: spec.table,
+    targetTable: target.table,
+    ownerKeyColumn: ownerPk.column,
+    targetKeyColumn: targetPk.column,
+    ownerKind: fieldKind(ownerPk.ctor),
+    targetKind: fieldKind(targetPk.ctor),
+    relatedName: manyReverseName(spec.name, f),
+  )
+  if result.ownerColumn == result.targetColumn:
+    result.ownerColumn = "from_" & result.ownerColumn
+    result.targetColumn = "to_" & result.targetColumn
+
 proc concreteProcs(
-    spec: ModelSpec, reverses: seq[RelGen], indexExprs, orderExprs: NimNode
+    spec: ModelSpec,
+    reverses: seq[RelGen],
+    manyReverses: seq[ManyGen],
+    indexExprs, orderExprs: NimNode,
 ): NimNode =
   result = newStmtList()
   let T = ident(spec.name)
@@ -460,6 +576,24 @@ proc concreteProcs(
   var fieldExprs = newNimNode(nnkBracket)
   for f in spec.fields:
     fieldExprs.add fieldDefExpr(f)
+  var manyExprs = newNimNode(nnkBracket)
+  for f in spec.manyToMany:
+    let d = resolvedMany(spec, f)
+    manyExprs.add nnkObjConstr.newTree(
+      bindSym"ManyToManyDef",
+      nnkExprColonExpr.newTree(ident"name", newLit(d.name)),
+      nnkExprColonExpr.newTree(ident"target", newLit(d.target)),
+      nnkExprColonExpr.newTree(ident"table", newLit(d.table)),
+      nnkExprColonExpr.newTree(ident"ownerColumn", newLit(d.ownerColumn)),
+      nnkExprColonExpr.newTree(ident"targetColumn", newLit(d.targetColumn)),
+      nnkExprColonExpr.newTree(ident"ownerTable", newLit(d.ownerTable)),
+      nnkExprColonExpr.newTree(ident"targetTable", newLit(d.targetTable)),
+      nnkExprColonExpr.newTree(ident"ownerKeyColumn", newLit(d.ownerKeyColumn)),
+      nnkExprColonExpr.newTree(ident"targetKeyColumn", newLit(d.targetKeyColumn)),
+      nnkExprColonExpr.newTree(ident"ownerKind", ident($d.ownerKind)),
+      nnkExprColonExpr.newTree(ident"targetKind", ident($d.targetKind)),
+      nnkExprColonExpr.newTree(ident"relatedName", newLit(d.relatedName)),
+    )
 
   let row = ident"row"
   let m = ident"m"
@@ -578,6 +712,7 @@ proc concreteProcs(
         fields: @`fieldExprs`,
         indexes: @`indexExprs`,
         ordering: @`orderExprs`,
+        manyToMany: @`manyExprs`,
       )
       metadata
 
@@ -723,6 +858,37 @@ proc concreteProcs(
         let rows = await qs.all()
         rememberMany(`m`, `relLit`, rows)
         return rows
+
+  for f in spec.manyToMany:
+    let d = resolvedMany(spec, f)
+    let accessor = ident(f.name)
+    let target = ident(f.target)
+    let tableLit = newLit(d.table)
+    let ownerColLit = newLit(d.ownerColumn)
+    let targetColLit = newLit(d.targetColumn)
+    result.add quote do:
+      proc `accessor`*(
+          `m`: `T`, db: Database = nil
+      ): ManyToManyManager[`T`, `target`] =
+        ## Returns the async manager for this many-to-many relation.
+        initManyToManyManager[`T`, `target`](
+          `m`, db, `tableLit`, `ownerColLit`, `targetColLit`
+        )
+
+  for rev in manyReverses:
+    let parent = ident(rev.target)
+    let accessor = ident(rev.name)
+    let tableLit = newLit(rev.table)
+    let ownerColLit = newLit(rev.ownerColumn)
+    let targetColLit = newLit(rev.targetColumn)
+    result.add quote do:
+      proc `accessor`*(
+          `m`: `parent`, db: Database = nil
+      ): ManyToManyManager[`parent`, `T`] =
+        ## Returns the async manager for the reverse many-to-many relation.
+        initManyToManyManager[`parent`, `T`](
+          `m`, db, `tableLit`, `ownerColLit`, `targetColLit`
+        )
 
 proc isFieldConstructor(n: NimNode): bool =
   var name = ""
@@ -1076,6 +1242,7 @@ macro model*(args: varargs[untyped]): untyped =
     spec.fields = parent.fields
     spec.indexes = parent.indexes
     spec.ordering = parent.ordering
+    spec.manyToMany = parent.manyToMany
     inheritedCount = spec.fields.len
 
   var declared: seq[string]
@@ -1095,6 +1262,20 @@ macro model*(args: varargs[untyped]): untyped =
     if f.name in declared:
       error("fastorm: field `" & f.name & "` is declared twice", stmt)
     declared.add f.name
+    if f.isManyToMany:
+      if spec.fields.indexOf(f.name) >= 0 or
+          spec.manyToMany.anyIt(it.name == f.name):
+        error("fastorm: field `" & f.name & "` is already inherited", stmt)
+      spec.manyToMany.add ManySpec(
+        name: f.name,
+        target: f.target,
+        relatedName: f.relatedName,
+        relatedExplicit: f.relatedExplicit,
+        table: f.throughTable,
+      )
+      continue
+    if spec.manyToMany.anyIt(it.name == f.name):
+      error("fastorm: field `" & f.name & "` clashes with a many-to-many relation", stmt)
     let existing = spec.fields.indexOf(f.name)
     if existing >= 0:
       inheritedTypes.add (f.name, nimType(spec.fields[existing]).repr)
@@ -1157,6 +1338,23 @@ macro model*(args: varargs[untyped]): untyped =
     f.targetColumn = tpk.column
     f.targetPkCtor = tpk.ctor
 
+  for f in spec.manyToMany:
+    var target: ModelSpec
+    if f.target == spec.name:
+      if spec.abstract:
+        error("fastorm: abstract model " & spec.name & " cannot reference itself", head)
+      target = spec
+    elif f.target in modelCache:
+      target = readModel(f.target)
+    else:
+      error(
+        "fastorm: ManyToManyField target `" & f.target &
+          "` must be declared with `model` before " & spec.name,
+        head,
+      )
+    if target.abstract:
+      error("fastorm: ManyToManyField cannot target abstract model " & f.target, head)
+
   for (name, oldType) in inheritedTypes:
     let newType = nimType(spec.fields[spec.fields.indexOf(name)]).repr
     if newType != oldType:
@@ -1176,6 +1374,7 @@ macro model*(args: varargs[untyped]): untyped =
   let resolved = resolveMeta(spec, metaNode)
   modelCache[spec.name] = encode(spec)
   var reverses: seq[RelGen]
+  var manyReverses: seq[ManyGen]
   if not spec.abstract:
     for f in spec.fields:
       if not f.isForeignKey:
@@ -1212,6 +1411,49 @@ macro model*(args: varargs[untyped]): untyped =
         )
       reverseCache[rev] = newLit(spec.name)
       reverses.add RelGen(target: f.target, name: rn, column: f.column)
+    for f in spec.manyToMany:
+      let d = resolvedMany(spec, f)
+      let fwd = spec.name & "." & f.name
+      if fwd in forwardCache or fwd in reverseCache or fwd in manyCache:
+        error("fastorm: " & spec.name & " already has a relation `" & f.name & "`", head)
+      if spec.fields.indexOf(f.name) >= 0:
+        error(
+          "fastorm: many-to-many name `" & f.name & "` clashes with field " & fwd,
+          head,
+        )
+      manyCache[fwd] = newLit(f.target)
+      let rn = d.relatedName
+      if rn.len == 0:
+        continue
+      if not isRelIdent(rn):
+        error("fastorm: relatedName `" & rn & "` is not a valid identifier", head)
+      let rev = f.target & "." & rn
+      if rev in forwardCache or rev in reverseCache or rev in manyCache:
+        error(
+          "fastorm: reverse name `" & rn & "` of " & fwd &
+            " clashes with relation " & rev & "; set a different relatedName",
+          head,
+        )
+      let targetSpec =
+        if f.target == spec.name:
+          spec
+        else:
+          readModel(f.target)
+      if targetSpec.fields.indexOf(rn) >= 0 or
+          targetSpec.manyToMany.anyIt(it.name == rn):
+        error(
+          "fastorm: reverse name `" & rn & "` clashes with field " & f.target & "." & rn &
+            "; set a different relatedName",
+          head,
+        )
+      manyCache[rev] = newLit(spec.name)
+      manyReverses.add ManyGen(
+        target: f.target,
+        name: rn,
+        table: d.table,
+        ownerColumn: d.targetColumn,
+        targetColumn: d.ownerColumn,
+      )
   result = newStmtList(typeSection(spec, newAttrs))
   if not spec.abstract:
     var indexExprs = newNimNode(nnkBracket)
@@ -1220,7 +1462,7 @@ macro model*(args: varargs[untyped]): untyped =
     var orderExprs = newNimNode(nnkBracket)
     for column in resolved.ordering:
       orderExprs.add newLit(column)
-    result.add concreteProcs(spec, reverses, indexExprs, orderExprs)
+    result.add concreteProcs(spec, reverses, manyReverses, indexExprs, orderExprs)
 
 # -- query macros ------------------------------------------------------------
 

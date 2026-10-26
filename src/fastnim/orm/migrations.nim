@@ -156,6 +156,40 @@ proc tableFor(m: ModelMeta): TableDef =
       unique: ix.unique,
     )
 
+proc tableForMany(m: ManyToManyDef): TableDef =
+  result.name = m.table
+  result.columns = @[
+    ColumnDef(
+      name: m.ownerColumn,
+      sqlType: sqlType(m.ownerKind, 0),
+      notNull: true,
+      refTable: m.ownerTable,
+      refColumn: m.ownerKeyColumn,
+      onDelete: "CASCADE",
+    ),
+    ColumnDef(
+      name: m.targetColumn,
+      sqlType: sqlType(m.targetKind, 0),
+      notNull: true,
+      refTable: m.targetTable,
+      refColumn: m.targetKeyColumn,
+      onDelete: "CASCADE",
+    ),
+  ]
+  result.indexes = @[
+    IndexDef(
+      name: m.table & "_" & m.ownerColumn & "_" & m.targetColumn & "_uniq",
+      table: m.table,
+      columns: @[m.ownerColumn, m.targetColumn],
+      unique: true,
+    ),
+    IndexDef(
+      name: m.table & "_" & m.targetColumn & "_idx",
+      table: m.table,
+      columns: @[m.targetColumn],
+    ),
+  ]
+
 proc snapshotOf*(models: openArray[ModelMeta]): Snapshot =
   ## Deterministic schema snapshot: tables sorted by name, columns in
   ## declaration order.
@@ -168,6 +202,16 @@ proc snapshotOf*(models: openArray[ModelMeta]): Snapshot =
       )
     seen[m.table] = m.name
     result.tables.add tableFor(m)
+  for model in models:
+    for relation in model.manyToMany:
+      if relation.table in seen:
+        raise newException(
+          MigrationError,
+          "many-to-many relation " & model.name & "." & relation.name &
+            " and " & seen[relation.table] & " both use table " & relation.table,
+        )
+      seen[relation.table] = model.name & "." & relation.name
+      result.tables.add tableForMany(relation)
   result.tables.sort(
     proc(a, b: TableDef): int =
       cmp(a.name, b.name)

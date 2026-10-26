@@ -62,6 +62,22 @@ type
     onDelete*: OnDelete
     relatedName*: string ## reverse accessor; empty when none was set
 
+  ManyToManyDef* = object
+    ## Metadata for an implicit many-to-many junction table. Unlike a
+    ## ``FieldDef``, this relation does not occupy a column on either model.
+    name*: string
+    target*: string
+    table*: string
+    ownerColumn*: string
+    targetColumn*: string
+    ownerTable*: string
+    targetTable*: string
+    ownerKeyColumn*: string
+    targetKeyColumn*: string
+    ownerKind*: FieldKind
+    targetKind*: FieldKind
+    relatedName*: string
+
   MetaIndex* = object
     ## A model-level index declared in `Meta`. `descending` is parallel to
     ## `columns`; an empty sequence means every column is ascending.
@@ -78,6 +94,7 @@ type
     pkIndex*: int
     indexes*: seq[MetaIndex]
     ordering*: seq[string] ## column names; a leading `-` means descending
+    manyToMany*: seq[ManyToManyDef] ## Virtual many-to-many relations.
 
 proc invalid(msg: string) =
   raise newException(ValueError, "fastorm: " & msg)
@@ -293,6 +310,13 @@ proc ForeignKey*(
   result.targetKind = targetKind
   result.onDelete = onDelete
   result.relatedName = relatedName
+
+proc ManyToManyField*(
+    target: string, relatedName = "", table = ""
+): ManyToManyDef =
+  ## Describes a many-to-many relation. The ``model`` macro fills the model
+  ## and key metadata and creates the implicit junction table.
+  ManyToManyDef(target: target, relatedName: relatedName, table: table)
 
 proc named*(f: FieldDef, name, column: string): FieldDef =
   result = f
