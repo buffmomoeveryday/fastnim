@@ -728,14 +728,163 @@ macro noContent*(value: untyped): untyped =
   quote:
     initResponse(statusNoContent)
 
+proc isTypeContainer(name: string): bool {.compileTime.} =
+  case name
+  of "seq", "Option", "Table", "OrderedTable", "CountTable", "HashSet", "OrderedSet",
+      "set", "array", "ptr", "Future", "JsonResponseFields":
+    true
+  else:
+    false
+
+proc fieldName(node: NimNode): string {.compileTime.} =
+  case node.kind
+  of nnkSym, nnkIdent:
+    $node
+  of nnkPostfix, nnkPragmaExpr:
+    fieldName(node[^1])
+  of nnkAccQuoted:
+    if node.len == 1: fieldName(node[0]) else: node.repr
+  else:
+    node.repr
+
+proc collectFields(
+    node: NimNode, fields: var seq[tuple[name: string, typ: NimNode]]
+) {.compileTime.} =
+  case node.kind
+  of nnkIdentDefs:
+    if node.len >= 3:
+      let typ = node[^2]
+      for index in 0 .. node.len - 3:
+        if node[index].kind != nnkEmpty:
+          fields.add((fieldName(node[index]), typ))
+  of nnkOfInherit:
+    if node.len > 0 and node[0].kind in {nnkSym, nnkIdent} and $node[0] != "RootObj":
+      collectFields(node[0].getTypeImpl(), fields)
+  of nnkObjectTy, nnkTupleTy, nnkRecList, nnkRecCase, nnkOfBranch, nnkElse:
+    for child in node:
+      collectFields(child, fields)
+  else:
+    discard
+
+proc shapeOf(inst: NimNode, seen: var seq[string]): string {.compileTime.}
+
+proc fieldList(node: NimNode, seen: var seq[string]): string {.compileTime.} =
+  var fields: seq[tuple[name: string, typ: NimNode]]
+  collectFields(node, fields)
+  for index, field in fields:
+    if index > 0:
+      result.add(", ")
+    result.add(field.name & ": " & shapeOf(field.typ, seen))
+
+proc genericShape(inst: NimNode, seen: var seq[string]): string {.compileTime.} =
+  if inst[0].kind in {nnkSym, nnkIdent}:
+    result = $inst[0]
+  else:
+    result = inst[0].repr
+  result.add('[')
+  for index in 1 ..< inst.len:
+    if index > 1:
+      result.add(", ")
+    result.add(shapeOf(inst[index], seen))
+  result.add(']')
+
+proc shapeOf(inst: NimNode, seen: var seq[string]): string {.compileTime.} =
+  case inst.kind
+  of nnkSym, nnkIdent:
+    let name = $inst
+    if name in seen:
+      return name
+    let impl = inst.getTypeImpl()
+    if impl.kind == nnkObjectTy:
+      seen.add(name)
+      result = name & "(" & fieldList(impl, seen) & ")"
+      seen.setLen(seen.len - 1)
+    elif impl.kind == nnkRefTy:
+      let inner =
+        if impl[0].kind == nnkSym:
+          impl[0].getTypeImpl()
+        else:
+          impl[0]
+      if inner.kind == nnkObjectTy:
+        seen.add(name)
+        result = name & "(" & fieldList(inner, seen) & ")"
+        seen.setLen(seen.len - 1)
+      else:
+        result = "ref " & shapeOf(impl[0], seen)
+    elif impl.kind == nnkPtrTy:
+      result = "ptr " & shapeOf(impl[0], seen)
+    elif impl.kind == nnkTupleTy:
+      seen.add(name)
+      result = name & "(" & fieldList(impl, seen) & ")"
+      seen.setLen(seen.len - 1)
+    else:
+      result = name
+  of nnkBracketExpr:
+    let head =
+      if inst[0].kind in {nnkSym, nnkIdent}:
+        $inst[0]
+      else:
+        ""
+    if head.len == 0 or isTypeContainer(head):
+      result = genericShape(inst, seen)
+    else:
+      let rendered = genericShape(inst, seen)
+      let impl = inst.getTypeImpl()
+      if rendered in seen:
+        result = rendered
+      elif impl.kind == nnkObjectTy:
+        seen.add(rendered)
+        result = rendered & "(" & fieldList(impl, seen) & ")"
+        seen.setLen(seen.len - 1)
+      elif impl.kind == nnkRefTy:
+        let inner =
+          if impl[0].kind == nnkSym:
+            impl[0].getTypeImpl()
+          else:
+            impl[0]
+        if inner.kind == nnkObjectTy:
+          seen.add(rendered)
+          result = rendered & "(" & fieldList(inner, seen) & ")"
+          seen.setLen(seen.len - 1)
+        else:
+          result = rendered
+      else:
+        result = rendered
+  of nnkTupleTy:
+    result = "(" & fieldList(inst, seen) & ")"
+  of nnkRefTy:
+    result = "ref " & shapeOf(inst[0], seen)
+  of nnkPtrTy:
+    result = "ptr " & shapeOf(inst[0], seen)
+  of nnkVarTy:
+    result = "var " & shapeOf(inst[0], seen)
+  else:
+    result = inst.repr
+
+proc responseTypeShape(typeNode: NimNode): string {.compileTime.} =
+  var node = typeNode.getTypeInst()
+  if node.kind == nnkBracketExpr and node.len == 2 and eqIdent(node[0], "typedesc"):
+    node = node[1]
+  var seen: seq[string]
+  shapeOf(node, seen)
+
+macro responseTypeMismatch(status: static[int], expected: typed, model: typed): untyped =
+  error(
+    "response model does not match the type declared for status " & $status &
+      "\nexpected: " & responseTypeShape(expected) &
+      "\nreceived: " & responseTypeShape(model),
+    model,
+  )
+
 template checkedResponse*[T](status: static[int], model: typed): Response =
   ## Creates a response only when ``model`` has the route-declared type ``T``.
+  ## A mismatch prints both types with their object fields.
   when typeof(model) is T:
     response(status, model)
   elif typeof(model) is JsonResponseFields[T]:
     response(status, model)
   else:
-    {.error: "response model does not match the type declared for this status".}
+    responseTypeMismatch(status, T, model)
 
 proc toResponse*(value: Response): Response {.inline, raises: [].} =
   ## Leaves an explicit response unchanged.
