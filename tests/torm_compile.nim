@@ -16,4 +16,5 @@ suite "compile-time model errors":
       )
       check code != 0
       check expected in output
-      if expected notin output: echo output
+      if expected notin output:
+        echo output

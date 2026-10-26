@@ -30,7 +30,8 @@ type
     Accepted
     Rejected
 
-  MqttDecision* = object ## Handler outcome translated into protocol acknowledgement behavior.
+  MqttDecision* = object
+    ## Handler outcome translated into protocol acknowledgement behavior.
     kind*: MqttDecisionKind ## Whether processing succeeded or was rejected.
     reason*: MqttReasonCode ## MQTT 5 reason used when the outcome is rejected.
 

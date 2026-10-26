@@ -4,6 +4,7 @@ type
   Author = ref object
     id: int
     name: string
+
   Draft = ref object
     id: int
     name: int

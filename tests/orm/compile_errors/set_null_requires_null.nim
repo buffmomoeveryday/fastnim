@@ -1,6 +1,8 @@
 # expect: onDelete: SetNull) requires null: true
 import fastnim/orm
 model User:
-  name: CharField()
+  name:
+    CharField()
 model Book:
-  owner: ForeignKey(User, onDelete: SetNull)
+  owner:
+    ForeignKey(User, onDelete: SetNull)

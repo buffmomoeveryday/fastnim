@@ -26,7 +26,7 @@ proc isJsonIntToken(text: string): bool =
       return false
     start = 1
   for index in start ..< text.len:
-    if text[index] notin {'0'..'9'}:
+    if text[index] notin {'0' .. '9'}:
       return false
   true
 
@@ -86,7 +86,8 @@ proc concreteObject(node: NimNode): NimNode {.compileTime.} =
       return current
     if current.kind in {nnkSym, nnkIdent}:
       current = current.getTypeImpl()
-    elif current.kind in {nnkRefTy, nnkPtrTy, nnkVarTy, nnkDistinctTy} and current.len > 0:
+    elif current.kind in {nnkRefTy, nnkPtrTy, nnkVarTy, nnkDistinctTy} and
+        current.len > 0:
       current = current[0].getTypeImpl()
     elif current.kind == nnkBracketExpr and current.len > 1:
       current = current[^1].getTypeImpl()
@@ -132,7 +133,7 @@ macro initVariant(value: typed, discriminator: typed): untyped =
   let obj = concreteObject(value.getTypeImpl())
   let field = discriminatorDef(obj[^1])[0]
   let typ = value.getTypeInst()
-  quote do:
+  quote:
     `value` = `typ`(`field`: `discriminator`)
 
 macro genericArg(sample: typed, position: static int): untyped =
@@ -191,6 +192,7 @@ proc readTable[T](node: JsonNode, value: var T) =
   type
     Key = genericArg(value, 1)
     Item = genericArg(value, 2)
+
   when T is TableRef:
     value = newTable[Key, Item]()
   elif T is OrderedTableRef:
@@ -353,9 +355,7 @@ proc dumpJsonInner[T](
         output, value.get(), NoJsonFieldOverrides, NoJsonFieldOverrides, false
       )
   elif T is distinct:
-    dumpJsonInner(
-      output, distinctBase(value), ignoredFields, includedFields, root
-    )
+    dumpJsonInner(output, distinctBase(value), ignoredFields, includedFields, root)
   elif T is Table or T is OrderedTable or T is TableRef or T is OrderedTableRef:
     when compiles(value.isNil):
       if value.isNil:
@@ -370,9 +370,7 @@ proc dumpJsonInner[T](
           output.add ','
         dumpJsonKey(output, key)
         output.add ':'
-        dumpJsonInner(
-          output, item, NoJsonFieldOverrides, NoJsonFieldOverrides, false
-        )
+        dumpJsonInner(output, item, NoJsonFieldOverrides, NoJsonFieldOverrides, false)
         inc written
       output.add '}'
   elif T is HashSet:
@@ -392,9 +390,7 @@ proc dumpJsonInner[T](
     if value.isNil:
       output.add "null"
     else:
-      dumpJsonInner(
-        output, value[], NoJsonFieldOverrides, NoJsonFieldOverrides, false
-      )
+      dumpJsonInner(output, value[], NoJsonFieldOverrides, NoJsonFieldOverrides, false)
   elif T is seq or T is array:
     output.add '['
     var written = 0
@@ -415,9 +411,7 @@ proc dumpJsonInner[T](
           output.add ','
         jsony.dumpHook(output, fieldName)
         output.add ':'
-        dumpJsonInner(
-          output, field, NoJsonFieldOverrides, NoJsonFieldOverrides, false
-        )
+        dumpJsonInner(output, field, NoJsonFieldOverrides, NoJsonFieldOverrides, false)
         inc written
       output.add '}'
     else:
@@ -426,9 +420,7 @@ proc dumpJsonInner[T](
       for field in fields(value):
         if written > 0:
           output.add ','
-        dumpJsonInner(
-          output, field, NoJsonFieldOverrides, NoJsonFieldOverrides, false
-        )
+        dumpJsonInner(output, field, NoJsonFieldOverrides, NoJsonFieldOverrides, false)
         inc written
       output.add ']'
   elif T is object:

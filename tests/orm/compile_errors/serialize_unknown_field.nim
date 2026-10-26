@@ -2,7 +2,8 @@
 import fastnim/orm
 
 model User:
-  name: CharField()
+  name:
+    CharField()
 
 proc main() =
   echo User(name: "A").omit(missing).serialize()

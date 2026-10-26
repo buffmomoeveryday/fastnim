@@ -2,9 +2,11 @@
 import fastnim/orm
 
 model User:
-  name: CharField()
+  name:
+    CharField()
 
 model Book:
-  user: ForeignKey(User, relatedName: "books")
+  user:
+    ForeignKey(User, relatedName: "books")
 
 discard User.objects.selectRelated("books")

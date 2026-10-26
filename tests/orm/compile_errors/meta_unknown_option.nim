@@ -2,6 +2,8 @@
 import fastnim/orm
 
 model M:
-  name: CharField()
+  name:
+    CharField()
   Meta:
-    verboseName: "M"
+    verboseName:
+      "M"

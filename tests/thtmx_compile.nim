@@ -9,9 +9,9 @@ suite "htmx version compile errors":
     let expected = readFile(path).splitLines()[0].replace("# expect:", "").strip
     test path.extractFilename:
       let (output, code) = execCmdEx(
-        quoteShell(getCurrentCompilerExe()) &
-          " check --hints:off --nimcache:" & quoteShell(cacheDir) &
-          " --path:" & quoteShell(root / "src") & " " & quoteShell(path)
+        quoteShell(getCurrentCompilerExe()) & " check --hints:off --nimcache:" &
+          quoteShell(cacheDir) & " --path:" & quoteShell(root / "src") & " " &
+          quoteShell(path)
       )
       check code != 0
       check expected in output

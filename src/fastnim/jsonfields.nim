@@ -87,7 +87,9 @@ proc withIgnoredField[T](value: T, field: string): JsonResponseFields[T] =
   result = JsonResponseFields[T](value: value)
   result.ignoredFields.add(field)
 
-proc withIgnoredField[T](value: JsonResponseFields[T], field: string): JsonResponseFields[T] =
+proc withIgnoredField[T](
+    value: JsonResponseFields[T], field: string
+): JsonResponseFields[T] =
   result = value
   result.includedFields.remove(field)
   result.ignoredFields.addUnique(field)
@@ -96,7 +98,9 @@ proc withIncludedField[T](value: T, field: string): JsonResponseFields[T] =
   result = JsonResponseFields[T](value: value)
   result.includedFields.add(field)
 
-proc withIncludedField[T](value: JsonResponseFields[T], field: string): JsonResponseFields[T] =
+proc withIncludedField[T](
+    value: JsonResponseFields[T], field: string
+): JsonResponseFields[T] =
   result = value
   result.ignoredFields.remove(field)
   result.includedFields.addUnique(field)
@@ -112,9 +116,9 @@ macro ignore*(value: typed, fields: varargs[untyped]): untyped =
   let model = responseModelType(value)
   result = value
   for field in fields:
-    result = newCall(bindSym("withIgnoredField"), result, newLit(
-      responseFieldName(model, field)
-    ))
+    result = newCall(
+      bindSym("withIgnoredField"), result, newLit(responseFieldName(model, field))
+    )
 
 macro `include`*(value: typed, fields: varargs[untyped]): untyped =
   ## Explicitly includes model fields in this JSON response.
@@ -126,6 +130,6 @@ macro `include`*(value: typed, fields: varargs[untyped]): untyped =
   let model = responseModelType(value)
   result = value
   for field in fields:
-    result = newCall(bindSym("withIncludedField"), result, newLit(
-      responseFieldName(model, field)
-    ))
+    result = newCall(
+      bindSym("withIncludedField"), result, newLit(responseFieldName(model, field))
+    )

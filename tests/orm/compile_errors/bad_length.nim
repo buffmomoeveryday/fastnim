@@ -2,4 +2,5 @@
 import fastnim/orm
 
 model User:
-  name: CharField(maxLength: 5, minLength: 9)
+  name:
+    CharField(maxLength: 5, minLength: 9)

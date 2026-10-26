@@ -1,6 +1,7 @@
 ## Route registration and dispatch for fastnim applications.
 
-import std/[json, logging, macrocache, macros, monotimes, sequtils, strutils, tables, times]
+import
+  std/[json, logging, macrocache, macros, monotimes, sequtils, strutils, tables, times]
 
 import chronos/[asyncloop, futures, timer, transport]
 from chronos/apps/http/httpserver import HttpRequestBodyTooLargeError, HttpWriteError
@@ -24,9 +25,8 @@ type
   SyncRouteHandler* =
     proc(request: Request): Response {.nimcall, raises: [CatchableError].}
     ## Legacy synchronous route handler adapted to ``RouteHandler`` at registration.
-  ErrorHandler* = proc(request: Request): Response {.
-    closure, gcsafe, raises: [CatchableError]
-  .}
+  ErrorHandler* =
+    proc(request: Request): Response {.closure, gcsafe, raises: [CatchableError].}
     ## Creates a response for a framework-generated HTTP error status.
   NextHandler* = proc(request: Request): Future[Response] {.
     closure, async: (raises: [CatchableError])
@@ -159,9 +159,7 @@ proc initFastNim*(
   ## Set ``logs = false`` to disable framework logs, or provide ``logHandler``
   ## to send them to a custom destination. ``limits`` caps request bodies,
   ## headers, and handler time.
-  initFastNim(
-    initApplicationSettings(logs, logHandler, logLevel), openApi, limits
-  )
+  initFastNim(initApplicationSettings(logs, logHandler, logLevel), openApi, limits)
 
 proc newApplication*(
     settings: ApplicationSettings,
@@ -179,9 +177,7 @@ proc newApplication*(
     limits = initRequestLimits(),
 ): Application {.deprecated: "Use FastNim instead.".} =
   ## Deprecated alias for ``initFastNim``.
-  initFastNim(
-    initApplicationSettings(logs, logHandler, logLevel), openApi, limits
-  )
+  initFastNim(initApplicationSettings(logs, logHandler, logLevel), openApi, limits)
 
 proc initRouter*(prefix = "", tags: seq[string] = @[]): Router =
   ## Creates an empty router with an optional path prefix and default tags.
@@ -387,8 +383,7 @@ proc staticString(node: NimNode, value: var string): bool {.compileTime.} =
   false
 
 proc withTypedPathBindings(
-    path, request, body: NimNode,
-    additionalBoundNames: openArray[string] = [],
+    path, request, body: NimNode, additionalBoundNames: openArray[string] = []
 ): NimNode {.compileTime.} =
   result = newStmtList()
   var routePath: string
@@ -426,13 +421,11 @@ proc withTypedPathBindings(
               ident("bool")
             of PathParamKind.Csv:
               newTree(nnkBracketExpr, ident("seq"), ident("string"))
-          let extractor =
-            newTree(nnkBracketExpr, bindSym("typedPathParam"), valueType)
+          let extractor = newTree(nnkBracketExpr, bindSym("typedPathParam"), valueType)
           let value = newCall(extractor, request, newLit(spec.name))
           result.add(
             newTree(
-              nnkLetSection,
-              newIdentDefs(ident(spec.name), newEmptyNode(), value),
+              nnkLetSection, newIdentDefs(ident(spec.name), newEmptyNode(), value)
             )
           )
   except ValueError as exc:
@@ -593,21 +586,36 @@ proc onError*(app: Application, status: int, handler: ErrorHandler) =
 proc defaultApiError(status: int, message = ""): ApiError {.raises: [].} =
   let fallback =
     case status
-    of 400: ("bad_request", "Bad Request")
-    of 401: ("unauthorized", "Unauthorized")
-    of 403: ("forbidden", "Forbidden")
-    of 404: ("not_found", "Not Found")
-    of 408: ("request_timeout", "Request Timeout")
-    of 409: ("conflict", "Conflict")
-    of 413: ("content_too_large", "Content Too Large")
-    of 422: ("validation_failed", "Unprocessable Content")
-    of 431: ("request_headers_too_large", "Request Header Fields Too Large")
-    of 500: ("internal_server_error", "Internal Server Error")
-    of 503: ("service_unavailable", "Service Unavailable")
-    else: ("http_error", "HTTP Error " & $status)
+    of 400:
+      ("bad_request", "Bad Request")
+    of 401:
+      ("unauthorized", "Unauthorized")
+    of 403:
+      ("forbidden", "Forbidden")
+    of 404:
+      ("not_found", "Not Found")
+    of 408:
+      ("request_timeout", "Request Timeout")
+    of 409:
+      ("conflict", "Conflict")
+    of 413:
+      ("content_too_large", "Content Too Large")
+    of 422:
+      ("validation_failed", "Unprocessable Content")
+    of 431:
+      ("request_headers_too_large", "Request Header Fields Too Large")
+    of 500:
+      ("internal_server_error", "Internal Server Error")
+    of 503:
+      ("service_unavailable", "Service Unavailable")
+    else:
+      ("http_error", "HTTP Error " & $status)
   initApiError(
     fallback[0],
-    if message.len == 0: fallback[1] else: message,
+    if message.len == 0:
+      fallback[1]
+    else:
+      message,
   )
 
 proc apiErrorResponse(
@@ -672,11 +680,8 @@ proc registeredMiddleware(node: NimNode): NimNode {.compileTime.} =
   if node.kind in {nnkCall, nnkCommand} and node.len == 1:
     let callee = node[0]
     let middlewareType = bindSym("Middleware")
-    result = quote do:
-      when typeof(`callee`) is `middlewareType`:
-        `callee`
-      else:
-        `node`
+    result = quote:
+      when typeof(`callee`) is `middlewareType`: `callee` else: `node`
   else:
     result = node
 
@@ -701,9 +706,7 @@ macro middlewares*(target: Application | Router, body: untyped): untyped =
         newCall(bindSym("addMiddleware"), targetSym, registeredMiddleware(middleware))
       )
   else:
-    result.add(
-      newCall(bindSym("addMiddleware"), targetSym, registeredMiddleware(body))
-    )
+    result.add(newCall(bindSym("addMiddleware"), targetSym, registeredMiddleware(body)))
 
 proc initPlugin*(name, version: string, install: PluginInstall): Plugin =
   ## Creates a plugin definition for use with ``app.installPlugin``.
@@ -747,7 +750,8 @@ proc validateRoutePath(path: string) =
     let isParam = segment.parsePathParamSegment(spec)
     if not isParam and ('{' in segment or '}' in segment):
       raise newException(
-        ValueError, "path parameters must occupy a complete {name} or {name:type} segment"
+        ValueError,
+        "path parameters must occupy a complete {name} or {name:type} segment",
       )
     if isParam:
       if spec.name in names:
@@ -1171,9 +1175,8 @@ proc typedOpenApiOperation(
           `operation`.responses[`status`] = %*{
             "description": "Response " & `status`,
             "content": {
-              "application/json": {
-                "schema": openApiResponseSchema(`model`, `ignored`, `included`)
-              }
+              "application/json":
+                {"schema": openApiResponseSchema(`model`, `ignored`, `included`)}
             },
           }
       )
@@ -1191,17 +1194,12 @@ proc typedOpenApiOperation(
         if not `operation`.responses.hasKey("400"):
           `operation`.responses["400"] = %*{
             "description": "Invalid request body",
-            "content": {
-              "application/json": {
-                  "schema": openApiSchema(ApiError)
-              }
-            },
+            "content": {"application/json": {"schema": openApiSchema(ApiError)}},
           }
         if not `operation`.responses.hasKey("422"):
           `operation`.responses["422"] = %*{
             "description": "Request validation failed",
-            "content":
-              {"application/json": {"schema": openApiSchema(ApiError)}},
+            "content": {"application/json": {"schema": openApiSchema(ApiError)}},
           }
     )
   if queryType.kind != nnkEmpty:
@@ -1214,14 +1212,12 @@ proc typedOpenApiOperation(
         if not `operation`.responses.hasKey("400"):
           `operation`.responses["400"] = %*{
             "description": "Invalid query parameters",
-            "content":
-              {"application/json": {"schema": openApiSchema(ApiError)}},
+            "content": {"application/json": {"schema": openApiSchema(ApiError)}},
           }
         if not `operation`.responses.hasKey("422"):
           `operation`.responses["422"] = %*{
             "description": "Query parameter validation failed",
-            "content":
-              {"application/json": {"schema": openApiSchema(ApiError)}},
+            "content": {"application/json": {"schema": openApiSchema(ApiError)}},
           }
     )
   result[^1].add(operation)
@@ -1242,8 +1238,7 @@ proc normalizeResponses(responses: NimNode): NimNode {.compileTime.} =
   if responses.kind != nnkPrefix or $responses[0] != "@" or
       responses[1].kind != nnkBracket:
     error(
-      "responses must use @[(status, ModelType), ...] or @[ok, ModelType]",
-      responses,
+      "responses must use @[(status, ModelType), ...] or @[ok, ModelType]", responses
     )
 
   var items = newNimNode(nnkBracket)
@@ -1272,8 +1267,7 @@ proc normalizeResponses(responses: NimNode): NimNode {.compileTime.} =
     let status = declaredStatus(statusNode)
     if status < 0:
       error(
-        "response status must be a code such as 200 or a name such as ok",
-        statusNode,
+        "response status must be a code such as 200 or a name such as ok", statusNode
       )
     if status in seen:
       error("a route may declare each status only once", item)
@@ -1283,24 +1277,19 @@ proc normalizeResponses(responses: NimNode): NimNode {.compileTime.} =
 
 var ormInputCount {.compileTime.} = 0
 
-proc modelIgnoreBody(node: NimNode): tuple[
-  model: NimNode, inputType: NimNode, declaration: NimNode
-] {.compileTime.} =
+proc modelIgnoreBody(
+    node: NimNode
+): tuple[model: NimNode, inputType: NimNode, declaration: NimNode] {.compileTime.} =
   ## Recognizes ``Author.ignore(id)`` and declares the plain input object.
-  if node.kind notin {nnkCall, nnkCommand} or node.len < 2 or
-      node[0].kind != nnkDotExpr or node[0].len != 2 or
-      not eqIdent(node[0][1], "ignore"):
+  if node.kind notin {nnkCall, nnkCommand} or node.len < 2 or node[0].kind != nnkDotExpr or
+      node[0].len != 2 or not eqIdent(node[0][1], "ignore"):
     return (newEmptyNode(), node, newEmptyNode())
   let model = node[0][0]
   if model.kind notin {nnkIdent, nnkSym, nnkOpenSymChoice, nnkClosedSymChoice}:
     error("body model must be a type name, as in `Author.ignore(id)`", node)
   inc ormInputCount
   let inputType = ident("FastnimOrmInput" & $ormInputCount)
-  (
-    model,
-    inputType,
-    newCall(ident("typeFrom"), inputType, node),
-  )
+  (model, inputType, newCall(ident("typeFrom"), inputType, node))
 
 proc buildTypedRoute(
     app, path, responses, body, `method`, bodyType: NimNode,
@@ -1738,8 +1727,18 @@ proc buildBodyRoute(
   if ignored.declaration.kind != nnkEmpty:
     bodyType = ignored.inputType
   result = buildTypedRoute(
-    app, path, responses, routeBody, `method`, bodyType, inputName, parser,
-    invalidMessage, validator, docs, modelType = ignored.model,
+    app,
+    path,
+    responses,
+    routeBody,
+    `method`,
+    bodyType,
+    inputName,
+    parser,
+    invalidMessage,
+    validator,
+    docs,
+    modelType = ignored.model,
   )
   if ignored.declaration.kind != nnkEmpty:
     result = newStmtList(ignored.declaration, result)

@@ -4,62 +4,89 @@ import fastnim
 import fastnim/orm
 
 model Timestamped {.abstract.}:
-  createdAt: DateTimeField(autoNowAdd: true)
-  updatedAt: DateTimeField(autoNow: true)
+  createdAt:
+    DateTimeField(autoNowAdd: true)
+  updatedAt:
+    DateTimeField(autoNow: true)
 
 model Publisher:
-  name: CharField()
+  name:
+    CharField()
 
 model Author = ref Timestamped:
-  id: UUIDField(primaryKey: true)
-  name: CharField(maxLength: 50)
-  email: CharField(unique: true, null: true)
-  publisher: ForeignKey(Publisher, null: true, onDelete: SetNull)
+  id:
+    UUIDField(primaryKey: true)
+  name:
+    CharField(maxLength: 50)
+  email:
+    CharField(unique: true, null: true)
+  publisher:
+    ForeignKey(Publisher, null: true, onDelete: SetNull)
 
 model Noted {.abstract.}:
-  owner: ForeignKey(Author, relatedName: "{model}s")
+  owner:
+    ForeignKey(Author, relatedName: "{model}s")
 
 model Note = ref Noted:
-  body: TextField()
+  body:
+    TextField()
 
 model Article = ref Timestamped:
-  author: ForeignKey(Author, onDelete: Cascade)
-  title: CharField(maxLength: 200)
-  views: IntegerField(default: 0)
-  published: BooleanField(default: false)
-  rating: FloatField(null: true)
+  author:
+    ForeignKey(Author, onDelete: Cascade)
+  title:
+    CharField(maxLength: 200)
+  views:
+    IntegerField(default: 0)
+  published:
+    BooleanField(default: false)
+  rating:
+    FloatField(null: true)
 
 model Comment:
-  article: ForeignKey(Article, onDelete: SetNull, null: true)
-  body: TextField()
+  article:
+    ForeignKey(Article, onDelete: SetNull, null: true)
+  body:
+    TextField()
 
 model Chapter:
-  article: ForeignKey(Article, onDelete: Cascade, relatedName: "chapters")
-  title: CharField()
+  article:
+    ForeignKey(Article, onDelete: Cascade, relatedName: "chapters")
+  title:
+    CharField()
 
 model Node:
-  parent: ForeignKey(Node, onDelete: SetNull, null: true, relatedName: "children")
-  name: CharField()
+  parent:
+    ForeignKey(Node, onDelete: SetNull, null: true, relatedName: "children")
+  name:
+    CharField()
 
 model Shelf:
-  owner: ForeignKey(Author, onDelete: Restrict)
-  label: CharField()
+  owner:
+    ForeignKey(Author, onDelete: Restrict)
+  label:
+    CharField()
 
 model Ranked:
-  label: CharField()
-  rank: IntegerField()
+  label:
+    CharField()
+  rank:
+    IntegerField()
   Meta:
-    ordering: ["rank", "-label"]
+    ordering:
+      ["rank", "-label"]
     indexes:
       Index(fields: ["rank", "label"], name: "ranked_rank_label")
     uniqueTogether:
       ["label", "rank"]
 
 model Animal:
-  name: CharField()
+  name:
+    CharField()
 
 model Dog = ref Animal:
-  breed: CharField()
+  breed:
+    CharField()
 
 proc freshDb(): Future[(Database, string)] {.async.} =
   let dir = createTempDir("fastorm_", "_test")
@@ -74,11 +101,14 @@ proc cleanup(db: Database, dir: string) {.async.} =
 
 proc author(name: string, email = ""): Future[Author] {.async.} =
   let a = Author(name: name)
-  if email.len > 0: a.email = some(email)
+  if email.len > 0:
+    a.email = some(email)
   await a.save()
   return a
 
-proc article(a: Author, title: string, views = 0, rating = none(float)): Future[Article] {.async.} =
+proc article(
+    a: Author, title: string, views = 0, rating = none(float)
+): Future[Article] {.async.} =
   let x = newArticle()
   x.author = a
   x.title = title
@@ -87,7 +117,8 @@ proc article(a: Author, title: string, views = 0, rating = none(float)): Future[
   await x.save()
   return x
 
-proc titles(xs: seq[Article]): seq[string] = xs.mapIt(it.title)
+proc titles(xs: seq[Article]): seq[string] =
+  xs.mapIt(it.title)
 
 suite "querying":
   asyncTest "save inserts, assigns keys, and updates":
@@ -123,7 +154,8 @@ suite "querying":
     await Ranked(label: "a", rank: 1).save()
     await Ranked(label: "c", rank: 1).save()
     check (await Ranked.objects.all()).mapIt(it.label) == @["c", "a", "b"]
-    check (await Ranked.objects.orderBy("label").all()).mapIt(it.label) == @["a", "b", "c"]
+    check (await Ranked.objects.orderBy("label").all()).mapIt(it.label) ==
+      @["a", "b", "c"]
     expect DatabaseError:
       await Ranked(label: "a", rank: 1).save()
     var names: seq[string]
@@ -136,7 +168,8 @@ suite "querying":
   asyncTest "query sets are immutable and chainable":
     let (db, dir) = await freshDb()
     let a = await author("Ada")
-    for i in 1 .. 5: discard await article(a, "Post " & $i, views = i * 10)
+    for i in 1 .. 5:
+      discard await article(a, "Post " & $i, views = i * 10)
     let popular = Article.objects.filter(views >= 20)
     let top = popular.orderBy("-views").limit(2)
     check (await popular.count()) == 4
@@ -156,18 +189,24 @@ suite "querying":
     discard await article(a, "Two", views = 20, rating = some(3.5))
     discard await article(a, "Three", views = 30)
     let stats = await Article.filter(views >= 20).aggregate(
-      rows = Count(id), totalViews = Sum(views), averageViews = Avg(views),
-      lowestTitle = Min(title), highestRating = Max(rating))
+      rows = Count(id),
+      totalViews = Sum(views),
+      averageViews = Avg(views),
+      lowestTitle = Min(title),
+      highestRating = Max(rating),
+    )
     check stats.aggregateInt("rows") == 2
     check stats.aggregateInt("totalViews") == 50
     check stats.aggregateFloat("averageViews") == 25.0
     check stats.aggregateValue("lowestTitle").s == "Three"
     check stats.aggregateFloat("highestRating") == 3.5
     let page = await Article.objects.orderBy("views").limit(2).aggregate(
-      rows = Count(id), totalViews = Sum(views))
+      rows = Count(id), totalViews = Sum(views)
+    )
     check page.aggregateInt("rows") == 2
     check page.aggregateInt("totalViews") == 30
-    let empty = await Article.filter(views > 100).aggregate(rows = Count(id), total = Sum(views))
+    let empty =
+      await Article.filter(views > 100).aggregate(rows = Count(id), total = Sum(views))
     check empty.aggregateInt("rows") == 0
     check empty.aggregateValue("total").kind == dvNull
     await cleanup(db, dir)
@@ -181,21 +220,30 @@ suite "querying":
     discard await article(a, "Goodbye 100%")
     proc q(qs: QuerySet[Article]): Future[seq[string]] {.async.} =
       return (await qs.orderBy("title").all()).titles
+
     check (await q(Article.filter(title.contains = "Hello"))) == @["Hello World"]
-    check (await q(Article.filter(title.icontains = "hello"))) == @["Hello World", "hello again"]
+    check (await q(Article.filter(title.icontains = "hello"))) ==
+      @["Hello World", "hello again"]
     check (await q(Article.filter(title.startsWith = "hello"))) == @["hello again"]
-    check (await q(Article.filter(title.istartsWith = "HELLO"))) == @["Hello World", "hello again"]
+    check (await q(Article.filter(title.istartsWith = "HELLO"))) ==
+      @["Hello World", "hello again"]
     check (await q(Article.filter(title.endsWith = "100%"))) == @["Goodbye 100%"]
     check (await q(Article.filter(title.icontains = "0%"))) == @["Goodbye 100%"]
     check (await q(Article.filter(title.icontains = "_"))) == newSeq[string]()
     check (await q(Article.filter(title.iexact = "HELLO WORLD"))) == @["Hello World"]
-    check (await q(Article.filter(title != "Hello World"))) == @["Goodbye 100%", "hello again"]
-    check (await q(Article.filter(title in ["hello again", "nope"]))) == @["hello again"]
-    check (await q(Article.filter(title notin ["hello again"]))) == @["Goodbye 100%", "Hello World"]
+    check (await q(Article.filter(title != "Hello World"))) ==
+      @["Goodbye 100%", "hello again"]
+    check (await q(Article.filter(title in ["hello again", "nope"]))) == @[
+      "hello again"
+    ]
+    check (await q(Article.filter(title notin ["hello again"]))) ==
+      @["Goodbye 100%", "Hello World"]
     check (await q(Article.filter(title.isIn = newSeq[string]()))) == newSeq[string]()
-    check (await q(Article.filter(rating.isNull = true))) == @["Goodbye 100%", "hello again"]
+    check (await q(Article.filter(rating.isNull = true))) ==
+      @["Goodbye 100%", "hello again"]
     check (await q(Article.filter(rating > 4.0))) == @["Hello World"]
-    check (await q(Article.filter(rating = none(float)))) == @["Goodbye 100%", "hello again"]
+    check (await q(Article.filter(rating = none(float)))) ==
+      @["Goodbye 100%", "hello again"]
     check (await q(Article.exclude(title.icontains = "hello"))) == @["Goodbye 100%"]
     check (await Author.filter(email = "ada@example.com").count()) == 1
     check (await Author.filter(email.isNull = true).count()) == 1
@@ -213,7 +261,8 @@ suite "querying":
   asyncTest "bulk update and delete":
     let (db, dir) = await freshDb()
     let a = await author("Ada")
-    for i in 1 .. 4: discard await article(a, "Post " & $i, views = i)
+    for i in 1 .. 4:
+      discard await article(a, "Post " & $i, views = i)
     check (await Article.filter(views <= 2).update(published = true, views = 99)) == 2
     check (await Article.filter(published = true).count()) == 2
     check (await Article.filter(views = 99).delete()) == 2
@@ -300,9 +349,11 @@ suite "querying":
   asyncTest "concurrent operations are serialized safely":
     let (db, dir) = await freshDb()
     var futs: seq[Future[Author]]
-    for i in 0 ..< 50: futs.add author("Author " & $i)
+    for i in 0 ..< 50:
+      futs.add author("Author " & $i)
     await allFutures(futs)
-    for f in futs: check f.completed
+    for f in futs:
+      check f.completed
     check (await Author.objects.count()) == 50
     await cleanup(db, dir)
 
@@ -325,11 +376,15 @@ suite "querying":
     discard await article(a, "Beta", views = 5)
     discard await article(a, "Gamma", views = 9)
     check (await Article.filter(title == "Alpha" or title == "Gamma").count()) == 2
-    check (await Article.filter(any(title = "Alpha", title = "Gamma"), views > 1).count()) == 1
-    check (await Article.filter(all(views >= 5, views < 9) or title == "Alpha").count()) == 2
+    check (
+      await Article.filter(any(title = "Alpha", title = "Gamma"), views > 1).count()
+    ) == 1
+    check (await Article.filter(all(views >= 5, views < 9) or title == "Alpha").count()) ==
+      2
     check (await Article.exclude(title == "Beta" or views < 5).count()) == 1
-    check (await Article.filter(title.icontains == "beta" or views == 1).orderBy("title").all()).titles ==
-      @["Alpha", "Beta"]
+    check (
+      await Article.filter(title.icontains == "beta" or views == 1).orderBy("title").all()
+    ).titles == @["Alpha", "Beta"]
     let ada = (await Author.get(name = "Ada")).get
     check (await Article.filter(author == ada or views > 100).count()) == 3
     await cleanup(db, dir)
@@ -355,12 +410,15 @@ suite "querying":
     check (await Article.filter(author.name = "Ada", views > 1).count()) == 1
 
     # Multi-level chase.
-    check (await Article.filter(author.publisher.name = "Orbit").all()).titles == @["Mine"]
-    check (await Article.filter(author.publisher.name.icontains = "bit").all()).titles == @["Mine"]
+    check (await Article.filter(author.publisher.name = "Orbit").all()).titles ==
+      @["Mine"]
+    check (await Article.filter(author.publisher.name.icontains = "bit").all()).titles ==
+      @["Mine"]
 
     # Comparison operator chased through a relation, and combined with or/any/all.
     check (await Author.filter(name = "Grace").count()) == 1
-    check (await Article.filter(author.name == "Ada" or author.name == "Grace").count()) == 2
+    check (await Article.filter(author.name == "Ada" or author.name == "Grace").count()) ==
+      2
     check (await Article.filter(any(author.name = "Ada", views > 1000)).count()) == 1
     check (await Article.filter(all(author.name = "Grace", views > 10)).count()) == 1
     check (await Article.exclude(author.name == "Ada").count()) == 1
@@ -433,7 +491,8 @@ suite "querying":
     chapter.article = one
     await chapter.save()
     let mark = db.operationCount
-    let people = await Author.objects.orderBy("name").prefetchRelated("articles.chapters").all()
+    let people =
+      await Author.objects.orderBy("name").prefetchRelated("articles.chapters").all()
     check db.operationCount == mark + 3
     var adaTitles = (await people[0].articles()).titles
     adaTitles.sort()
@@ -473,12 +532,14 @@ suite "querying":
     child.parent = root
     await child.save()
     let mark = db.operationCount
-    let loaded = (await Node.objects.filter(name = "child").selectRelated("parent").get()).get
+    let loaded =
+      (await Node.objects.filter(name = "child").selectRelated("parent").get()).get
     check db.operationCount == mark + 1
     let parent = await loaded.parent()
     check parent.get.name == "root"
     check db.operationCount == mark + 1
-    let roots = await Node.objects.filter(name = "root").prefetchRelated("children").all()
+    let roots =
+      await Node.objects.filter(name = "root").prefetchRelated("children").all()
     let kids = await roots[0].children()
     check kids.len == 1
     check kids[0].name == "child"

@@ -2,6 +2,8 @@
 import fastnim/orm
 
 model M {.table: "one".}:
-  name: CharField()
+  name:
+    CharField()
   Meta:
-    table: "two"
+    table:
+      "two"

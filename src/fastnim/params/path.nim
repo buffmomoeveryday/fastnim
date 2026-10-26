@@ -11,8 +11,7 @@ type
     Bool
     Csv
 
-  PathParamSpec* = object
-    ## Parsed name and converter for one path-parameter segment.
+  PathParamSpec* = object ## Parsed name and converter for one path-parameter segment.
     name*: string ## Name exposed to the route handler.
     kind*: PathParamKind ## Converter used to match and decode the segment.
 

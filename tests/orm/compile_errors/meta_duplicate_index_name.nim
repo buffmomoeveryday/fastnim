@@ -2,13 +2,15 @@
 import fastnim/orm
 
 model A:
-  name: CharField()
+  name:
+    CharField()
   Meta:
     indexes:
       Index(fields: ["name"], name: "shared_idx")
 
 model B:
-  name: CharField()
+  name:
+    CharField()
   Meta:
     indexes:
       Index(fields: ["name"], name: "shared_idx")

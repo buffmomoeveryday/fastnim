@@ -22,9 +22,7 @@ type S3ProductAssetsForm = object
 static:
   doAssert not compiles(
     default(S3Client).upload(
-      default(Request),
-      S3ProductAssetsForm,
-      keys = (image: "products/42/image"),
+      default(Request), S3ProductAssetsForm, keys = (image: "products/42/image")
     )
   )
   doAssert not compiles(
@@ -141,9 +139,8 @@ block uploadsParsedDiskFile:
   let directory = createTempDir("fastnim-s3-upload-", "")
   let path = directory / "product.png"
   writeFile(path, "image bytes")
-  let s3 = s3Plugin(
-    initS3UploadOptions("product-assets", productKey), fakeTransport(state)
-  )
+  let s3 =
+    s3Plugin(initS3UploadOptions("product-assets", productKey), fakeTransport(state))
   let file = UploadedFile(
     fieldName: "image",
     filename: "product.png",
@@ -163,21 +160,17 @@ block uploadsParsedDiskFile:
 block streamsConfiguredUploadDirectlyToS3:
   const boundary = "fastnim-s3-test"
   let body =
-    "--" & boundary & "\r\n" &
-    "Content-Disposition: form-data; name=\"image\"; " &
-    "filename=\"product.png\"\r\n" &
-    "Content-Type: image/png\r\n\r\n" &
+    "--" & boundary & "\r\n" & "Content-Disposition: form-data; name=\"image\"; " &
+    "filename=\"product.png\"\r\n" & "Content-Type: image/png\r\n\r\n" &
     "image bytes\r\n--" & boundary & "--\r\n"
   var headers = initTable[string, string]()
   headers["content-type"] = "multipart/form-data; boundary=" & boundary
   let request = initRequest(HttpMethod.Post, "/upload", headers, body)
   let state = FakeS3()
-  let s3 = s3Plugin(
-    initS3UploadOptions("product-assets", productKey), fakeTransport(state)
-  )
-  let uploaded = waitFor s3.upload(
-    request, S3ProductImageForm, key = "products/42/primary"
-  )
+  let s3 =
+    s3Plugin(initS3UploadOptions("product-assets", productKey), fakeTransport(state))
+  let uploaded =
+    waitFor s3.upload(request, S3ProductImageForm, key = "products/42/primary")
 
   doAssert state.partSizes == @[11]
   doAssert uploaded.storage == UploadStorage.External
@@ -188,29 +181,22 @@ block streamsConfiguredUploadDirectlyToS3:
 block streamsTypedFilesToDifferentS3Folders:
   const boundary = "fastnim-s3-assets"
   let body =
-    "--" & boundary & "\r\n" &
-    "Content-Disposition: form-data; name=\"image\"; " &
-    "filename=\"product.png\"\r\n" &
-    "Content-Type: image/png\r\n\r\nimage bytes\r\n" &
-    "--" & boundary & "\r\n" &
-    "Content-Disposition: form-data; name=\"manual\"; " &
-    "filename=\"guide.pdf\"\r\n" &
-    "Content-Type: application/pdf\r\n\r\npdf bytes\r\n" &
+    "--" & boundary & "\r\n" & "Content-Disposition: form-data; name=\"image\"; " &
+    "filename=\"product.png\"\r\n" & "Content-Type: image/png\r\n\r\nimage bytes\r\n" &
+    "--" & boundary & "\r\n" & "Content-Disposition: form-data; name=\"manual\"; " &
+    "filename=\"guide.pdf\"\r\n" & "Content-Type: application/pdf\r\n\r\npdf bytes\r\n" &
     "--" & boundary & "--\r\n"
   var headers = initTable[string, string]()
   headers["content-type"] = "multipart/form-data; boundary=" & boundary
   let request = initRequest(HttpMethod.Post, "/upload", headers, body)
   let state = FakeS3()
-  let s3 = s3Plugin(
-    initS3UploadOptions("product-assets", productKey), fakeTransport(state)
-  )
+  let s3 =
+    s3Plugin(initS3UploadOptions("product-assets", productKey), fakeTransport(state))
   let assets = waitFor s3.upload(
     request,
     S3ProductAssetsForm,
-    keys = (
-      image: "products/42/images/primary",
-      manual: "products/42/manuals/guide.pdf",
-    ),
+    keys =
+      (image: "products/42/images/primary", manual: "products/42/manuals/guide.pdf"),
   )
 
   doAssert assets.image.stored.key == "products/42/images/primary"
@@ -230,9 +216,7 @@ block validatesConfiguration:
   doAssertRaises ValueError:
     discard initS3Config("bucket", "us-east-1", "", "secret", productKey)
   let optionsWithoutKey = initS3UploadOptions("product-assets")
-  let storeWithoutKey = newS3UploadStore(
-    optionsWithoutKey, fakeTransport(state)
-  )
+  let storeWithoutKey = newS3UploadStore(optionsWithoutKey, fakeTransport(state))
   doAssertRaises ValueError:
     discard waitFor storeWithoutKey.begin(
       UploadMetadata(fieldName: "image", filename: "product.png")

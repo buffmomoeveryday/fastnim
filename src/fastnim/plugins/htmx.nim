@@ -239,8 +239,7 @@ template htmxPrompt*(request: Request): string =
   ##
   ## htmx 4 sends this header from the ``hx-prompt`` extension.
   htmxV2(
-    request,
-    "htmxPrompt",
+    request, "htmxPrompt",
     "htmx 4 does not send HX-Prompt unless the hx-prompt extension is loaded.",
   )
   htmxPromptImpl(request)
@@ -250,8 +249,7 @@ template htmxTrigger*(request: Request): string =
   ##
   ## htmx 4 sends that element as ``HX-Source``. Use ``htmxSource``.
   htmxV2(
-    request,
-    "htmxTrigger",
+    request, "htmxTrigger",
     "htmx 4 sends the triggering element as HX-Source. Use htmxSource.",
   )
   htmxTriggerImpl(request)
@@ -261,17 +259,14 @@ template htmxTriggerName*(request: Request): string =
   ##
   ## htmx 4 folds this into ``HX-Source``. Use ``htmxSource``.
   htmxV2(
-    request,
-    "htmxTriggerName",
-    "htmx 4 does not send HX-Trigger-Name. Use htmxSource.",
+    request, "htmxTriggerName", "htmx 4 does not send HX-Trigger-Name. Use htmxSource."
   )
   htmxTriggerNameImpl(request)
 
 template htmxSource*(request: Request): string =
   ## Returns ``HX-Source`` in ``tag#id`` form. htmx 4 only.
   htmxV4(
-    request,
-    "htmxSource",
+    request, "htmxSource",
     "Select htmx 4 with htmxPlugin(version = 4). htmx 2 sends the element id in HX-Trigger.",
   )
   htmxSourceImpl(request)
@@ -279,28 +274,19 @@ template htmxSource*(request: Request): string =
 template htmxSourceTag*(request: Request): string =
   ## Returns the tag from ``HX-Source``, such as ``button`` in ``button#save``.
   ## htmx 4 only.
-  htmxV4(
-    request,
-    "htmxSourceTag",
-    "Select htmx 4 with htmxPlugin(version = 4).",
-  )
+  htmxV4(request, "htmxSourceTag", "Select htmx 4 with htmxPlugin(version = 4).")
   htmxElementParts(htmxSourceImpl(request)).tag
 
 template htmxSourceId*(request: Request): string =
   ## Returns the id from ``HX-Source``, such as ``save`` in ``button#save``.
   ## htmx 4 only.
-  htmxV4(
-    request,
-    "htmxSourceId",
-    "Select htmx 4 with htmxPlugin(version = 4).",
-  )
+  htmxV4(request, "htmxSourceId", "Select htmx 4 with htmxPlugin(version = 4).")
   htmxElementParts(htmxSourceImpl(request)).id
 
 template htmxRequestType*(request: Request): string =
   ## Returns ``HX-Request-Type``: ``partial`` or ``full``. htmx 4 only.
   htmxV4(
-    request,
-    "htmxRequestType",
+    request, "htmxRequestType",
     "Select htmx 4 with htmxPlugin(version = 4). htmx 2 does not send HX-Request-Type.",
   )
   htmxRequestTypeImpl(request)
@@ -308,8 +294,7 @@ template htmxRequestType*(request: Request): string =
 template htmxTargetTag*(request: Request): string =
   ## Returns the tag from htmx 4's ``HX-Target`` value. htmx 4 only.
   htmxV4(
-    request,
-    "htmxTargetTag",
+    request, "htmxTargetTag",
     "Select htmx 4 with htmxPlugin(version = 4). htmx 2 sends the target id in HX-Target.",
   )
   htmxElementParts(request.htmxTarget).tag
@@ -317,8 +302,7 @@ template htmxTargetTag*(request: Request): string =
 template htmxTargetId*(request: Request): string =
   ## Returns the id from htmx 4's ``HX-Target`` value. htmx 4 only.
   htmxV4(
-    request,
-    "htmxTargetId",
+    request, "htmxTargetId",
     "Select htmx 4 with htmxPlugin(version = 4). htmx 2 sends the target id in HX-Target.",
   )
   htmxElementParts(request.htmxTarget).id
@@ -362,13 +346,12 @@ template htmxTrigger*(
 proc bindHtmxVersion(version: int): NimNode {.compileTime.} =
   if htmxVersion != 0 and htmxVersion != version:
     error(
-      "htmxPlugin(version = " & $version &
-        ") conflicts with htmx " & $htmxVersion &
+      "htmxPlugin(version = " & $version & ") conflicts with htmx " & $htmxVersion &
         " helpers already used. Call htmxPlugin before those helpers."
     )
   htmxVersion = version
   let versionNode = newLit(version)
-  quote do:
+  quote:
     initHtmxPlugin(`versionNode`)
 
 macro htmxPlugin*(version: static[int]): untyped =
@@ -383,5 +366,5 @@ macro htmxPlugin*(version: static[int]): untyped =
 
 macro htmxPlugin*(): untyped =
   ## Selects htmx 2 and installs ``Vary: HX-Request``.
-  result = quote do:
+  result = quote:
     htmxPlugin(2)

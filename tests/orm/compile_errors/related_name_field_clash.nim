@@ -2,7 +2,9 @@
 import fastnim/orm
 
 model User:
-  books: CharField()
+  books:
+    CharField()
 
 model Novel:
-  owner: ForeignKey(User, relatedName: "books")
+  owner:
+    ForeignKey(User, relatedName: "books")

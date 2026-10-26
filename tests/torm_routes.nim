@@ -3,11 +3,14 @@ import fastnim
 import fastnim/orm
 
 model Author:
-  name: CharField(maxLength: 80)
+  name:
+    CharField(maxLength: 80)
 
 model Book:
-  author: ForeignKey(Author, onDelete: Cascade)
-  title: CharField()
+  author:
+    ForeignKey(Author, onDelete: Cascade)
+  title:
+    CharField()
 
 let app = initFastNim(logs = false)
 
@@ -33,9 +36,7 @@ block decodesModelWithoutPrimaryKey:
 
 block decodesForeignKeyAsId:
   let response = app.handleSync(
-    initRequest(
-      HttpMethod.Post, "/books", body = """{"authorId":4,"title":"Notes"}"""
-    )
+    initRequest(HttpMethod.Post, "/books", body = """{"authorId":4,"title":"Notes"}""")
   )
   doAssert response.status == 201
   let payload = parseJson(response.body)
@@ -45,16 +46,14 @@ block decodesForeignKeyAsId:
 
 block openApiDocumentsInputWithoutPrimaryKey:
   let document = app.openApiDocument()
-  let authorSchema =
-    document["paths"]["/authors"]["post"]["requestBody"]["content"][
-      "application/json"
-    ]["schema"]
+  let authorSchema = document["paths"]["/authors"]["post"]["requestBody"]["content"][
+    "application/json"
+  ]["schema"]
   doAssert "name" in authorSchema["properties"]
   doAssert "id" notin authorSchema["properties"]
-  let bookSchema =
-    document["paths"]["/books"]["post"]["requestBody"]["content"][
-      "application/json"
-    ]["schema"]
+  let bookSchema = document["paths"]["/books"]["post"]["requestBody"]["content"][
+    "application/json"
+  ]["schema"]
   doAssert "authorId" in bookSchema["properties"]
   doAssert "title" in bookSchema["properties"]
   doAssert "id" notin bookSchema["properties"]

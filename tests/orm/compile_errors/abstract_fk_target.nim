@@ -2,7 +2,9 @@
 import fastnim/orm
 
 model Base {.abstract.}:
-  name: CharField()
+  name:
+    CharField()
 
 model Book:
-  owner: ForeignKey(Base)
+  owner:
+    ForeignKey(Base)

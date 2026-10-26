@@ -15,10 +15,16 @@ proc testApp(): TestClient =
     %*{"id": request.pathParam("id"), "page": request.queryParam("page", "1")}
   api.post("/items", body = Item, responses = @[(201, Item)]):
     created body
-  api.put("/items/{id}", proc(request: Request): Response {.raises: [].} =
-    json(%*{"updated": request.pathParam("id")}))
-  api.patch("/items/{id}", proc(request: Request): Response {.raises: [].} =
-    json(%*{"patched": request.pathParam("id")}))
+  api.put(
+    "/items/{id}",
+    proc(request: Request): Response {.raises: [].} =
+      json(%*{"updated": request.pathParam("id")}),
+  )
+  api.patch(
+    "/items/{id}",
+    proc(request: Request): Response {.raises: [].} =
+      json(%*{"patched": request.pathParam("id")}),
+  )
   api.delete("/items/{id}", responses = @[(200, Item)]):
     ok Item(id: 1, name: "deleted")
   initTestClient(api)
@@ -59,7 +65,7 @@ suite "TestClient":
   test "forwards request headers":
     let api = initFastNim(logs = false)
     api.get("/who"):
-      %*{ "agent": request.header("x-agent") }
+      %*{"agent": request.header("x-agent")}
     let client = initTestClient(api)
     let response = client.get("/who", {"x-agent": "spec"}.toTable)
     check response.json()["agent"].getStr() == "spec"

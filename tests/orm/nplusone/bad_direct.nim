@@ -2,11 +2,14 @@
 import chronos, fastnim/orm
 
 model Author:
-  name: CharField()
+  name:
+    CharField()
 
 model Article:
-  author: ForeignKey(Author, onDelete: Cascade)
-  title: CharField()
+  author:
+    ForeignKey(Author, onDelete: Cascade)
+  title:
+    CharField()
 
 proc run() {.async.} =
   checkNPlusOne:

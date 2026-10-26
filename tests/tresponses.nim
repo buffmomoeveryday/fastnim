@@ -91,9 +91,8 @@ block responseHeadersRetainRepeatedValues:
   response.addHeader("Set-Cookie", "theme=dark; Path=/")
   response.addHeader("set-cookie", "session=abc; HttpOnly")
   doAssert response.headers["SET-COOKIE"] == "session=abc; HttpOnly"
-  doAssert response.getAllHeaders("Set-Cookie") == @[
-    "theme=dark; Path=/", "session=abc; HttpOnly"
-  ]
+  doAssert response.getAllHeaders("Set-Cookie") ==
+    @["theme=dark; Path=/", "session=abc; HttpOnly"]
   var cookies: seq[string]
   for name, value in response.headers:
     if name == "set-cookie":
@@ -109,9 +108,8 @@ block requestHeadersRetainRepeatedValues:
   headers.addHeader("warning", "299 second warning")
   let request = initRequest(HttpMethod.Get, "/", headers)
   doAssert request.headers["WARNING"] == "299 second warning"
-  doAssert request.getAllHeaders("Warning") == @[
-    "199 first warning", "299 second warning"
-  ]
+  doAssert request.getAllHeaders("Warning") ==
+    @["199 first warning", "299 second warning"]
 
 block legacyHeaderTablesRemainAccepted:
   var headers = initTable[string, string]()
@@ -148,11 +146,12 @@ block invalidJsonBody:
   let response =
     app.handleSync(initRequest(HttpMethod.Post, "/items/from-body", body = "not json"))
   doAssert response.status == 400
-  doAssert parseJson(response.body) == %*{
-    "code": "invalid_request_body",
-    "message": "invalid JSON request body",
-    "fields": {},
-  }
+  doAssert parseJson(response.body) ==
+    %*{
+      "code": "invalid_request_body",
+      "message": "invalid JSON request body",
+      "fields": {},
+    }
 
 block jsonNameEncodesAndDecodesRequestBodies:
   let helper = initFastNim(logs = false)
@@ -181,9 +180,7 @@ block jsonNameAppliesToTypedResponses:
 
 block jsonNameRejectsAmbiguousInput:
   let helper = initFastNim(logs = false)
-  helper.post(
-    "/profile", body = RenamedProfile, responses = @[(200, RenamedProfile)]
-  ):
+  helper.post("/profile", body = RenamedProfile, responses = @[(200, RenamedProfile)]):
     ok body
 
   let response = helper.handleSync(
@@ -240,10 +237,9 @@ block responseFieldOverridesWorkInTypedRoutes:
   doAssert "boolVal" notin stringProperties
   doAssert stringProperties["strVal"]["type"].getStr == "string"
 
-type
-  Member = object
-    name: string
-    age: int
+type Member = object
+  name: string
+  age: int
 
 block jsonHelperSerializesValues:
   let helper = initFastNim(logs = false)

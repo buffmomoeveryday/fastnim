@@ -14,29 +14,35 @@ type FakeUploadState = ref object
   completed, aborted, removed: int
 
 type ProductImageForm = object
-  image* {.upload(
-    contentTypes = ["image/jpeg", "image/png"],
-    storage = UploadStorage.Memory,
-    memorySizeCap = 1024,
-    maxRequestSize = 4096,
-    maxFileSize = 1024,
-  ).}: UploadedFile
+  image* {.
+    upload(
+      contentTypes = ["image/jpeg", "image/png"],
+      storage = UploadStorage.Memory,
+      memorySizeCap = 1024,
+      maxRequestSize = 4096,
+      maxFileSize = 1024,
+    )
+  .}: UploadedFile
 
 type ProductAssetsForm = object
-  image* {.upload(
-    contentTypes = ["image/png"],
-    storage = UploadStorage.Memory,
-    memorySizeCap = 1024,
-    maxRequestSize = 4096,
-    maxFileSize = 1024,
-  ).}: UploadedFile
-  manual* {.upload(
-    contentTypes = ["application/pdf"],
-    storage = UploadStorage.Memory,
-    memorySizeCap = 1024,
-    maxRequestSize = 4096,
-    maxFileSize = 512,
-  ).}: UploadedFile
+  image* {.
+    upload(
+      contentTypes = ["image/png"],
+      storage = UploadStorage.Memory,
+      memorySizeCap = 1024,
+      maxRequestSize = 4096,
+      maxFileSize = 1024,
+    )
+  .}: UploadedFile
+  manual* {.
+    upload(
+      contentTypes = ["application/pdf"],
+      storage = UploadStorage.Memory,
+      memorySizeCap = 1024,
+      maxRequestSize = 4096,
+      maxFileSize = 512,
+    )
+  .}: UploadedFile
 
 proc newFakeUploadStore(state: FakeUploadState): UploadStore =
   let begin: UploadBeginProc = proc(
@@ -52,9 +58,7 @@ proc newFakeUploadStore(state: FakeUploadState): UploadStore =
     .} =
       {.cast(gcsafe).}:
         inc(state.completed)
-      let removeCb: UploadRemoveProc = proc(): Future[void] {.
-          async: (raises: [])
-      .} =
+      let removeCb: UploadRemoveProc = proc(): Future[void] {.async: (raises: []).} =
         {.cast(gcsafe).}:
           inc(state.removed)
       return initStoredUpload(
@@ -73,12 +77,11 @@ proc multipartBody(parts: openArray[string]): string =
   result.add("--" & Boundary & "--\r\n")
 
 proc fieldPart(name, value: string): string =
-  "Content-Disposition: form-data; name=\"" & name & "\"\r\n\r\n" &
-    value & "\r\n"
+  "Content-Disposition: form-data; name=\"" & name & "\"\r\n\r\n" & value & "\r\n"
 
 proc filePart(name, filename, contentType, value: string): string =
-  "Content-Disposition: form-data; name=\"" & name & "\"; filename=\"" &
-    filename & "\"\r\nContent-Type: " & contentType & "\r\n\r\n" & value & "\r\n"
+  "Content-Disposition: form-data; name=\"" & name & "\"; filename=\"" & filename &
+    "\"\r\nContent-Type: " & contentType & "\r\n\r\n" & value & "\r\n"
 
 proc multipartRequest(body: string): Request =
   var headers = initTable[string, string]()
@@ -90,13 +93,14 @@ proc removeUpload(path: string) =
     removeFile(path)
 
 block mixedFieldsAndMemoryFile:
-  let body = multipartBody([
-    fieldPart("title", "Red mug"),
-    filePart("image", "mug.png", "image/png", "PNG\0DATA"),
-  ])
-  let options = initMultipartOptions(
-    storage = UploadStorage.Memory, memorySizeCap = 1024
+  let body = multipartBody(
+    [
+      fieldPart("title", "Red mug"),
+      filePart("image", "mug.png", "image/png", "PNG\0DATA"),
+    ]
   )
+  let options =
+    initMultipartOptions(storage = UploadStorage.Memory, memorySizeCap = 1024)
   let form = waitFor parseMultipart(multipartRequest(body), options)
   doAssert form.firstField("title") == "Red mug"
   doAssert form.files.len == 1
@@ -107,15 +111,16 @@ block mixedFieldsAndMemoryFile:
   doAssert form.files[0].data == "PNG\0DATA"
 
 block multipleFilesAndRepeatedFields:
-  let body = multipartBody([
-    fieldPart("tag", "front"),
-    fieldPart("tag", "catalog"),
-    filePart("images", "front.jpg", "image/jpeg", "one"),
-    filePart("images", "back.jpg", "image/jpeg", "two"),
-  ])
-  let options = initMultipartOptions(
-    storage = UploadStorage.Memory, memorySizeCap = 1024
+  let body = multipartBody(
+    [
+      fieldPart("tag", "front"),
+      fieldPart("tag", "catalog"),
+      filePart("images", "front.jpg", "image/jpeg", "one"),
+      filePart("images", "back.jpg", "image/jpeg", "two"),
+    ]
   )
+  let options =
+    initMultipartOptions(storage = UploadStorage.Memory, memorySizeCap = 1024)
   let form = waitFor parseMultipart(multipartRequest(body), options)
   doAssert form.fields["tag"] == @["front", "catalog"]
   doAssert form.files.len == 2
@@ -125,16 +130,13 @@ block multipleFilesAndRepeatedFields:
 block streamsFileToDisk:
   let directory = createTempDir("fastnim-multipart-", "")
   let content = repeat("0123456789abcdef", 128 * 1024)
-  let body = multipartBody([
-    filePart("image", "large.bin", "application/octet-stream", content)
-  ])
+  let body =
+    multipartBody([filePart("image", "large.bin", "application/octet-stream", content)])
   let options = initMultipartOptions(
     uploadDir = directory,
     chunkSize = 4096,
-    limits = initUploadLimits(
-      maxRequestSize = 3 * 1024 * 1024,
-      maxFileSize = 3 * 1024 * 1024,
-    ),
+    limits =
+      initUploadLimits(maxRequestSize = 3 * 1024 * 1024, maxFileSize = 3 * 1024 * 1024),
   )
   var offset = 0
   var reads = 0
@@ -148,7 +150,7 @@ block streamsFileToDisk:
       if offset >= body.len:
         return ""
       let count = min(maxBytes, body.len - offset)
-      result = body[offset..<offset + count]
+      result = body[offset ..< offset + count]
       offset += count
   let close: BodyCloseProc = proc(): Future[void] {.async: (raises: []).} =
     discard
@@ -177,9 +179,9 @@ block rejectsOversizedFileThroughApplicationBoundary:
     text("uploaded")
 
   let response = app.handleSync(
-    multipartRequest(multipartBody([
-      filePart("image", "large.png", "image/png", "four")
-    ]))
+    multipartRequest(
+      multipartBody([filePart("image", "large.png", "image/png", "four")])
+    )
   )
   doAssert response.status == 413
   doAssert "size limit" in response.body
@@ -190,10 +192,12 @@ block enforcesFileCount:
     memorySizeCap = 1024,
     limits = initUploadLimits(maxFiles = 1),
   )
-  let body = multipartBody([
-    filePart("image", "one.png", "image/png", "one"),
-    filePart("image", "two.png", "image/png", "two"),
-  ])
+  let body = multipartBody(
+    [
+      filePart("image", "one.png", "image/png", "one"),
+      filePart("image", "two.png", "image/png", "two"),
+    ]
+  )
   var rejected = false
   try:
     discard waitFor parseMultipart(multipartRequest(body), options)
@@ -211,9 +215,8 @@ block enforcesContentTypeHook:
     memorySizeCap = 1024,
     limits = initUploadLimits(allowContentType = allowImages),
   )
-  let body = multipartBody([
-    filePart("image", "payload.exe", "application/octet-stream", "bad")
-  ])
+  let body =
+    multipartBody([filePart("image", "payload.exe", "application/octet-stream", "bad")])
   var rejected = false
   try:
     discard waitFor parseMultipart(multipartRequest(body), options)
@@ -230,10 +233,12 @@ block parsesDeclarativeSingleUpload:
     maxRequestSize = 4096,
     maxFileSize = 1024,
   )
-  let body = multipartBody([
-    fieldPart("caption", "Front view"),
-    filePart("image", "product.png", "image/png", "image bytes"),
-  ])
+  let body = multipartBody(
+    [
+      fieldPart("caption", "Front view"),
+      filePart("image", "product.png", "image/png", "image bytes"),
+    ]
+  )
   let image = waitFor multipartRequest(body).parseUpload(config)
   doAssert image.fieldName == "image"
   doAssert image.filename == "product.png"
@@ -241,9 +246,8 @@ block parsesDeclarativeSingleUpload:
   doAssert image.data == "image bytes"
 
 block parsesTypedSingleUpload:
-  let body = multipartBody([
-    filePart("image", "product.png", "image/png", "image bytes")
-  ])
+  let body =
+    multipartBody([filePart("image", "product.png", "image/png", "image bytes")])
   let form = waitFor multipartRequest(body).parseUpload(ProductImageForm)
   doAssert form.image.fieldName == "image"
   doAssert form.image.filename == "product.png"
@@ -251,10 +255,12 @@ block parsesTypedSingleUpload:
   doAssert form.image.data == "image bytes"
 
 block parsesTypedMultipleUploads:
-  let body = multipartBody([
-    filePart("manual", "guide.pdf", "application/pdf", "pdf bytes"),
-    filePart("image", "product.png", "image/png", "image bytes"),
-  ])
+  let body = multipartBody(
+    [
+      filePart("manual", "guide.pdf", "application/pdf", "pdf bytes"),
+      filePart("image", "product.png", "image/png", "image bytes"),
+    ]
+  )
   let form = waitFor multipartRequest(body).parseUpload(ProductAssetsForm)
   doAssert form.image.filename == "product.png"
   doAssert form.image.data == "image bytes"
@@ -278,10 +284,12 @@ block enforcesPerFieldSizeForMultipleUploads:
       maxFileSize = 3,
     ),
   ]
-  let body = multipartBody([
-    filePart("image", "product.png", "image/png", "ok"),
-    filePart("manual", "guide.pdf", "application/pdf", "four"),
-  ])
+  let body = multipartBody(
+    [
+      filePart("image", "product.png", "image/png", "ok"),
+      filePart("manual", "guide.pdf", "application/pdf", "four"),
+    ]
+  )
   var rejected = false
   try:
     discard waitFor multipartRequest(body).parseUploads(configs)
@@ -296,9 +304,8 @@ block declarativeUploadRequiresConfiguredFile:
     storage = UploadStorage.Memory,
     memorySizeCap = 1024,
   )
-  let body = multipartBody([
-    filePart("attachment", "product.png", "image/png", "image bytes")
-  ])
+  let body =
+    multipartBody([filePart("attachment", "product.png", "image/png", "image bytes")])
   var rejected = false
   try:
     discard waitFor multipartRequest(body).parseUpload(config)
@@ -313,9 +320,8 @@ block declarativeUploadEnforcesContentTypes:
     storage = UploadStorage.Memory,
     memorySizeCap = 1024,
   )
-  let body = multipartBody([
-    filePart("image", "product.exe", "application/octet-stream", "bad")
-  ])
+  let body =
+    multipartBody([filePart("image", "product.exe", "application/octet-stream", "bad")])
   var rejected = false
   try:
     discard waitFor multipartRequest(body).parseUpload(config)
@@ -333,12 +339,8 @@ block memoryModeRequiresAndEnforcesCap:
   doAssertRaises ValueError:
     discard initMultipartOptions(storage = UploadStorage.Memory)
 
-  let options = initMultipartOptions(
-    storage = UploadStorage.Memory, memorySizeCap = 3
-  )
-  let body = multipartBody([
-    filePart("image", "large.png", "image/png", "four")
-  ])
+  let options = initMultipartOptions(storage = UploadStorage.Memory, memorySizeCap = 3)
+  let body = multipartBody([filePart("image", "large.png", "image/png", "four")])
   var rejected = false
   try:
     discard waitFor parseMultipart(multipartRequest(body), options)
@@ -421,12 +423,10 @@ block streamsThroughExternalStore:
   let options = initMultipartOptions(
     limits = initUploadLimits(maxRequestSize = 4096, maxFileSize = 1024)
   )
-  let body = multipartBody([
-    filePart("image", "product.png", "image/png", "image bytes")
-  ])
-  let form = waitFor parseMultipart(
-    multipartRequest(body), options, newFakeUploadStore(state)
-  )
+  let body =
+    multipartBody([filePart("image", "product.png", "image/png", "image bytes")])
+  let form =
+    waitFor parseMultipart(multipartRequest(body), options, newFakeUploadStore(state))
   doAssert state.chunks.join() == "image bytes"
   doAssert state.completed == 1
   doAssert state.aborted == 0
@@ -439,14 +439,11 @@ block abortsExternalStoreAfterLimitFailure:
   let options = initMultipartOptions(
     limits = initUploadLimits(maxRequestSize = 4096, maxFileSize = 3)
   )
-  let body = multipartBody([
-    filePart("image", "too-large.png", "image/png", "four")
-  ])
+  let body = multipartBody([filePart("image", "too-large.png", "image/png", "four")])
   var rejected = false
   try:
-    discard waitFor parseMultipart(
-      multipartRequest(body), options, newFakeUploadStore(state)
-    )
+    discard
+      waitFor parseMultipart(multipartRequest(body), options, newFakeUploadStore(state))
   except MultipartError as exc:
     rejected = exc.status == 413
   doAssert rejected
@@ -456,19 +453,19 @@ block abortsExternalStoreAfterLimitFailure:
 block rollsBackCompletedExternalUploadsAfterLaterFailure:
   let state = FakeUploadState()
   let options = initMultipartOptions(
-    limits = initUploadLimits(
-      maxRequestSize = 4096, maxFileSize = 1024, maxFieldSize = 3
-    )
+    limits =
+      initUploadLimits(maxRequestSize = 4096, maxFileSize = 1024, maxFieldSize = 3)
   )
-  let body = multipartBody([
-    filePart("image", "product.png", "image/png", "ok"),
-    fieldPart("caption", "too long"),
-  ])
+  let body = multipartBody(
+    [
+      filePart("image", "product.png", "image/png", "ok"),
+      fieldPart("caption", "too long"),
+    ]
+  )
   var rejected = false
   try:
-    discard waitFor parseMultipart(
-      multipartRequest(body), options, newFakeUploadStore(state)
-    )
+    discard
+      waitFor parseMultipart(multipartRequest(body), options, newFakeUploadStore(state))
   except MultipartError as exc:
     rejected = exc.status == 413
   doAssert rejected

@@ -7,9 +7,9 @@ let cacheDir = getTempDir() / "fastnim_pathparams_compile_fail"
 
 proc checkCompileFailure(fileName, expectedMessage: string) =
   let command =
-    quoteShell(getCurrentCompilerExe()) &
-      " check --hints:off --nimcache:" & quoteShell(cacheDir) & " --path:" &
-      quoteShell(sourceDir) & " " & quoteShell(fixtureDir / fileName)
+    quoteShell(getCurrentCompilerExe()) & " check --hints:off --nimcache:" &
+    quoteShell(cacheDir) & " --path:" & quoteShell(sourceDir) & " " &
+    quoteShell(fixtureDir / fileName)
   let (output, exitCode) = execCmdEx(command)
   check exitCode != 0
   check expectedMessage in output

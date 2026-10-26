@@ -28,41 +28,28 @@ proc headersWith(pairs: openArray[(string, string)]): Headers =
 
 block rejectsOversizedBufferedBody:
   handlerCalls = 0
-  let app = initFastNim(
-    logs = false, limits = initRequestLimits(maxBodySize = 4)
-  )
+  let app = initFastNim(logs = false, limits = initRequestLimits(maxBodySize = 4))
   app.post("/items"):
     handlerCalls.inc
     text("ok")
-  let oversized = app.handleSync(
-    initRequest(HttpMethod.Post, "/items", body = "abcde")
-  )
+  let oversized = app.handleSync(initRequest(HttpMethod.Post, "/items", body = "abcde"))
   doAssert oversized.status == 413
   doAssert "request body exceeds the size limit" in oversized.body
   doAssert parseJson(oversized.body)["code"].getStr() == "content_too_large"
   doAssert parseJson(oversized.body)["fields"].len == 0
   doAssert handlerCalls == 0
-  let allowed = app.handleSync(
-    initRequest(HttpMethod.Post, "/items", body = "abcd")
-  )
+  let allowed = app.handleSync(initRequest(HttpMethod.Post, "/items", body = "abcd"))
   doAssert allowed.status == 200
   doAssert handlerCalls == 1
 
 block rejectsDeclaredContentLength:
   handlerCalls = 0
-  let app = initFastNim(
-    logs = false, limits = initRequestLimits(maxBodySize = 4)
-  )
+  let app = initFastNim(logs = false, limits = initRequestLimits(maxBodySize = 4))
   app.post("/items"):
     handlerCalls.inc
     text("ok")
   let response = app.handleSync(
-    initRequest(
-      HttpMethod.Post,
-      "/items",
-      headersWith({"content-length": "1000"}),
-      "",
-    )
+    initRequest(HttpMethod.Post, "/items", headersWith({"content-length": "1000"}), "")
   )
   doAssert response.status == 413
   doAssert handlerCalls == 0
@@ -71,16 +58,13 @@ block rejectsOversizedHeaders:
   let app = initFastNim(
     logs = false,
     limits = initRequestLimits(
-      maxHeaderNameSize = 8,
-      maxHeaderValueSize = 8,
-      maxHeaderCount = 2,
+      maxHeaderNameSize = 8, maxHeaderValueSize = 8, maxHeaderCount = 2
     ),
   )
   app.get("/"):
     text("ok")
-  let longName = app.handleSync(
-    initRequest(HttpMethod.Get, "/", headersWith({"toolongname": "x"}))
-  )
+  let longName =
+    app.handleSync(initRequest(HttpMethod.Get, "/", headersWith({"toolongname": "x"})))
   doAssert longName.status == 431
   doAssert "header name" in longName.body
   let longValue = app.handleSync(
@@ -89,17 +73,12 @@ block rejectsOversizedHeaders:
   doAssert longValue.status == 431
   doAssert "header value" in longValue.body
   let tooMany = app.handleSync(
-    initRequest(
-      HttpMethod.Get,
-      "/",
-      headersWith({"a": "1", "b": "2", "c": "3"}),
-    )
+    initRequest(HttpMethod.Get, "/", headersWith({"a": "1", "b": "2", "c": "3"}))
   )
   doAssert tooMany.status == 431
   doAssert "too many headers" in tooMany.body
-  let allowed = app.handleSync(
-    initRequest(HttpMethod.Get, "/", headersWith({"accept": "text"}))
-  )
+  let allowed =
+    app.handleSync(initRequest(HttpMethod.Get, "/", headersWith({"accept": "text"})))
   doAssert allowed.status == 200
 
 block normalRequestIsUnaffected:
@@ -108,10 +87,7 @@ block normalRequestIsUnaffected:
     text(request.body)
   let response = app.handleSync(
     initRequest(
-      HttpMethod.Post,
-      "/items",
-      headersWith({"content-type": "text/plain"}),
-      "hello",
+      HttpMethod.Post, "/items", headersWith({"content-type": "text/plain"}), "hello"
     )
   )
   doAssert response.status == 200
@@ -148,9 +124,7 @@ block cancelsHandlerThatExceedsTimeout:
 
 block rejectsMultipartBeforeParsing:
   handlerCalls = 0
-  let app = initFastNim(
-    logs = false, limits = initRequestLimits(maxBodySize = 32)
-  )
+  let app = initFastNim(logs = false, limits = initRequestLimits(maxBodySize = 32))
   app.post("/upload"):
     handlerCalls.inc
     discard await request.parseMultipart()
@@ -163,9 +137,7 @@ block rejectsMultipartBeforeParsing:
     initRequest(
       HttpMethod.Post,
       "/upload",
-      headersWith({
-        "content-type": "multipart/form-data; boundary=" & Boundary,
-      }),
+      headersWith({"content-type": "multipart/form-data; boundary=" & Boundary}),
       body,
     )
   )
@@ -178,8 +150,7 @@ block handlerTimeoutRemovesPartialUpload:
     let directory = createTempDir("fastnim-limit-", "")
     let options = initMultipartOptions(uploadDir = directory, chunkSize = 1024)
     let app = initFastNim(
-      logs = false,
-      limits = initRequestLimits(handlerTimeout = 500.milliseconds),
+      logs = false, limits = initRequestLimits(handlerTimeout = 500.milliseconds)
     )
     app.post("/upload"):
       try:
@@ -206,9 +177,9 @@ block handlerTimeoutRemovesPartialUpload:
     var request = initRequest(
       HttpMethod.Post,
       "/upload",
-      headersWith({
-        "content-type": "multipart/form-data; boundary=\"" & Boundary & "\"",
-      }),
+      headersWith(
+        {"content-type": "multipart/form-data; boundary=\"" & Boundary & "\""}
+      ),
     )
     request.attachBodySource(newRequestBodySource(read, close))
     let response = await app.handle(request)
@@ -237,9 +208,7 @@ proc exchange(port: Port, raw: string): Future[string] {.async.} =
   finally:
     await connection.closeWait()
 
-proc stalledBodyExchange(
-    port: Port, path: string
-): Future[string] {.async.} =
+proc stalledBodyExchange(port: Port, path: string): Future[string] {.async.} =
   let connection = await connect(initTAddress("127.0.0.1", port))
   try:
     discard await connection.write(
@@ -297,10 +266,8 @@ block loopbackRejectsStalledAndSlowBodies:
 block loopbackAppliesTotalBodyReadDeadline:
   let app = initFastNim(
     logs = false,
-    limits = initRequestLimits(
-      bodyReadTimeout = 100.milliseconds,
-      minBodyBytesPerSecond = 0,
-    ),
+    limits =
+      initRequestLimits(bodyReadTimeout = 100.milliseconds, minBodyBytesPerSecond = 0),
   )
   app.post("/body"):
     text(request.body)
@@ -315,10 +282,8 @@ block loopbackAppliesTotalBodyReadDeadline:
 block loopbackCapsConcurrentHandlers:
   concurrentHandlers = 0
   peakConcurrentHandlers = 0
-  let app = initFastNim(
-    logs = false,
-    limits = initRequestLimits(maxConcurrentHandlers = 1),
-  )
+  let app =
+    initFastNim(logs = false, limits = initRequestLimits(maxConcurrentHandlers = 1))
   app.get("/hold"):
     inc concurrentHandlers
     peakConcurrentHandlers = max(peakConcurrentHandlers, concurrentHandlers)
@@ -340,6 +305,7 @@ block loopbackCapsConcurrentHandlers:
     doAssert completed.startsWith("HTTP/1.1 200"), completed
     doAssert second.startsWith("HTTP/1.1 503"), second
     doAssert peakConcurrentHandlers == 1
+
   try:
     waitFor exercise(server.address.port)
   finally:
@@ -347,13 +313,9 @@ block loopbackCapsConcurrentHandlers:
 
 block loopbackCapsSseConnectionsSeparately:
   let sseLimits = initSseLimits(
-    maxConnections = 1,
-    idleTimeout = 1.seconds,
-    heartbeatInterval = InfiniteDuration,
+    maxConnections = 1, idleTimeout = 1.seconds, heartbeatInterval = InfiniteDuration
   )
-  let app = initFastNim(
-    logs = false, limits = initRequestLimits(sse = sseLimits)
-  )
+  let app = initFastNim(logs = false, limits = initRequestLimits(sse = sseLimits))
   app.sse("/events"):
     await sleepAsync(2.seconds)
   let server = app.serve(port = 0)
@@ -365,12 +327,12 @@ block loopbackCapsSseConnectionsSeparately:
       )
       await sleepAsync(50.milliseconds)
       let second = await exchange(
-        port,
-        "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        port, "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
       )
       doAssert second.startsWith("HTTP/1.1 503"), second
     finally:
       await first.closeWait()
+
   try:
     waitFor exercise(server.address.port)
   finally:
@@ -389,18 +351,17 @@ block loopbackCapsAcceptedConnections:
     try:
       await sleepAsync(25.milliseconds)
       let rejected = await exchange(
-        port,
-        "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        port, "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
       )
       doAssert rejected.len == 0, rejected
     finally:
       await held.closeWait()
     await sleepAsync(25.milliseconds)
     let accepted = await exchange(
-      port,
-      "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+      port, "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
     )
     doAssert accepted.startsWith("HTTP/1.1 200"), accepted
+
   try:
     waitFor exercise(server.address.port)
   finally:
@@ -442,16 +403,15 @@ block loopbackEnforcesTransportLimitsAndKeepsServing:
     )
     doAssert body.startsWith("HTTP/1.1 413"), body
     let timedOut = await exchange(
-      port,
-      "GET /slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+      port, "GET /slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
     )
     doAssert timedOut.startsWith("HTTP/1.1 503"), timedOut
     doAssert handlerCancelled
     let health = await exchange(
-      port,
-      "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+      port, "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
     )
     doAssert health.startsWith("HTTP/1.1 200"), health
+
   try:
     waitFor exercise(server.address.port)
   finally:

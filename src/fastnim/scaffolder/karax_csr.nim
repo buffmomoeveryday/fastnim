@@ -53,8 +53,10 @@ apiRouter.get("/hello", responses = @[(200, Greeting)]):
 proc csrMain(name: string, auth: bool): string =
   let authImports = if auth: "import auth\nimport routes/auth as auth_routes\n" else: ""
   let authSetup =
-    if auth: "web.installPlugin(authentication())\nweb.addRouter(auth_routes.authRouter)\n"
-    else: ""
+    if auth:
+      "web.installPlugin(authentication())\nweb.addRouter(auth_routes.authRouter)\n"
+    else:
+      ""
   """## """ & name & """ - FastNim + Karax CSR.
 ##
 ## Build the client first, then run the server:
@@ -64,7 +66,8 @@ proc csrMain(name: string, auth: bool): string =
 import chronos
 
 import fastnim
-""" & authImports & """
+""" &
+    authImports & """
 import routes/api
 
 let web = initFastNim()
@@ -255,7 +258,8 @@ nim c -r --path:src src/main.nim
 
 Open http://127.0.0.1:8000. The counter runs locally in the browser; the
 "Ask the server" button fetches `/api/hello`.
-""" & authDocs & """
+""" &
+    authDocs & """
 
 ## Test
 
@@ -281,7 +285,9 @@ proc scaffoldKaraxCsr*(dir, name: string, auth = false) =
   writeCsrFile(dir / "src" / "main.nim", csrMain(name, auth))
   writeCsrFile(dir / "src" / "routes" / "api.nim", csrApi(name))
   if auth:
-    writeCsrFile(dir / "src" / "auth.nim", jwtAuthSource(["/api/*"], ["/api/auth/login"]))
+    writeCsrFile(
+      dir / "src" / "auth.nim", jwtAuthSource(["/api/*"], ["/api/auth/login"])
+    )
     writeCsrFile(dir / "src" / "routes" / "auth.nim", csrAuthRoutes())
   writeCsrFile(dir / "client" / "app.nim", csrClient(name, auth))
   writeCsrFile(dir / "public" / "index.html", csrIndex(name))

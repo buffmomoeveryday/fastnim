@@ -4,48 +4,69 @@ import fastnim/orm
 
 # Successive versions of one table, used to simulate editing a model.
 model Post:
-  title: CharField(maxLength: 100)
+  title:
+    CharField(maxLength: 100)
 
 model PostV2 {.table: "post".}:
-  title: CharField(maxLength: 100)
-  summary: TextField(null: true)
-  slug: CharField(unique: true, null: true)
-  score: IntegerField(default: 0, index: true)
+  title:
+    CharField(maxLength: 100)
+  summary:
+    TextField(null: true)
+  slug:
+    CharField(unique: true, null: true)
+  score:
+    IntegerField(default: 0, index: true)
 
 model PostV3 {.table: "post".}:
-  body: TextField()
+  body:
+    TextField()
 
 model Owned {.abstract.}:
-  id: UUIDField(primaryKey: true)
-  owner: CharField()
+  id:
+    UUIDField(primaryKey: true)
+  owner:
+    CharField()
 
 model Doc = ref Owned:
-  post: ForeignKey(Post, onDelete: Cascade)
+  post:
+    ForeignKey(Post, onDelete: Cascade)
 
 model Labeled:
-  name: CharField()
-  score: IntegerField()
+  name:
+    CharField()
+  score:
+    IntegerField()
   Meta:
     indexes:
       Index(fields: ["-score", "name"], name: "labeled_score")
     uniqueTogether:
       ["name", "score"]
 
-proc v1(): Snapshot = snapshotOf([modelMeta(Post)])
-proc v2(): Snapshot = snapshotOf([modelMeta(PostV2)])
-proc v3(): Snapshot = snapshotOf([modelMeta(PostV3)])
+proc v1(): Snapshot =
+  snapshotOf([modelMeta(Post)])
 
-proc tempDir(): string = createTempDir("fastorm_", "_migrations")
+proc v2(): Snapshot =
+  snapshotOf([modelMeta(PostV2)])
+
+proc v3(): Snapshot =
+  snapshotOf([modelMeta(PostV3)])
+
+proc tempDir(): string =
+  createTempDir("fastorm_", "_migrations")
 
 proc kindsOf(ops: seq[Operation]): seq[OperationKind] =
-  for op in ops: result.add op.kind
+  for op in ops:
+    result.add op.kind
 
 proc nimLiteral(s: string): string =
   result = "\""
   for c in s:
-    if c == '\\': result.add "\\\\"
-    elif c == '"': result.add "\\\""
-    else: result.add c
+    if c == '\\':
+      result.add "\\\\"
+    elif c == '"':
+      result.add "\\\""
+    else:
+      result.add c
   result.add "\""
 
 proc compileMigrations(dir, project: string): tuple[output: string, exitCode: int] =
@@ -54,7 +75,9 @@ proc compileMigrations(dir, project: string): tuple[output: string, exitCode: in
   var reports = ""
   for folder in ["post", "labeled", "docs"]:
     reports.add "report(" & nimLiteral(dir / folder) & ")\n"
-  writeFile(runner, """
+  writeFile(
+    runner,
+    """
 import std/strutils
 import fastnim/orm
 import ./post/all
@@ -67,8 +90,11 @@ proc report(dir: string) =
     for sql in sqlDown(m):
       stdout.writeLine "DOWN ", m.name, " ", sql.replace("\n", " ")
 
-""" & reports)
-  var cmd = "nim c --colors:off --hints:off --warnings:off --nimcache:" &
+""" &
+      reports,
+  )
+  var cmd =
+    "nim c --colors:off --hints:off --warnings:off --nimcache:" &
     quoteShell(dir / "nimcache") & " --outdir:" & quoteShell(dir)
   for line in readFile(project / "nimble.paths").splitLines:
     if line.len > 0:
@@ -119,7 +145,8 @@ suite "migration planning":
       check "post.title was removed" in e.msg
       check "post.body is NOT NULL without a default" in e.msg
     check loadMigrations(dir).len == 1
-    let manual = makeMigrations(dir, name = "Rework post", empty = true, snapshot = v3())
+    let manual =
+      makeMigrations(dir, name = "Rework post", empty = true, snapshot = v3())
     check manual.get.extractFilename == "m0002_rework_post.nim"
     check loadMigrations(dir)[1].operations.len == 0
     check "Hand-written migration" in readFile(manual.get)
@@ -130,8 +157,10 @@ suite "migration planning":
     let dir = tempDir()
     let path = makeMigrations(dir, snapshot = snapshotOf([modelMeta(Labeled)])).get
     let source = readFile(path)
-    check "createIndex \"labeled_score\", \"labeled\", @[\"score\", \"name\"], descending = @[true, false]" in source
-    check "index \"labeled_score\", @[\"score\", \"name\"], descending = @[true, false]" in source
+    check "createIndex \"labeled_score\", \"labeled\", @[\"score\", \"name\"], descending = @[true, false]" in
+      source
+    check "index \"labeled_score\", @[\"score\", \"name\"], descending = @[true, false]" in
+      source
     removeDir(dir)
 
   test "generated modules compile and register the same migration":
@@ -141,7 +170,9 @@ suite "migration planning":
     discard makeMigrations(dir / "post", snapshot = v2())
     discard makeMigrations(dir / "post", empty = true, snapshot = v2())
     discard makeMigrations(dir / "labeled", snapshot = snapshotOf([modelMeta(Labeled)]))
-    discard makeMigrations(dir / "docs", snapshot = snapshotOf([modelMeta(Post), modelMeta(Doc)]))
+    discard makeMigrations(
+      dir / "docs", snapshot = snapshotOf([modelMeta(Post), modelMeta(Doc)])
+    )
     let (output, code) = compileMigrations(dir, project)
     if code != 0 or "CHECK " notin output:
       echo output
@@ -166,10 +197,13 @@ suite "migration planning":
     check planned.unsupported.len == 0
     var sql: seq[string]
     for op in planned.ops:
-      for statement in sqlFor(op): sql.add statement
+      for statement in sqlFor(op):
+        sql.add statement
     let text = sql.join("\n")
-    check "CREATE INDEX \"labeled_score\" ON \"labeled\" (\"score\" DESC, \"name\")" in text
-    check "CREATE UNIQUE INDEX \"labeled_name_score_uniq\" ON \"labeled\" (\"name\", \"score\")" in text
+    check "CREATE INDEX \"labeled_score\" ON \"labeled\" (\"score\" DESC, \"name\")" in
+      text
+    check "CREATE UNIQUE INDEX \"labeled_name_score_uniq\" ON \"labeled\" (\"name\", \"score\")" in
+      text
 
   test "snapshots flatten inheritance and record foreign keys":
     let snap = snapshotOf([modelMeta(Post), modelMeta(Doc)])
@@ -177,7 +211,8 @@ suite "migration planning":
     let doc = snap.tables[0]
     check doc.name == "doc"
     var cols: seq[string]
-    for c in doc.columns: cols.add c.name
+    for c in doc.columns:
+      cols.add c.name
     check cols == @["id", "owner", "post_id"]
     check doc.columns[2].refTable == "post"
     check doc.columns[2].onDelete == "CASCADE"
@@ -212,7 +247,8 @@ suite "applying migrations":
     var m = loadMigrations(dir / "m")[^1]
     m.operations = @[
       runSql("CREATE TABLE extra (x INTEGER)", "INSERT INTO extra VALUES (7)"),
-      renameColumn("extra", "x", "y")]
+      renameColumn("extra", "x", "y"),
+    ]
     registerMigration(m, dir / "m")
     discard await db.migrate(dir / "m")
     let res = await db.query("SELECT y FROM extra")

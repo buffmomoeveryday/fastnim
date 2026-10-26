@@ -15,7 +15,8 @@
 
 import std/[options, times]
 import chronos
-import fastnim/orm/[uuids, values, fields, sqlite, queryset, dsl, migrations, cli, outcome]
+import
+  fastnim/orm/[uuids, values, fields, sqlite, queryset, dsl, migrations, cli, outcome]
 import jsony except toJson
 # Generic async procs (`all`, `save`, ...) are instantiated in user modules,
 # where Chronos' `await` machinery has to be in scope. Only `Time` is taken

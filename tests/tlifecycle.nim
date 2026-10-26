@@ -62,9 +62,12 @@ suite "application lifecycle":
     events = @[]
     let app = initFastNim(logs = false)
     app.dependencies(DeclarativeDependencies):
-      provide db: provideDatabase()
-      cleanup db: cleanupDatabase(db)
-      provide settings: Settings(retries: 4)
+      provide db:
+        provideDatabase()
+      cleanup db:
+        cleanupDatabase(db)
+      provide settings:
+        Settings(retries: 4)
 
     app.get("/dependency"):
       let database = ctx.get("db")
@@ -72,7 +75,7 @@ suite "application lifecycle":
       database.value & ":" & $settings.retries
 
     app.load()
-    check app.handleSync(initRequest(HttpMethod.Get, "/dependency")).body == "declarative:4"
+    check app.handleSync(initRequest(HttpMethod.Get, "/dependency")).body ==
+      "declarative:4"
     app.unload()
     check events == @["provide", "cleanup:declarative"]
-

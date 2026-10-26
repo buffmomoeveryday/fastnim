@@ -41,20 +41,28 @@ proc runCli*(args: seq[string] = commandLineParams()): int =
   for kind, key, val in p.getopt():
     case kind
     of cmdArgument:
-      if command.len == 0: command = key else: target = key
+      if command.len == 0:
+        command = key
+      else:
+        target = key
     of cmdLongOption, cmdShortOption:
       case key
-      of "db": dbPath = val
-      of "dir": dir = val
-      of "name": name = val
-      of "empty": empty = true
+      of "db":
+        dbPath = val
+      of "dir":
+        dir = val
+      of "name":
+        name = val
+      of "empty":
+        empty = true
       of "help", "h":
         echo usage
         return 0
       else:
         stderr.writeLine "unknown option --" & key
         return 2
-    of cmdEnd: discard
+    of cmdEnd:
+      discard
   try:
     case command
     of "makemigrations":
@@ -63,26 +71,32 @@ proc runCli*(args: seq[string] = commandLineParams()): int =
           "that imports your models and calls runCli()."
         return 1
       let path = makeMigrations(dir, name, empty)
-      if path.isSome: echo "Created ", path.get
-      else: echo "No changes detected"
+      if path.isSome:
+        echo "Created ", path.get
+      else:
+        echo "No changes detected"
     of "migrate":
       let db = waitFor openDatabase(dbPath, setDefault = false)
       let applied = waitFor db.migrate(dir)
       waitFor db.close()
-      if applied.len == 0: echo "No migrations to apply"
-      for m in applied: echo "Applied ", m
+      if applied.len == 0:
+        echo "No migrations to apply"
+      for m in applied:
+        echo "Applied ", m
     of "showmigrations":
       let db = waitFor openDatabase(dbPath, setDefault = false)
       let statuses = waitFor db.showMigrations(dir)
       waitFor db.close()
-      for s in statuses: echo (if s.applied: "[X] " else: "[ ] "), s.name
+      for s in statuses:
+        echo (if s.applied: "[X] " else: "[ ] "), s.name
     of "sqlmigrate":
       if target.len == 0:
         stderr.writeLine "sqlmigrate needs a migration name"
         return 2
       for m in loadMigrations(dir):
         if m.name == target or m.name.startsWith(target & "_"):
-          for sql in sqlFor(m): echo sql, ";"
+          for sql in sqlFor(m):
+            echo sql, ";"
           return 0
       stderr.writeLine "no migration named " & target
       return 1

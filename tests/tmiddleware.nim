@@ -45,7 +45,7 @@ block wrapsRoutesInRegistrationOrder:
   let response = app.handleSync(initRequest(HttpMethod.Get, "/"))
   doAssert response.status == 200
   doAssert response.headers["x-first"] == "true"
-  doAssert steps[0..<stepCount] == [1, 2, 5, 3, 4]
+  doAssert steps[0 ..< stepCount] == [1, 2, 5, 3, 4]
 
 block registersMiddlewareWithCommandSyntax:
   stepCount = 0
@@ -79,7 +79,7 @@ block registersParenthesizedMiddlewareValues:
   doAssert response.status == 200
   doAssert response.headers["x-first"] == "true"
   doAssert response.headers["x-request-id"].len > 0
-  doAssert steps[0..<stepCount] == [1, 2, 5, 3, 4]
+  doAssert steps[0 ..< stepCount] == [1, 2, 5, 3, 4]
 
 block registersMiddlewareListInOrder:
   stepCount = 0
@@ -91,7 +91,7 @@ block registersMiddlewareListInOrder:
 
   let response = app.handleSync(initRequest(HttpMethod.Get, "/"))
   doAssert response.status == 200
-  doAssert steps[0..<stepCount] == [1, 2, 5, 3, 4]
+  doAssert steps[0 ..< stepCount] == [1, 2, 5, 3, 4]
 
 block canShortCircuitRoutes:
   endpointCalled = false

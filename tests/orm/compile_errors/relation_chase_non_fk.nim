@@ -2,10 +2,13 @@
 import fastnim/orm
 
 model Author:
-  name: CharField()
+  name:
+    CharField()
 
 model Article:
-  author: ForeignKey(Author, onDelete: Cascade)
-  title: CharField()
+  author:
+    ForeignKey(Author, onDelete: Cascade)
+  title:
+    CharField()
 
 discard Article.objects.filter(title.icontains.extra = "Ada")

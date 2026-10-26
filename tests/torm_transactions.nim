@@ -3,12 +3,16 @@ import chronos/unittest2/asynctests
 import fastnim/orm
 
 model Account:
-  owner: CharField(maxLength: 50)
-  balance: IntegerField(default: 0)
+  owner:
+    CharField(maxLength: 50)
+  balance:
+    IntegerField(default: 0)
 
 model Ledger:
-  account: ForeignKey(Account, onDelete: Cascade)
-  note: TextField()
+  account:
+    ForeignKey(Account, onDelete: Cascade)
+  note:
+    TextField()
 
 proc freshDb(maxConnections = 4): Future[(Database, string)] {.async.} =
   let dir = createTempDir("fastorm_tx_", "_test")
@@ -58,7 +62,8 @@ suite "transactions":
     discard await account("Ada", 100)
     expect ValueError:
       atomic db:
-        discard await Account.objects.withDb(tx).filter(owner = "Ada").update(balance = 0)
+        discard
+          await Account.objects.withDb(tx).filter(owner = "Ada").update(balance = 0)
         await Account(owner: "Grace", balance: 5).save(tx)
         raise newException(ValueError, "boom")
     # Neither the update nor the insert survived.
@@ -110,6 +115,7 @@ suite "transactions":
         await Account(owner: "Ada").save(tx)
         await sleepAsync(2.seconds)
         await Account(owner: "Grace").save(tx)
+
     let fut = work()
     await sleepAsync(50.milliseconds)
     await fut.cancelAndWait()
@@ -135,10 +141,13 @@ suite "transactions":
     proc deposit(owner: string) {.async.} =
       atomic db:
         await Account(owner: owner, balance: 1).save(tx)
+
     var futs: seq[Future[void]]
-    for i in 0 ..< 5: futs.add deposit("owner " & $i)
+    for i in 0 ..< 5:
+      futs.add deposit("owner " & $i)
     await allFutures(futs)
-    for f in futs: check f.completed
+    for f in futs:
+      check f.completed
     check (await Account.objects.count()) == 5
     await cleanup(db, dir)
 
@@ -190,9 +199,12 @@ suite "transactions":
     atomic db:
       await Account(owner: "Ada").save(tx)
       expect DatabaseError:
-        await tx.batch(@[
-          Statement(sql: "INSERT INTO account (owner, balance) VALUES ('Grace', 1)"),
-          Statement(sql: "INSERT INTO nope (x) VALUES (1)")])
+        await tx.batch(
+          @[
+            Statement(sql: "INSERT INTO account (owner, balance) VALUES ('Grace', 1)"),
+            Statement(sql: "INSERT INTO nope (x) VALUES (1)"),
+          ]
+        )
       # The failed batch rolled back to its savepoint, not past it.
       check tx.inTransaction
       check (await Account.objects.withDb(tx).count()) == 1

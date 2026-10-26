@@ -81,7 +81,6 @@ app.post(
       users.add user
     created user
 
-
 let clients = newWebSocketGroup()
 app.websocket("/chat"):
   await websocket.accept()

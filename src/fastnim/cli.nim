@@ -103,9 +103,8 @@ proc runInit(
     )
     return 1
   if templateName == "inertiajs":
-    return runInertiaInit(
-      target, name, frontend, pkgManager, css, auth, force, interactive
-    )
+    return
+      runInertiaInit(target, name, frontend, pkgManager, css, auth, force, interactive)
   try:
     createDir(target)
     case templateName
@@ -128,8 +127,7 @@ proc runInit(
   0
 
 proc runInertiaInit(
-    target, name, frontend, pkgManager, css: string,
-    auth, force, interactive: bool,
+    target, name, frontend, pkgManager, css: string, auth, force, interactive: bool
 ): int =
   ## Resolves Inertia choices, scaffolds, and prints next steps.
   var choices = InertiaChoices(pkgManager: pkgManager, css: cssTailwind)
@@ -205,8 +203,8 @@ proc runInertiaInit(
   if interactive and terminal.isatty(stdin):
     if promptYesNo("Run '" & commands.install & "' now?"):
       let code = execShellCmd(
-        "cd " & quoteShell(target) & " && " &
-          quoteShell(commands.install.split(' ')[0]) & " install"
+        "cd " & quoteShell(target) & " && " & quoteShell(commands.install.split(' ')[0]) &
+          " install"
       )
       if code != 0:
         echo "Install failed (exit " & $code & "). Run '" & commands.install &
@@ -216,9 +214,15 @@ proc runInertiaInit(
 var cliInteractive {.threadvar.}: bool
 
 proc fastNimCommand(
-    args: seq[string], `template` = DefaultTemplate, frontend = "",
-    pkgManager = "", packageManager = "", css = "", dir = ".",
-    auth = false, force = false,
+    args: seq[string],
+    `template` = DefaultTemplate,
+    frontend = "",
+    pkgManager = "",
+    packageManager = "",
+    css = "",
+    dir = ".",
+    auth = false,
+    force = false,
 ): int =
   ## Creates a new FastNim project.
   if args.len == 0:
@@ -239,13 +243,21 @@ proc fastNimCommand(
     stderr.writeLine("fastnim: error: --dir needs a value.")
     return 2
 
-  let name = if args.len == 2: args[1] else: "myapp"
-  let selectedPkgManager =
-    if pkgManager.len > 0: pkgManager
-    else: packageManager
+  let name =
+    if args.len == 2:
+      args[1]
+    else:
+      "myapp"
+  let selectedPkgManager = if pkgManager.len > 0: pkgManager else: packageManager
   runInit(
-    name, dir, `template`.toLowerAscii(), frontend.toLowerAscii(),
-    selectedPkgManager.toLowerAscii(), css.toLowerAscii(), auth, force,
+    name,
+    dir,
+    `template`.toLowerAscii(),
+    frontend.toLowerAscii(),
+    selectedPkgManager.toLowerAscii(),
+    css.toLowerAscii(),
+    auth,
+    force,
     cliInteractive,
   )
 
@@ -295,7 +307,11 @@ proc cliMain*(params: seq[string], interactive = true): int =
   ## Pass ``interactive = false`` (as tests do) to never prompt or install:
   ## missing choices silently fall back to defaults.
   cliInteractive = interactive
-  let effectiveParams = if params.len == 0: @["--help"] else: params
+  let effectiveParams =
+    if params.len == 0:
+      @["--help"]
+    else:
+      params
   try:
     result = dispatchFastNim(effectiveParams)
   except HelpOnly, VersionOnly:

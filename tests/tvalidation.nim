@@ -60,8 +60,11 @@ const AllowedTransitions = transitions(OrderState):
   OrderState.pending.to OrderState.cancelled
   OrderState.paid.to OrderState.cancelled
 
-proc validateProduct(value: Product): ValidationResult = validateModel(value)
-proc validateCustomer(value: Customer): ValidationResult = validateModel(value)
+proc validateProduct(value: Product): ValidationResult =
+  validateModel(value)
+
+proc validateCustomer(value: Customer): ValidationResult =
+  validateModel(value)
 
 proc validateStatusChange(value: StatusChange): ValidationResult =
   result = initValidationResult()
@@ -110,22 +113,21 @@ proc testApp(): TestClient =
     if not validation.isValid():
       return validationResponse(validation, source = "query")
     json(%*{"sort": sort})
-  api.patch("/orders/{id}", proc(request: Request): Response =
-    var body: StatusChange
-    let checked = parseAndValidateBody(request, body, validateStatusChange)
-    if not checked.ok:
-      return checked.error.get()
-    json(%*{"id": request.pathParam("id"), "toStatus": body.toStatus}))
+  api.patch(
+    "/orders/{id}",
+    proc(request: Request): Response =
+      var body: StatusChange
+      let checked = parseAndValidateBody(request, body, validateStatusChange)
+      if not checked.ok:
+        return checked.error.get()
+      json(%*{"id": request.pathParam("id"), "toStatus": body.toStatus}),
+  )
   api.post("/quick-products"):
     let checked = request.validate(Product)
     if not checked.ok:
       return checked.error.get()
     json(%*{"name": checked.value.name, "qty": checked.value.qty})
-  api.post(
-    "/typed-products",
-    body = Product,
-    responses = @[(200, Product)],
-  ):
+  api.post("/typed-products", body = Product, responses = @[(200, Product)]):
     ok body
   api.post(
     "/typed-transitions",
@@ -134,11 +136,7 @@ proc testApp(): TestClient =
     responses = @[(200, StatusChange)],
   ):
     ok body
-  api.put(
-    "/typed-products/{id}",
-    body = Product,
-    responses = @[(200, Product)],
-  ):
+  api.put("/typed-products/{id}", body = Product, responses = @[(200, Product)]):
     ok body
   api.patch(
     "/typed-transitions/{id}",
@@ -147,11 +145,7 @@ proc testApp(): TestClient =
     responses = @[(200, StatusChange)],
   ):
     ok body
-  api.post(
-    "/teams",
-    body = Team,
-    responses = @[(200, Team)],
-  ):
+  api.post("/teams", body = Team, responses = @[(200, Team)]):
     ok body
   api.post(
     "/optional-customers",
@@ -165,11 +159,7 @@ proc testApp(): TestClient =
     responses = @[(200, CustomerWithReference)],
   ):
     ok body
-  api.post(
-    "/bounded-floats",
-    body = BoundedFloat,
-    responses = @[(200, BoundedFloat)],
-  ):
+  api.post("/bounded-floats", body = BoundedFloat, responses = @[(200, BoundedFloat)]):
     ok body
   api.put("/plain-put"):
     json(%*{"method": "put"})
@@ -194,50 +184,40 @@ suite "Validation":
     check fieldName(Renamed, emailAddress) == "email"
 
   test "accepts a valid product":
-    let response = testApp().post(
-      "/products", """{"name":"Widget","price":9.99,"qty":3}"""
-    )
+    let response =
+      testApp().post("/products", """{"name":"Widget","price":9.99,"qty":3}""")
     check response.status == 200
     check response.json() == %*{"name": "Widget", "price": 9.99, "qty": 3}
 
   test "rejects an empty product name":
-    let response = testApp().post(
-      "/products", """{"name":"","price":9.99,"qty":3}"""
-    )
+    let response = testApp().post("/products", """{"name":"","price":9.99,"qty":3}""")
     check response.status == 422
     check response.fieldMessage("body.name") == "must contain at least 1 character"
 
   test "rejects a non-positive price":
-    let response = testApp().post(
-      "/products", """{"name":"Widget","price":0.0,"qty":3}"""
-    )
+    let response =
+      testApp().post("/products", """{"name":"Widget","price":0.0,"qty":3}""")
     check response.status == 422
     check response.fieldMessage("body.price") == "must be greater than 0"
 
   test "rejects both quantity bounds":
-    let low = testApp().post(
-      "/products", """{"name":"Widget","price":9.99,"qty":0}"""
-    )
+    let low = testApp().post("/products", """{"name":"Widget","price":9.99,"qty":0}""")
     check low.status == 422
     check "body.qty" in low.json()["fields"]
-    let high = testApp().post(
-      "/products", """{"name":"Widget","price":9.99,"qty":101}"""
-    )
+    let high =
+      testApp().post("/products", """{"name":"Widget","price":9.99,"qty":101}""")
     check high.status == 422
     check "body.qty" in high.json()["fields"]
 
   test "reports nested error locations":
-    let response = testApp().post(
-      "/customers", """{"contact":{"email":"not-an-email"}}"""
-    )
+    let response =
+      testApp().post("/customers", """{"contact":{"email":"not-an-email"}}""")
     check response.status == 422
-    check response.fieldMessage("body.contact.email") ==
-      "must be a valid email address"
+    check response.fieldMessage("body.contact.email") == "must be a valid email address"
 
   test "accepts nested valid input":
-    let response = testApp().post(
-      "/customers", """{"contact":{"email":"ada@example.com"}}"""
-    )
+    let response =
+      testApp().post("/customers", """{"contact":{"email":"ada@example.com"}}""")
     check response.status == 200
     check response.json() == %*{"email": "ada@example.com"}
 
@@ -246,60 +226,54 @@ suite "Validation":
     check response.status == 200
 
   test "validates present optional models without exposing Option internals":
-    let response = testApp().post(
-      "/optional-customers", """{"contact":{"email":"bad"}}"""
-    )
+    let response =
+      testApp().post("/optional-customers", """{"contact":{"email":"bad"}}""")
     check response.status == 422
     check "body.contact.email" in response.json()["fields"]
 
   test "validates fields inside referenced models":
-    let response = testApp().post(
-      "/referenced-customers", """{"contact":{"email":"bad"}}"""
-    )
+    let response =
+      testApp().post("/referenced-customers", """{"contact":{"email":"bad"}}""")
     check response.status == 422
     check "body.contact.email" in response.json()["fields"]
 
   test "rejects non-finite constrained numbers once":
-    let response = testApp().post(
-      "/bounded-floats", """{"value":"nan"}"""
-    )
+    let response = testApp().post("/bounded-floats", """{"value":"nan"}""")
     check response.status == 422
     check response.json()["fields"].len == 1
     check "body.value" in response.json()["fields"]
 
   test "reports nested sequence indexes":
     let response = testApp().post(
-      "/teams",
-      """{"contacts":[{"email":"ada@example.com"},{"email":"bad"}]}""",
-    )
+        "/teams", """{"contacts":[{"email":"ada@example.com"},{"email":"bad"}]}"""
+      )
     check response.status == 422
     check "body.contacts.1.email" in response.json()["fields"]
 
   test "rejects malformed JSON with 400":
     let response = testApp().post("/products", "not json")
     check response.status == 400
-    check response.json() == %*{
-      "code": "invalid_request_body",
-      "message": "invalid JSON request body",
-      "fields": {},
-    }
+    check response.json() ==
+      %*{
+        "code": "invalid_request_body",
+        "message": "invalid JSON request body",
+        "fields": {},
+      }
 
   test "rejects wrong JSON types with 400":
-    let response = testApp().post(
-      "/products", """{"name":"Widget","price":"free","qty":3}"""
-    )
+    let response =
+      testApp().post("/products", """{"name":"Widget","price":"free","qty":3}""")
     check response.status == 400
 
   test "uses the standard 422 envelope":
-    let response = testApp().post(
-      "/products", """{"name":"","price":9.99,"qty":3}"""
-    )
+    let response = testApp().post("/products", """{"name":"","price":9.99,"qty":3}""")
     check response.status == 422
-    check response.json() == %*{
-      "code": "validation_failed",
-      "message": "validation failed",
-      "fields": {"body.name": "must contain at least 1 character"},
-    }
+    check response.json() ==
+      %*{
+        "code": "validation_failed",
+        "message": "validation failed",
+        "fields": {"body.name": "must contain at least 1 character"},
+      }
 
   test "enforces pagination bounds with query locations":
     let ok = testApp().get("/orders?page=2&limit=20")
@@ -345,67 +319,54 @@ suite "Validation":
     check validation.isValid()
 
   test "retains the one-call request helper":
-    let ok = testApp().post(
-      "/quick-products", """{"name":"Widget","price":9.99,"qty":3}"""
-    )
+    let ok =
+      testApp().post("/quick-products", """{"name":"Widget","price":9.99,"qty":3}""")
     check ok.status == 200
-    let bad = testApp().post(
-      "/quick-products", """{"name":"","price":9.99,"qty":3}"""
-    )
+    let bad = testApp().post("/quick-products", """{"name":"","price":9.99,"qty":3}""")
     check bad.status == 422
     check "body.name" in bad.json()["fields"]
 
   test "automatically validates typed route bodies":
-    let ok = testApp().post(
-      "/typed-products", """{"name":"Widget","price":9.99,"qty":3}"""
-    )
+    let ok =
+      testApp().post("/typed-products", """{"name":"Widget","price":9.99,"qty":3}""")
     check ok.status == 200
-    let bad = testApp().post(
-      "/typed-products", """{"name":"","price":9.99,"qty":3}"""
-    )
+    let bad = testApp().post("/typed-products", """{"name":"","price":9.99,"qty":3}""")
     check bad.status == 422
     check "body.name" in bad.json()["fields"]
 
   test "merges a typed route custom validator":
     let ok = testApp().post(
-      "/typed-transitions", """{"fromStatus":"paid","toStatus":"shipped"}"""
-    )
+        "/typed-transitions", """{"fromStatus":"paid","toStatus":"shipped"}"""
+      )
     check ok.status == 200
     let bad = testApp().post(
-      "/typed-transitions",
-      """{"fromStatus":"pending","toStatus":"shipped"}""",
-    )
+        "/typed-transitions", """{"fromStatus":"pending","toStatus":"shipped"}"""
+      )
     check bad.status == 422
     check "body.toStatus" in bad.json()["fields"]
 
   test "rejects unknown enum states as an invalid body":
     let response = testApp().post(
-      "/typed-transitions",
-      """{"fromStatus":"unknown","toStatus":"paid"}""",
-    )
+        "/typed-transitions", """{"fromStatus":"unknown","toStatus":"paid"}"""
+      )
     check response.status == 400
 
   test "validates typed PUT route bodies":
-    let ok = testApp().put(
-      "/typed-products/1", """{"name":"Widget","price":9.99,"qty":3}"""
-    )
+    let ok =
+      testApp().put("/typed-products/1", """{"name":"Widget","price":9.99,"qty":3}""")
     check ok.status == 200
-    let bad = testApp().put(
-      "/typed-products/1", """{"name":"","price":9.99,"qty":3}"""
-    )
+    let bad = testApp().put("/typed-products/1", """{"name":"","price":9.99,"qty":3}""")
     check bad.status == 422
     check "body.name" in bad.json()["fields"]
 
   test "merges a typed PATCH route custom validator":
     let ok = testApp().patch(
-      "/typed-transitions/1",
-      """{"fromStatus":"paid","toStatus":"shipped"}""",
-    )
+        "/typed-transitions/1", """{"fromStatus":"paid","toStatus":"shipped"}"""
+      )
     check ok.status == 200
     let bad = testApp().patch(
-      "/typed-transitions/1",
-      """{"fromStatus":"pending","toStatus":"shipped"}""",
-    )
+        "/typed-transitions/1", """{"fromStatus":"pending","toStatus":"shipped"}"""
+      )
     check bad.status == 422
     check "body.toStatus" in bad.json()["fields"]
 

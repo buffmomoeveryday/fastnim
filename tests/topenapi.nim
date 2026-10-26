@@ -20,18 +20,15 @@ type
     details: ItemDetails
 
 let app = initFastNim(
-  logs = false,
-  openApi = initOpenApiSettings(title = "Inventory", version = "2.0.0"),
+  logs = false, openApi = initOpenApiSettings(title = "Inventory", version = "2.0.0")
 )
 
-app.get(
-  "/items/{itemId}",
-  responses = @[(200, Item)],
-):
+app.get("/items/{itemId}", responses = @[(200, Item)]):
   ok Item(id: 1, name: request.pathParam("itemId"))
 
 app.documentRoute(
-  HttpMethod.Get, "/items/{itemId}",
+  HttpMethod.Get,
+  "/items/{itemId}",
   initOpenApiRoute(summary = "Get one item", tags = @["items"]),
 )
 
@@ -44,18 +41,10 @@ app.post(
 ):
   created Item(id: 1, name: body.name)
 
-app.put(
-  "/items/{itemId}",
-  body = CreateItem,
-  responses = @[(200, Item)],
-):
+app.put("/items/{itemId}", body = CreateItem, responses = @[(200, Item)]):
   ok Item(id: 1, name: body.name)
 
-app.patch(
-  "/items/{itemId}",
-  body = CreateItem,
-  responses = @[(200, Item)],
-):
+app.patch("/items/{itemId}", body = CreateItem, responses = @[(200, Item)]):
   ok Item(id: 1, name: body.name)
 
 app.get(
@@ -72,10 +61,11 @@ block generatedDocument:
   let document = app.openApiDocument()
   doAssert document["openapi"].getStr == "3.1.0"
   doAssert document["info"]["title"].getStr == "Inventory"
-  doAssert document["paths"]["/items/{itemId}"]["get"]["summary"].getStr == "Get one item"
-  doAssert document["paths"]["/items/{itemId}"]["get"]["parameters"][0]["name"].getStr == "itemId"
-  let itemResponse =
-    document["paths"]["/items/{itemId}"]["get"]["responses"]["200"]
+  doAssert document["paths"]["/items/{itemId}"]["get"]["summary"].getStr ==
+    "Get one item"
+  doAssert document["paths"]["/items/{itemId}"]["get"]["parameters"][0]["name"].getStr ==
+    "itemId"
+  let itemResponse = document["paths"]["/items/{itemId}"]["get"]["responses"]["200"]
   let itemSchema = itemResponse["content"]["application/json"]["schema"]
   doAssert itemSchema["properties"]["id"]["type"].getStr == "integer"
   doAssert itemSchema["properties"]["display_name"]["type"].getStr == "string"
@@ -118,5 +108,7 @@ block builtInEndpoints:
   doAssert "swagger-ui" in docs.body
 
 block disabledEndpoints:
-  let disabled = initFastNim(logs = false, openApi = initOpenApiSettings(enabled = false))
-  doAssert disabled.handleSync(initRequest(HttpMethod.Get, "/openapi.json")).status == 404
+  let disabled =
+    initFastNim(logs = false, openApi = initOpenApiSettings(enabled = false))
+  doAssert disabled.handleSync(initRequest(HttpMethod.Get, "/openapi.json")).status ==
+    404

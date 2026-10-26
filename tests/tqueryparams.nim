@@ -48,11 +48,12 @@ proc testApp(): TestClient =
       %*{
         "page": queryParams.page,
         "limit": queryParams.limit,
-        "min_price":
-          (if queryParams.minPrice.isSome():
+        "min_price": (
+          if queryParams.minPrice.isSome():
             %queryParams.minPrice.get()
           else:
-            newJNull()),
+            newJNull()
+        ),
         "category": $queryParams.category,
         "sort": $queryParams.sort,
         "available": queryParams.available,
@@ -81,20 +82,20 @@ proc testApp(): TestClient =
 
 suite "Typed query parameters":
   test "parses the complete product search query":
-    let response = testApp().get(
-      "/search?page=2&limit=20&min_price=1000&category=books&sort=price"
-    )
+    let response =
+      testApp().get("/search?page=2&limit=20&min_price=1000&category=books&sort=price")
     check response.status == 200
-    check response.json() == %*{
-      "page": 2,
-      "limit": 20,
-      "min_price": 1000,
-      "category": "books",
-      "sort": "price",
-      "available": false,
-      "q": "",
-      "tags": [],
-    }
+    check response.json() ==
+      %*{
+        "page": 2,
+        "limit": 20,
+        "min_price": 1000,
+        "category": "books",
+        "sort": "price",
+        "available": false,
+        "q": "",
+        "tags": [],
+      }
 
   test "uses defaults and represents missing optional values":
     let response = testApp().get("/search?category=books&sort=name")
@@ -114,29 +115,23 @@ suite "Typed query parameters":
 
   test "parses documented boolean spellings without case sensitivity":
     for spelling in ["true", "YES", "1", "On", "y"]:
-      let response = testApp().get(
-        "/search?category=books&sort=price&available=" & spelling
-      )
+      let response =
+        testApp().get("/search?category=books&sort=price&available=" & spelling)
       check response.status == 200
       check response.json()["available"].getBool()
     for spelling in ["false", "NO", "0", "Off", "n"]:
-      let response = testApp().get(
-        "/search?category=books&sort=price&available=" & spelling
-      )
+      let response =
+        testApp().get("/search?category=books&sort=price&available=" & spelling)
       check response.status == 200
       check not response.json()["available"].getBool()
 
   test "collects repeated parameters in URL order":
-    let response = testApp().get(
-      "/search?category=books&sort=price&tag=nim&tag=web"
-    )
+    let response = testApp().get("/search?category=books&sort=price&tag=nim&tag=web")
     check response.status == 200
     check response.json()["tags"] == %*["nim", "web"]
 
   test "does not split comma-separated values":
-    let response = testApp().get(
-      "/search?category=books&sort=price&tag=nim,web"
-    )
+    let response = testApp().get("/search?category=books&sort=price&tag=nim,web")
     check response.status == 200
     check response.json()["tags"] == %*["nim,web"]
 
@@ -156,9 +151,8 @@ suite "Typed query parameters":
     check invalidInt.status == 400
     check invalidInt.fieldMessage("query.value") == "must be an integer"
 
-    let invalidBool = testApp().get(
-      "/search?category=books&sort=price&available=sometimes"
-    )
+    let invalidBool =
+      testApp().get("/search?category=books&sort=price&available=sometimes")
     check invalidBool.status == 400
     check invalidBool.fieldMessage("query.available") == "must be a boolean"
 
@@ -207,10 +201,9 @@ suite "Typed query parameters":
     check not parameters[2]["required"].getBool()
     check parameters[3]["name"].getStr() == "category"
     check parameters[3]["required"].getBool()
-    let errorSchema =
-      api.openApiDocument()["paths"]["/search"]["get"]["responses"]["400"][
-        "content"
-      ]["application/json"]["schema"]
+    let errorSchema = api.openApiDocument()["paths"]["/search"]["get"]["responses"][
+      "400"
+    ]["content"]["application/json"]["schema"]
     check errorSchema["properties"]["code"]["type"].getStr() == "string"
     check errorSchema["properties"]["message"]["type"].getStr() == "string"
     check errorSchema["properties"]["fields"]["type"].getStr() == "object"

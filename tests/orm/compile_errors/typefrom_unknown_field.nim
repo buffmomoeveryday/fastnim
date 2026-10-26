@@ -2,6 +2,7 @@
 import fastnim/orm
 
 model User:
-  name: CharField()
+  name:
+    CharField()
 
 typeFrom(CreateUser, User.ignore(missing))

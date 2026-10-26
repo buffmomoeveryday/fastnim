@@ -30,7 +30,11 @@ proc yn(value: bool): string =
   if value: "true" else: "false"
 
 proc field(name, value: string): string =
-  let shown = if value.len == 0: "<em>empty</em>" else: xmltree.escape(value)
+  let shown =
+    if value.len == 0:
+      "<em>empty</em>"
+    else:
+      xmltree.escape(value)
   "<li><code>" & name & "</code> " & shown & "</li>"
 
 proc facts(request: Request): string =
@@ -63,11 +67,13 @@ proc document(body: string): string =
       el.textContent = el.textContent ? el.textContent + " · " + text : text
     }
   </script>
-  """ & Css & """
+  """ &
+    Css & """
 </head>
 <body hx-on="saved -> note('saved'); counted -> note('counted ' + event.detail.total)">
   <h1>FastNim HTMX 4</h1>
-  <div id="main">""" & body & """</div>
+  <div id="main">""" &
+    body & """</div>
 </body>
 </html>"""
 
@@ -95,7 +101,8 @@ proc home(request: Request): string =
     Read HX-* headers
   </button>
   <a href="/boosted" hx-boost="true">Boosted page</a>
-  """ & facts(request) & """
+  """ &
+    facts(request) & """
 </section>
 <section>
   <h2>html</h2>
@@ -139,10 +146,14 @@ app.get("/facts"):
   page(request, facts(request))
 
 app.get("/boosted"):
-  html document("<p><code>htmxBoosted</code> is " & yn(request.htmxBoosted) & ".</p>" & facts(request))
+  html document(
+    "<p><code>htmxBoosted</code> is " & yn(request.htmxBoosted) & ".</p>" &
+      facts(request)
+  )
 
 app.get("/missing"):
-  let body = "<h1>Not found</h1><p>Returned with <code>html(statusNotFound, body)</code>.</p>"
+  let body =
+    "<h1>Not found</h1><p>Returned with <code>html(statusNotFound, body)</code>.</p>"
   if request.isPartial:
     html(statusNotFound, body)
   else:
@@ -164,7 +175,8 @@ app.post("/location-spec"):
   htmxLocation(%*{"path": "/landed", "target": "#main"})
 
 app.get("/push"):
-  let body = "<p><code>htmxPushUrl</code> set the address bar to <code>/push</code>.</p>"
+  let body =
+    "<p><code>htmxPushUrl</code> set the address bar to <code>/push</code>.</p>"
   if not request.isPartial:
     return html(document(body))
   var response = html(body)
@@ -172,7 +184,8 @@ app.get("/push"):
   response
 
 app.get("/replace"):
-  let body = "<p><code>htmxReplaceUrl</code> replaced the history entry with <code>/replace</code>.</p>"
+  let body =
+    "<p><code>htmxReplaceUrl</code> replaced the history entry with <code>/replace</code>.</p>"
   if not request.isPartial:
     return html(document(body))
   var response = html(body)
@@ -180,7 +193,8 @@ app.get("/replace"):
   response
 
 app.get("/reswap"):
-  let body = """<div id="swap-box">Replaced with <code>htmxReswap("outerHTML")</code>.</div>"""
+  let body =
+    """<div id="swap-box">Replaced with <code>htmxReswap("outerHTML")</code>.</div>"""
   if not request.isPartial:
     return html(document(body))
   var response = html(body)
@@ -188,7 +202,8 @@ app.get("/reswap"):
   response
 
 app.get("/retarget"):
-  let body = "<p>This landed in <code>#elsewhere</code> via <code>htmxRetarget</code>.</p>"
+  let body =
+    "<p>This landed in <code>#elsewhere</code> via <code>htmxRetarget</code>.</p>"
   if not request.isPartial:
     return html(document(body))
   var response = html(body)
@@ -196,7 +211,8 @@ app.get("/retarget"):
   response
 
 app.get("/reselect"):
-  let body = """<div><p>ignored</p><p id="picked">Only this node was swapped, via <code>htmxReselect</code>.</p></div>"""
+  let body =
+    """<div><p>ignored</p><p id="picked">Only this node was swapped, via <code>htmxReselect</code>.</p></div>"""
   if not request.isPartial:
     return html(document(body))
   var response = html(body)

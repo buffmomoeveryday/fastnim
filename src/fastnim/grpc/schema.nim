@@ -30,10 +30,10 @@ type
     typeNode: NimNode
 
 proc isIdentStart(value: char): bool {.compileTime.} =
-  value in {'a'..'z', 'A'..'Z', '_'}
+  value in {'a' .. 'z', 'A' .. 'Z', '_'}
 
 proc isIdentContinue(value: char): bool {.compileTime.} =
-  value.isIdentStart() or value in {'0'..'9'}
+  value.isIdentStart() or value in {'0' .. '9'}
 
 proc tokenize(source: string): seq[string] {.compileTime.} =
   var position = 0
@@ -59,13 +59,13 @@ proc tokenize(source: string): seq[string] {.compileTime.} =
       inc position
       while position < source.len and source[position].isIdentContinue():
         inc position
-      result.add(source[first..<position])
-    elif source[position] in {'0'..'9'}:
+      result.add(source[first ..< position])
+    elif source[position] in {'0' .. '9'}:
       let first = position
       inc position
-      while position < source.len and source[position] in {'0'..'9'}:
+      while position < source.len and source[position] in {'0' .. '9'}:
         inc position
-      result.add(source[first..<position])
+      result.add(source[first ..< position])
     elif source[position] in {'\'', '"'}:
       let quote = source[position]
       let first = position
@@ -78,7 +78,7 @@ proc tokenize(source: string): seq[string] {.compileTime.} =
       if position >= source.len:
         raise newException(ValueError, "unterminated protobuf string")
       inc position
-      result.add(source[first..<position])
+      result.add(source[first ..< position])
     else:
       result.add($source[position])
       inc position
@@ -87,7 +87,11 @@ proc requireToken(
     tokens: seq[string], position: var int, expected: string
 ) {.compileTime.} =
   if position >= tokens.len or tokens[position] != expected:
-    let actual = if position < tokens.len: tokens[position] else: "end of file"
+    let actual =
+      if position < tokens.len:
+        tokens[position]
+      else:
+        "end of file"
     raise newException(
       ValueError, "expected '" & expected & "' in protobuf schema, got '" & actual & "'"
     )
@@ -110,8 +114,10 @@ proc skipStatement(tokens: seq[string], position: var int) {.compileTime.} =
   var squareDepth = 0
   while position < tokens.len:
     case tokens[position]
-    of "[": inc squareDepth
-    of "]": dec squareDepth
+    of "[":
+      inc squareDepth
+    of "]":
+      dec squareDepth
     of ";":
       inc position
       if squareDepth == 0:
@@ -127,9 +133,12 @@ proc skipBlock(tokens: seq[string], position: var int) {.compileTime.} =
   var depth = 1
   while position < tokens.len and depth > 0:
     case tokens[position]
-    of "{": inc depth
-    of "}": dec depth
-    else: discard
+    of "{":
+      inc depth
+    of "}":
+      dec depth
+    else:
+      discard
     inc position
   if depth != 0:
     raise newException(ValueError, "unterminated protobuf block")
@@ -169,12 +178,14 @@ proc parseMessage(
       raise newException(ValueError, "missing protobuf field number")
     let fieldNumber = parseInt(tokens[position])
     inc position
-    result.fields.add(ProtoField(
-      name: fieldName,
-      typeName: packageName.qualify(typeName),
-      number: fieldNumber,
-      repeated: repeated,
-    ))
+    result.fields.add(
+      ProtoField(
+        name: fieldName,
+        typeName: packageName.qualify(typeName),
+        number: fieldNumber,
+        repeated: repeated,
+      )
+    )
     tokens.skipStatement(position)
   tokens.requireToken(position, "}")
 
@@ -202,13 +213,15 @@ proc parseService(
       inc position
     let responseType = schema.packageName.qualify(tokens.takeName(position))
     tokens.requireToken(position, ")")
-    schema.methods.add(ProtoMethod(
-      path: "/" & schema.packageName.qualify(serviceName) & "/" & methodName,
-      requestType: requestType,
-      responseType: responseType,
-      requestStreaming: requestStreaming,
-      responseStreaming: responseStreaming,
-    ))
+    schema.methods.add(
+      ProtoMethod(
+        path: "/" & schema.packageName.qualify(serviceName) & "/" & methodName,
+        requestType: requestType,
+        responseType: responseType,
+        requestStreaming: requestStreaming,
+        responseStreaming: responseStreaming,
+      )
+    )
     if position < tokens.len and tokens[position] == "{":
       tokens.skipBlock(position)
     else:
@@ -237,12 +250,13 @@ proc parseSchema(source: string): ProtoSchema {.compileTime.} =
       tokens.skipBlock(position)
     else:
       raise newException(
-        ValueError, "unsupported top-level protobuf declaration '" & tokens[position] & "'"
+        ValueError,
+        "unsupported top-level protobuf declaration '" & tokens[position] & "'",
       )
 
 proc staticString(node: NimNode, label: string): string {.compileTime.} =
   case node.kind
-  of nnkStrLit..nnkTripleStrLit:
+  of nnkStrLit .. nnkTripleStrLit:
     result = node.strVal
   of nnkSym:
     let implementation = node.getImpl()
@@ -266,7 +280,10 @@ proc normalized(name: string): string {.compileTime.} =
 
 proc bareName(name: string): string {.compileTime.} =
   let separator = name.rfind('.')
-  if separator < 0: name else: name[separator + 1..^1]
+  if separator < 0:
+    name
+  else:
+    name[separator + 1 ..^ 1]
 
 proc nimTypeName(node: NimNode): string {.compileTime.} =
   case node.kind
@@ -274,7 +291,7 @@ proc nimTypeName(node: NimNode): string {.compileTime.} =
     result = node.strVal
   of nnkBracketExpr:
     result = nimTypeName(node[0]) & "["
-    for index in 1..<node.len:
+    for index in 1 ..< node.len:
       if index > 1:
         result.add(", ")
       result.add(nimTypeName(node[index]))
@@ -292,7 +309,7 @@ proc objectFields(typeNode: NimNode): seq[NimField] {.compileTime.} =
   for definition in records:
     if definition.kind != nnkIdentDefs:
       error("variant protobuf objects are not supported", definition)
-    for index in 0..<definition.len - 2:
+    for index in 0 ..< definition.len - 2:
       var nameNode = definition[index]
       if nameNode.kind == nnkPostfix:
         nameNode = nameNode[1]
@@ -301,15 +318,24 @@ proc objectFields(typeNode: NimNode): seq[NimField] {.compileTime.} =
 proc expectedNimType(field: ProtoField): string {.compileTime.} =
   var base: string
   case field.typeName.bareName()
-  of "double": base = "float64"
-  of "float": base = "float32"
-  of "int32": base = "int32"
-  of "int64": base = "int64"
-  of "uint32": base = "uint32"
-  of "uint64": base = "uint64"
-  of "bool": base = "bool"
-  of "string": base = "string"
-  of "bytes": base = "seq[byte]"
+  of "double":
+    base = "float64"
+  of "float":
+    base = "float32"
+  of "int32":
+    base = "int32"
+  of "int64":
+    base = "int64"
+  of "uint32":
+    base = "uint32"
+  of "uint64":
+    base = "uint64"
+  of "bool":
+    base = "bool"
+  of "string":
+    base = "string"
+  of "bytes":
+    base = "seq[byte]"
   of "sint32", "sint64", "fixed32", "fixed64", "sfixed32", "sfixed64":
     error(
       "protobuf type '" & field.typeName.bareName() &
@@ -336,16 +362,15 @@ proc validateMessage(
   if fields.len != message.fields.len:
     error(
       "Nim type '" & nimTypeName(typeNode) & "' has " & $fields.len &
-        " fields, but protobuf message '" & messageName & "' has " &
-        $message.fields.len,
+        " fields, but protobuf message '" & messageName & "' has " & $message.fields.len,
       errorNode,
     )
   for index, protoField in message.fields:
     let nimField = fields[index]
     if protoField.number != index + 1:
       error(
-        "protobuf field '" & protoField.name & "' uses number " &
-          $protoField.number & "; FastNim's built-in codec requires declaration-order " &
+        "protobuf field '" & protoField.name & "' uses number " & $protoField.number &
+          "; FastNim's built-in codec requires declaration-order " &
           "field numbers starting at 1",
         errorNode,
       )
@@ -385,7 +410,9 @@ proc validateGrpcSchema*(
     error("gRPC method '" & path & "' is not declared in " & relativePath, pathNode)
   if selected.requestStreaming != requestStreaming or
       selected.responseStreaming != responseStreaming:
-    error("gRPC streaming shape does not match protobuf method '" & path & "'", pathNode)
+    error(
+      "gRPC streaming shape does not match protobuf method '" & path & "'", pathNode
+    )
   if nimTypeName(requestType) != selected.requestType.bareName():
     error(
       "route request type '" & nimTypeName(requestType) &
@@ -402,7 +429,8 @@ proc validateGrpcSchema*(
   schema.validateMessage(selected.responseType, responseType, responseType)
 
 macro validateGrpcContract*(
-    protoPath, path: static[string], requestType, responseType: typedesc,
+    protoPath, path: static[string],
+    requestType, responseType: typedesc,
     requestStreaming, responseStreaming: static[bool],
 ): untyped =
   ## Checks a route after Nim has resolved its request and response types.
@@ -411,11 +439,6 @@ macro validateGrpcContract*(
   let pathNode = newLit(path)
   pathNode.copyLineInfo(requestType)
   validateGrpcSchema(
-    protoNode,
-    pathNode,
-    requestType,
-    responseType,
-    requestStreaming,
-    responseStreaming,
+    protoNode, pathNode, requestType, responseType, requestStreaming, responseStreaming
   )
   newEmptyNode()

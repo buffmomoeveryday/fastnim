@@ -2,5 +2,7 @@
 import fastnim/orm
 
 model User:
-  name: CharField()
-  name: TextField()
+  name:
+    CharField()
+  name:
+    TextField()

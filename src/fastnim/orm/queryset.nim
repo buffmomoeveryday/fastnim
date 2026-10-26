@@ -18,7 +18,11 @@ type
 
   AggregateKind* = enum
     ## SQL aggregate functions supported by `QuerySet.aggregate`.
-    akCount, akSum, akAvg, akMin, akMax
+    akCount
+    akSum
+    akAvg
+    akMin
+    akMax
 
   AggregateSpec* = object
     ## A validated aggregate expression, constructed by the `aggregate` macro.
@@ -34,15 +38,15 @@ type
   QuerySet*[T] = object
     db*: Database
     wheres*: seq[Predicate]
-    ordering*: seq[string]   ## column name, prefixed with `-` for descending
-    selects*: seq[string]    ## selectRelated paths
+    ordering*: seq[string] ## column name, prefixed with `-` for descending
+    selects*: seq[string] ## selectRelated paths
     prefetches*: seq[string] ## prefetchRelated paths
-    expands*: seq[string]    ## relation paths nested into JSON by `expand`
-    relPaths*: seq[string]   ## relation paths a filter condition reaches through
-    limitN*: int             ## -1 means no limit
+    expands*: seq[string] ## relation paths nested into JSON by `expand`
+    relPaths*: seq[string] ## relation paths a filter condition reaches through
+    limitN*: int ## -1 means no limit
     offsetN*: int
-    forUpdate*: bool         ## the rows must be read inside a transaction
-    columns*: seq[string]    ## selected SQL columns; empty means every field
+    forUpdate*: bool ## the rows must be read inside a transaction
+    columns*: seq[string] ## selected SQL columns; empty means every field
 
   UpdateAssignment* = object
     ## One `SET` clause for `QuerySet.update`. A literal value is `sql = "?"`
@@ -65,7 +69,8 @@ type
     many: Table[string, seq[FastormModel]]
 
   PrefetchKind* = enum
-    pfForward, pfReverse
+    pfForward
+    pfReverse
 
   PrefetchDef* = object
     owner*: string
@@ -74,13 +79,13 @@ type
     kind*: PrefetchKind
     keyColumn*: string
 
-  RowFn = proc (m: FastormModel): seq[DbValue] {.gcsafe, raises: [].}
-  HydrateFn = proc (row: seq[DbValue]): FastormModel {.gcsafe, raises: [DatabaseError].}
+  RowFn = proc(m: FastormModel): seq[DbValue] {.gcsafe, raises: [].}
+  HydrateFn = proc(row: seq[DbValue]): FastormModel {.gcsafe, raises: [DatabaseError].}
 
   Join = object
     parentPath: string
     field: string
-    path: string   ## full dotted path, e.g. "author.publisher"
+    path: string ## full dotted path, e.g. "author.publisher"
     model: string
     table: string
     alias: string
@@ -96,20 +101,25 @@ proc qcol(col: string, alias = rootAlias): string =
 proc rememberOmit*(model: FastormModel, fields: openArray[string]) {.raises: [].} =
   ## Records field names for the next FastNim encoding of `model`.
   ## `toJsonHook` consumes the list.
-  if model.isNil: return
+  if model.isNil:
+    return
   model.responseSkip.setLen(0)
   for name in fields:
     model.responseSkip.add name
 
 proc rememberExpand*(model: FastormModel, paths: openArray[string]) {.raises: [].} =
   ## Records relation paths to nest into the next JSON encoding of `model`.
-  if model.isNil: return
+  if model.isNil:
+    return
   for path in paths:
     if path notin model.responseExpand:
       model.responseExpand.add path
 
 proc jsonKey(field: FieldDef): string =
-  if field.kind == fkForeignKey: field.name & "Id" else: field.name
+  if field.kind == fkForeignKey:
+    field.name & "Id"
+  else:
+    field.name
 
 proc dbToJson(value: DbValue, kind: FieldKind): JsonNode =
   if value.kind == dvNull:
@@ -118,32 +128,55 @@ proc dbToJson(value: DbValue, kind: FieldKind): JsonNode =
   of fkBoolean:
     newJBool(value.kind == dvInt and value.i != 0)
   of fkInteger:
-    if value.kind == dvInt: newJInt(value.i) else: newJNull()
+    if value.kind == dvInt:
+      newJInt(value.i)
+    else:
+      newJNull()
   of fkFloat:
     case value.kind
-    of dvFloat: newJFloat(value.f)
-    of dvInt: newJFloat(float(value.i))
-    else: newJNull()
+    of dvFloat:
+      newJFloat(value.f)
+    of dvInt:
+      newJFloat(float(value.i))
+    else:
+      newJNull()
   of fkForeignKey:
     case value.kind
-    of dvInt: newJInt(value.i)
-    of dvFloat: newJFloat(value.f)
-    of dvText: newJString(value.s)
-    else: newJNull()
+    of dvInt:
+      newJInt(value.i)
+    of dvFloat:
+      newJFloat(value.f)
+    of dvText:
+      newJString(value.s)
+    else:
+      newJNull()
   of fkUUID, fkChar, fkText, fkDateTime, fkDate, fkTime, fkDecimal:
-    if value.kind == dvText: newJString(value.s) else: newJNull()
+    if value.kind == dvText:
+      newJString(value.s)
+    else:
+      newJNull()
   of fkDuration:
-    if value.kind == dvInt: newJInt(value.i) else: newJNull()
+    if value.kind == dvInt:
+      newJInt(value.i)
+    else:
+      newJNull()
   of fkJson:
     if value.kind == dvText:
-      try: parseJson(value.s)
-      except CatchableError: newJString(value.s)
-    else: newJNull()
+      try:
+        parseJson(value.s)
+      except CatchableError:
+        newJString(value.s)
+    else:
+      newJNull()
   of fkBinary:
-    if value.kind == dvBlob: newJString(encode(value.b)) else: newJNull()
+    if value.kind == dvBlob:
+      newJString(encode(value.b))
+    else:
+      newJNull()
 
-proc encodeModel(model: FastormModel, modelName: string, expands: seq[string],
-                 skip: openArray[string]): JsonNode
+proc encodeModel(
+  model: FastormModel, modelName: string, expands: seq[string], skip: openArray[string]
+): JsonNode
 
 proc toJsonHook*[T: FastormModel](model: T): JsonNode =
   ## `std/jsonutils.toJson` calls this, which is how FastNim's `ok` and
@@ -174,22 +207,26 @@ proc addPredicate*[T](qs: QuerySet[T], p: Predicate): QuerySet[T] =
 
 proc addSelect*[T](qs: QuerySet[T], path: string): QuerySet[T] =
   result = qs
-  if path notin result.selects: result.selects.add path
+  if path notin result.selects:
+    result.selects.add path
 
 proc addPrefetch*[T](qs: QuerySet[T], path: string): QuerySet[T] =
   result = qs
-  if path notin result.prefetches: result.prefetches.add path
+  if path notin result.prefetches:
+    result.prefetches.add path
 
 proc addExpand*[T](qs: QuerySet[T], path: string): QuerySet[T] =
   ## Records `path` for JSON nesting after the query is evaluated.
   result = qs
-  if path notin result.expands: result.expands.add path
+  if path notin result.expands:
+    result.expands.add path
 
 proc addRelPath*[T](qs: QuerySet[T], path: string): QuerySet[T] =
   ## Records that a filter condition needs `path` joined to resolve a field
   ## on a related model (`author.name = "Ada"`).
   result = qs
-  if path notin result.relPaths: result.relPaths.add path
+  if path notin result.relPaths:
+    result.relPaths.add path
 
 proc applyOnly*[T](qs: QuerySet[T], columns: seq[string]): QuerySet[T] =
   ## Replaces the selected columns. The compile-time `only` macro supplies
@@ -204,7 +241,8 @@ proc applyDefer*[T](qs: QuerySet[T], columns: seq[string]): QuerySet[T] =
   let m = modelMeta(T)
   var keep: seq[string]
   if qs.columns.len == 0:
-    for f in m.fields: keep.add f.column
+    for f in m.fields:
+      keep.add f.column
   else:
     keep = qs.columns
   for c in columns:
@@ -228,24 +266,34 @@ proc markLoaded*(m: FastormModel, fields: openArray[string]) {.raises: [].} =
 proc isFullyLoaded*(m: FastormModel, fields: openArray[string]): bool {.raises: [].} =
   ## True when every name in `fields` was hydrated, or when the instance
   ## was never projected (`loaded` is empty).
-  if m.loaded.len == 0: return true
+  if m.loaded.len == 0:
+    return true
   for name in fields:
-    if name notin m.loaded: return false
+    if name notin m.loaded:
+      return false
   true
 
-proc coerceFloat*(v: SomeInteger): DbValue = toDbValue(float(v))
-proc coerceFloat*(v: SomeFloat): DbValue = toDbValue(v)
+proc coerceFloat*(v: SomeInteger): DbValue =
+  toDbValue(float(v))
+
+proc coerceFloat*(v: SomeFloat): DbValue =
+  toDbValue(v)
 
 proc columnFor(m: ModelMeta, name: string): string {.raises: [QueryError].} =
   let i = m.findField(name)
   if i < 0:
     var known: seq[string]
-    for f in m.fields: known.add f.name
-    raise newException(QueryError, m.name & " has no field '" & name &
-      "' (fields: " & known.join(", ") & ")")
+    for f in m.fields:
+      known.add f.name
+    raise newException(
+      QueryError,
+      m.name & " has no field '" & name & "' (fields: " & known.join(", ") & ")",
+    )
   m.fields[i].column
 
-proc orderBy*[T](qs: QuerySet[T], fields: varargs[string]): QuerySet[T] {.raises: [QueryError].} =
+proc orderBy*[T](
+    qs: QuerySet[T], fields: varargs[string]
+): QuerySet[T] {.raises: [QueryError].} =
   ## Orders by field names; prefix a name with `-` for descending order.
   ## Replaces any previous ordering.
   mixin modelMeta
@@ -254,7 +302,11 @@ proc orderBy*[T](qs: QuerySet[T], fields: varargs[string]): QuerySet[T] {.raises
   result.ordering = @[]
   for f in fields:
     let desc = f.startsWith("-")
-    let name = if desc: f[1 .. ^1] else: f
+    let name =
+      if desc:
+        f[1 .. ^1]
+      else:
+        f
     result.ordering.add (if desc: "-" else: "") & m.columnFor(name)
 
 proc limit*[T](qs: QuerySet[T], n: Natural): QuerySet[T] =
@@ -277,7 +329,9 @@ proc selectForUpdate*[T](qs: QuerySet[T]): QuerySet[T] =
   result = qs
   result.forUpdate = true
 
-proc aggregateInt*(values: AggregateResult, alias: string): int64 {.raises: [QueryError].} =
+proc aggregateInt*(
+    values: AggregateResult, alias: string
+): int64 {.raises: [QueryError].} =
   ## Reads an integer aggregate, typically `Count`. Raises when the alias is
   ## unknown or its value is NULL/non-integral.
   var value: DbValue
@@ -289,7 +343,9 @@ proc aggregateInt*(values: AggregateResult, alias: string): int64 {.raises: [Que
     raise newException(QueryError, "aggregate '" & alias & "' is not an integer")
   value.i
 
-proc aggregateValue*(values: AggregateResult, alias: string): DbValue {.raises: [QueryError].} =
+proc aggregateValue*(
+    values: AggregateResult, alias: string
+): DbValue {.raises: [QueryError].} =
   ## Reads a raw aggregate value, including `dvNull` for an empty `SUM`,
   ## `AVG`, `MIN`, or `MAX`.
   try:
@@ -297,33 +353,45 @@ proc aggregateValue*(values: AggregateResult, alias: string): DbValue {.raises: 
   except KeyError:
     raise newException(QueryError, "aggregate result has no alias '" & alias & "'")
 
-proc aggregateFloat*(values: AggregateResult, alias: string): float {.raises: [QueryError].} =
+proc aggregateFloat*(
+    values: AggregateResult, alias: string
+): float {.raises: [QueryError].} =
   ## Reads a numeric aggregate. SQLite may return either an integer or float.
   let value = values.aggregateValue(alias)
   case value.kind
-  of dvInt: float(value.i)
-  of dvFloat: value.f
-  else: raise newException(QueryError, "aggregate '" & alias & "' is not numeric")
+  of dvInt:
+    float(value.i)
+  of dvFloat:
+    value.f
+  else:
+    raise newException(QueryError, "aggregate '" & alias & "' is not numeric")
 
 # -- predicate builders used by the filter macros ----------------------------
 
-proc coerce*[T](t: typedesc[T], v: T): DbValue = toDbValue(v)
-proc coerce*[T](t: typedesc[Option[T]], v: T): DbValue = toDbValue(v)
+proc coerce*[T](t: typedesc[T], v: T): DbValue =
+  toDbValue(v)
+
+proc coerce*[T](t: typedesc[Option[T]], v: T): DbValue =
+  toDbValue(v)
+
 proc coerce*[T; M: ref RootObj](t: typedesc[T], v: M): DbValue =
   ## Lets foreign key lookups accept a model instance instead of its key.
   mixin pkValue
   toDbValue(pkValue(v))
 
 proc coerceSeq*[T, V](t: typedesc[T], vs: openArray[V]): seq[DbValue] =
-  for v in vs: result.add coerce(T, v)
+  for v in vs:
+    result.add coerce(T, v)
 
 proc notPredicate*(p: Predicate): Predicate =
   Predicate(sql: "NOT (" & p.sql & ")", params: p.params)
 
 proc orPredicate*(ps: openArray[Predicate]): Predicate =
   ## Any of the predicates may match. Zero predicates match nothing.
-  if ps.len == 0: return Predicate(sql: "0")
-  if ps.len == 1: return ps[0]
+  if ps.len == 0:
+    return Predicate(sql: "0")
+  if ps.len == 1:
+    return ps[0]
   var parts: seq[string]
   for p in ps:
     parts.add "(" & p.sql & ")"
@@ -339,16 +407,19 @@ const relMarker = '\x01'
   ## joins for the final query are planned.
 
 proc refCol(col, path: string): string =
-  if path.len == 0: return qcol(col)
+  if path.len == 0:
+    return qcol(col)
   result.add relMarker
   result.add path
   result.add relMarker
   result.add '.'
   result.add quoteIdent(col)
 
-proc resolveRelMarkers(sql: string, aliasOf: Table[string, string]): string {.
-    raises: [QueryError].} =
-  if relMarker notin sql: return sql
+proc resolveRelMarkers(
+    sql: string, aliasOf: Table[string, string]
+): string {.raises: [QueryError].} =
+  if relMarker notin sql:
+    return sql
   let parts = sql.split(relMarker)
   for i in 0 ..< parts.len:
     if i mod 2 == 0:
@@ -357,7 +428,9 @@ proc resolveRelMarkers(sql: string, aliasOf: Table[string, string]): string {.
       try:
         result.add quoteIdent(aliasOf[parts[i]])
       except KeyError:
-        raise newException(QueryError, "fastorm: internal error resolving relation '" & parts[i] & "'")
+        raise newException(
+          QueryError, "fastorm: internal error resolving relation '" & parts[i] & "'"
+        )
 
 proc eqPredicate*(col: string, v: DbValue, negate = false, path = ""): Predicate =
   let c = refCol(col, path)
@@ -375,32 +448,45 @@ proc inPredicate*(col: string, vs: seq[DbValue], negate = false, path = ""): Pre
   if vs.len == 0:
     return Predicate(sql: if negate: "1" else: "0")
   let marks = repeat("?", vs.len).join(", ")
-  Predicate(sql: refCol(col, path) & (if negate: " NOT IN (" else: " IN (") & marks & ")",
-            params: vs)
+  Predicate(
+    sql: refCol(col, path) & (if negate: " NOT IN (" else: " IN (") & marks & ")",
+    params: vs,
+  )
 
 proc nullPredicate*(col: string, isNull: bool, path = ""): Predicate =
   Predicate(sql: refCol(col, path) & (if isNull: " IS NULL" else: " IS NOT NULL"))
 
 proc escapeLike(s: string): string =
   for c in s:
-    if c in {'\\', '%', '_'}: result.add '\\'
+    if c in {'\\', '%', '_'}:
+      result.add '\\'
     result.add c
 
 proc textPredicate*(col, lookup: string, v: DbValue, path = ""): Predicate =
   ## String lookups. Case-insensitive variants use SQLite `LIKE`, which folds
   ## ASCII letters only.
   let c = refCol(col, path)
-  let s = if v.kind == dvText: v.s else: $v
+  let s =
+    if v.kind == dvText:
+      v.s
+    else:
+      $v
   case lookup
-  of "iexact": Predicate(sql: c & " = ? COLLATE NOCASE", params: @[v])
-  of "contains": Predicate(sql: "instr(" & c & ", ?) > 0", params: @[v])
+  of "iexact":
+    Predicate(sql: c & " = ? COLLATE NOCASE", params: @[v])
+  of "contains":
+    Predicate(sql: "instr(" & c & ", ?) > 0", params: @[v])
   of "startsWith":
     Predicate(sql: "substr(" & c & ", 1, ?) = ?", params: @[toDbValue(s.len), v])
   of "endsWith":
-    if s.len == 0: Predicate(sql: c & " IS NOT NULL")
-    else: Predicate(sql: "substr(" & c & ", ?) = ?", params: @[toDbValue(-s.len), v])
+    if s.len == 0:
+      Predicate(sql: c & " IS NOT NULL")
+    else:
+      Predicate(sql: "substr(" & c & ", ?) = ?", params: @[toDbValue(-s.len), v])
   of "icontains":
-    Predicate(sql: c & " LIKE ? ESCAPE '\\'", params: @[toDbValue("%" & escapeLike(s) & "%")])
+    Predicate(
+      sql: c & " LIKE ? ESCAPE '\\'", params: @[toDbValue("%" & escapeLike(s) & "%")]
+    )
   of "istartsWith":
     Predicate(sql: c & " LIKE ? ESCAPE '\\'", params: @[toDbValue(escapeLike(s) & "%")])
   of "iendsWith":
@@ -411,7 +497,8 @@ proc textPredicate*(col, lookup: string, v: DbValue, path = ""): Predicate =
 # -- SQL compilation ---------------------------------------------------------
 
 proc whereClause[T](qs: QuerySet[T], params: var seq[DbValue]): string =
-  if qs.wheres.len == 0: return ""
+  if qs.wheres.len == 0:
+    return ""
   var parts: seq[string]
   for p in qs.wheres:
     parts.add "(" & p.sql & ")"
@@ -420,17 +507,20 @@ proc whereClause[T](qs: QuerySet[T], params: var seq[DbValue]): string =
 
 proc columnList(m: ModelMeta, alias: string): string =
   var cols: seq[string]
-  for f in m.fields: cols.add qcol(f.column, alias)
+  for f in m.fields:
+    cols.add qcol(f.column, alias)
   cols.join(", ")
 
 proc columnList(columns: seq[string], alias: string): string =
   var cols: seq[string]
-  for c in columns: cols.add qcol(c, alias)
+  for c in columns:
+    cols.add qcol(c, alias)
   cols.join(", ")
 
 proc rootColumns(m: ModelMeta, selected: seq[string]): seq[string] =
   if selected.len == 0:
-    for f in m.fields: result.add f.column
+    for f in m.fields:
+      result.add f.column
   else:
     result = selected
 
@@ -440,28 +530,38 @@ proc fromClause(m: ModelMeta): string =
 # -- relation cache ----------------------------------------------------------
 
 proc ensureCache(m: FastormModel): RelationCache =
-  if m.cache.isNil: m.cache = RelationCache()
+  if m.cache.isNil:
+    m.cache = RelationCache()
   m.cache
 
 proc rememberSingle*(m: FastormModel, name: string, value: FastormModel) =
   let c = ensureCache(m)
   c.single[name] = value
-  if c.missing.hasKey(name): c.missing.del(name)
+  if c.missing.hasKey(name):
+    c.missing.del(name)
 
 proc rememberMissing*(m: FastormModel, name: string) =
   let c = ensureCache(m)
   c.missing[name] = true
-  if c.single.hasKey(name): c.single.del(name)
+  if c.single.hasKey(name):
+    c.single.del(name)
 
-proc rememberMany*[T: FastormModel](m: FastormModel, name: string, values: openArray[T]) =
+proc rememberMany*[T: FastormModel](
+    m: FastormModel, name: string, values: openArray[T]
+) =
   var refs: seq[FastormModel]
-  for v in values: refs.add v
+  for v in values:
+    refs.add v
   ensureCache(m).many[name] = refs
 
-proc cachedSingle*[T: FastormModel](m: FastormModel, name: string): tuple[hit: bool, value: Option[T]] =
-  if m.cache.isNil: return
+proc cachedSingle*[T: FastormModel](
+    m: FastormModel, name: string
+): tuple[hit: bool, value: Option[T]] =
+  if m.cache.isNil:
+    return
   try:
-    if m.cache.missing[name]: return (true, none(T))
+    if m.cache.missing[name]:
+      return (true, none(T))
   except KeyError:
     discard
   try:
@@ -469,22 +569,28 @@ proc cachedSingle*[T: FastormModel](m: FastormModel, name: string): tuple[hit: b
   except KeyError:
     discard
 
-proc cachedMany*[T: FastormModel](m: FastormModel, name: string): tuple[hit: bool, value: seq[T]] =
-  if m.cache.isNil: return
+proc cachedMany*[T: FastormModel](
+    m: FastormModel, name: string
+): tuple[hit: bool, value: seq[T]] =
+  if m.cache.isNil:
+    return
   var rows: seq[FastormModel]
   try:
     rows = m.cache.many[name]
   except KeyError:
     return
   result.hit = true
-  for v in rows: result.value.add T(v)
+  for v in rows:
+    result.value.add T(v)
 
 proc relationParent(root: FastormModel, path: string): FastormModel =
-  if path.len == 0: return root
+  if path.len == 0:
+    return root
   result = root
   for part in path.split('.'):
     let hit = cachedSingle[FastormModel](result, part)
-    if not hit.hit or hit.value.isNone: return nil
+    if not hit.hit or hit.value.isNone:
+      return nil
     result = hit.value.get
 
 # -- model and prefetch registries ------------------------------------------
@@ -497,16 +603,19 @@ proc registerModelFns*(name: string, toRow: RowFn, hydrate: HydrateFn) =
 
 proc registerPrefetch*(d: PrefetchDef) =
   for existing in prefetchDefs:
-    if existing.owner == d.owner and existing.name == d.name: return
+    if existing.owner == d.owner and existing.name == d.name:
+      return
   prefetchDefs.add d
 
 proc modelByName(name: string): ModelMeta {.gcsafe, raises: [QueryError].} =
   for m in registeredModels():
-    if m.name == name: return m
+    if m.name == name:
+      return m
   raise newException(QueryError, "fastorm: model " & name & " is not registered")
 
-proc fnsOf(name: string): tuple[toRow: RowFn, hydrate: HydrateFn] {.
-    gcsafe, raises: [QueryError].} =
+proc fnsOf(
+    name: string
+): tuple[toRow: RowFn, hydrate: HydrateFn] {.gcsafe, raises: [QueryError].} =
   {.cast(gcsafe).}:
     try:
       result = modelFns[name]
@@ -516,18 +625,24 @@ proc fnsOf(name: string): tuple[toRow: RowFn, hydrate: HydrateFn] {.
 proc findPrefetch(owner, name: string): PrefetchDef {.gcsafe.} =
   {.cast(gcsafe).}:
     for d in prefetchDefs:
-      if d.owner == owner and d.name == name: return d
+      if d.owner == owner and d.name == name:
+        return d
 
 proc prefetchBy(owner, name: string): PrefetchDef {.gcsafe, raises: [QueryError].} =
   result = findPrefetch(owner, name)
   if result.name.len == 0:
-    raise newException(QueryError, "fastorm: " & owner & " has no relation '" & name & "'")
+    raise
+      newException(QueryError, "fastorm: " & owner & " has no relation '" & name & "'")
 
 proc skippedField(field: FieldDef, skip: openArray[string]): bool =
   field.name in skip or jsonKey(field) in skip
 
-proc encodeModel(model: FastormModel, modelName: string, expands: seq[string],
-                 skip: openArray[string]): JsonNode =
+proc encodeModel(
+    model: FastormModel,
+    modelName: string,
+    expands: seq[string],
+    skip: openArray[string],
+): JsonNode =
   ## Columns first, then each expanded relation from the cache. A missing
   ## forward relation is JSON `null`; a missing reverse relation is `[]`.
   if model.isNil:
@@ -550,15 +665,25 @@ proc encodeModel(model: FastormModel, modelName: string, expands: seq[string],
   let row = toRow(model)
   result = newJObject()
   for i, field in meta.fields:
-    if skippedField(field, skip): continue
+    if skippedField(field, skip):
+      continue
     if i < row.len:
       result[jsonKey(field)] = dbToJson(row[i], field.kind)
   var groups: OrderedTable[string, seq[string]]
   for path in expands:
-    if path.len == 0: continue
+    if path.len == 0:
+      continue
     let dot = path.find('.')
-    let head = if dot < 0: path else: path[0 ..< dot]
-    let tail = if dot < 0: "" else: path[dot + 1 .. ^1]
+    let head =
+      if dot < 0:
+        path
+      else:
+        path[0 ..< dot]
+    let tail =
+      if dot < 0:
+        ""
+      else:
+        path[dot + 1 .. ^1]
     if head notin groups:
       groups[head] = @[]
     if tail.len > 0 and tail notin groups[head]:
@@ -579,22 +704,34 @@ proc encodeModel(model: FastormModel, modelName: string, expands: seq[string],
         arr.add encodeModel(child, spec.target, suffixes, [])
       result[rel] = arr
       continue
-    result[rel] = if spec.kind == pfReverse: newJArray() else: newJNull()
+    result[rel] =
+      if spec.kind == pfReverse:
+        newJArray()
+      else:
+        newJNull()
 
 proc colIndex(m: ModelMeta, column: string): int {.raises: [QueryError].} =
   for i, f in m.fields:
-    if f.column == column: return i
+    if f.column == column:
+      return i
   raise newException(QueryError, m.name & " has no column '" & column & "'")
 
 proc valueKey(v: DbValue): string =
   case v.kind
-  of dvNull: "n"
-  of dvInt: "i" & $v.i
-  of dvFloat: "f" & $v.f
-  of dvText: "t" & v.s
-  of dvBlob: "b" & $v.b.len
+  of dvNull:
+    "n"
+  of dvInt:
+    "i" & $v.i
+  of dvFloat:
+    "f" & $v.f
+  of dvText:
+    "t" & v.s
+  of dvBlob:
+    "b" & $v.b.len
 
-proc planJoins(root: ModelMeta, paths: seq[string]): seq[Join] {.raises: [QueryError].} =
+proc planJoins(
+    root: ModelMeta, paths: seq[string]
+): seq[Join] {.raises: [QueryError].} =
   var aliasOf = {"": rootAlias}.toTable
   var modelOf = {"": root.name}.toTable
   for path in paths:
@@ -603,27 +740,44 @@ proc planJoins(root: ModelMeta, paths: seq[string]): seq[Join] {.raises: [QueryE
     for part in path.split('.'):
       if part.len == 0:
         raise newException(QueryError, "empty relation in '" & path & "'")
-      acc = if acc.len == 0: part else: acc & "." & part
+      acc =
+        if acc.len == 0:
+          part
+        else:
+          acc & "." & part
       if acc in aliasOf:
         parentPath = acc
         continue
       let parent = modelByName(modelOf.getOrDefault(parentPath))
       let fi = parent.findField(part)
       if fi < 0 or parent.fields[fi].kind != fkForeignKey:
-        raise newException(QueryError, parent.name & " has no foreign key '" & part & "'")
+        raise
+          newException(QueryError, parent.name & " has no foreign key '" & part & "'")
       let f = parent.fields[fi]
       let target = modelByName(f.target)
-      let j = Join(parentPath: parentPath, field: part, path: acc, model: target.name,
-        table: target.table, alias: "t" & $(result.len + 1),
-        parentAlias: aliasOf.getOrDefault(parentPath), fkColumn: f.column,
-        targetColumn: f.targetColumn, pkIndex: target.pkIndex, ncols: target.fields.len)
+      let j = Join(
+        parentPath: parentPath,
+        field: part,
+        path: acc,
+        model: target.name,
+        table: target.table,
+        alias: "t" & $(result.len + 1),
+        parentAlias: aliasOf.getOrDefault(parentPath),
+        fkColumn: f.column,
+        targetColumn: f.targetColumn,
+        pkIndex: target.pkIndex,
+        ncols: target.fields.len,
+      )
       result.add j
       aliasOf[acc] = j.alias
       modelOf[acc] = target.name
       parentPath = acc
 
-proc joinedFrom(meta: ModelMeta, paths: seq[string]): tuple[
-    clause: string, joins: seq[Join], aliasOf: Table[string, string]] {.raises: [QueryError].} =
+proc joinedFrom(
+    meta: ModelMeta, paths: seq[string]
+): tuple[clause: string, joins: seq[Join], aliasOf: Table[string, string]] {.
+    raises: [QueryError]
+.} =
   ## The FROM clause (base table plus any LEFT JOINs needed for `paths`) and
   ## the path -> alias map used to resolve relation-marked columns.
   let joins = planJoins(meta, paths)
@@ -635,21 +789,27 @@ proc joinedFrom(meta: ModelMeta, paths: seq[string]): tuple[
       " ON " & qcol(j.fkColumn, j.parentAlias) & " = " & qcol(j.targetColumn, j.alias)
   (clause, joins, aliasOf)
 
-proc selectSql*[T](qs: QuerySet[T], params: var seq[DbValue], limitOverride = -1): string {.
-    raises: [QueryError].} =
+proc selectSql*[T](
+    qs: QuerySet[T], params: var seq[DbValue], limitOverride = -1
+): string {.raises: [QueryError].} =
   ## Builds the parameterized SELECT statement for `qs`.
   mixin modelMeta
   let m = modelMeta(T)
   let (fromSql, joins, aliasOf) = joinedFrom(m, qs.selects & qs.relPaths)
   var lists = @[columnList(rootColumns(m, qs.columns), rootAlias)]
-  for j in joins: lists.add columnList(modelByName(j.model), j.alias)
+  for j in joins:
+    lists.add columnList(modelByName(j.model), j.alias)
   result = "SELECT " & lists.join(", ") & " FROM " & fromSql
   result.add resolveRelMarkers(qs.whereClause(params), aliasOf)
   if qs.ordering.len > 0:
     var orders: seq[string]
     for o in qs.ordering:
       let desc = o.len > 0 and o[0] == '-'
-      let col = if desc: o[1 .. ^1] else: o
+      let col =
+        if desc:
+          o[1 .. ^1]
+        else:
+          o
       orders.add qcol(col) & (if desc: " DESC" else: " ASC")
     result.add " ORDER BY " & orders.join(", ")
   let lim = if limitOverride >= 0: limitOverride else: qs.limitN
@@ -658,10 +818,12 @@ proc selectSql*[T](qs: QuerySet[T], params: var seq[DbValue], limitOverride = -1
     params.add toDbValue(lim)
     params.add toDbValue(qs.offsetN)
 
-proc queryWhere(meta: ModelMeta, pred: Predicate, db: Database): Future[seq[seq[DbValue]]] {.
-    async: (raises: [DatabaseError, CancelledError]).} =
-  let sql = "SELECT " & columnList(meta, rootAlias) & " FROM " & meta.fromClause &
-    " WHERE " & pred.sql
+proc queryWhere(
+    meta: ModelMeta, pred: Predicate, db: Database
+): Future[seq[seq[DbValue]]] {.async: (raises: [DatabaseError, CancelledError]).} =
+  let sql =
+    "SELECT " & columnList(meta, rootAlias) & " FROM " & meta.fromClause & " WHERE " &
+    pred.sql
   return (await db.query(sql, pred.params)).rows
 
 proc deduped(values: seq[DbValue]): seq[DbValue] =
@@ -672,9 +834,11 @@ proc deduped(values: seq[DbValue]): seq[DbValue] =
       seen[k] = true
       result.add v
 
-proc loadPrefetch(spec: PrefetchDef, parents: seq[FastormModel], db: Database): Future[void] {.
-    async: (raises: [DatabaseError, QueryError, CancelledError]).} =
-  if parents.len == 0: return
+proc loadPrefetch(
+    spec: PrefetchDef, parents: seq[FastormModel], db: Database
+): Future[void] {.async: (raises: [DatabaseError, QueryError, CancelledError]).} =
+  if parents.len == 0:
+    return
   let ownerFns = fnsOf(spec.owner)
   let targetFns = fnsOf(spec.target)
   let ownerMeta = modelByName(spec.owner)
@@ -685,64 +849,89 @@ proc loadPrefetch(spec: PrefetchDef, parents: seq[FastormModel], db: Database): 
     var keys: seq[DbValue]
     for m in parents:
       let v = ownerFns.toRow(m)[fkIndex]
-      if v.kind != dvNull: keys.add v
+      if v.kind != dvNull:
+        keys.add v
     var byKey: Table[string, FastormModel]
     if keys.len > 0:
-      let rows = await queryWhere(targetMeta, inPredicate(targetMeta.pkField.column, deduped(keys)), db)
+      let rows = await queryWhere(
+        targetMeta, inPredicate(targetMeta.pkField.column, deduped(keys)), db
+      )
       for row in rows:
         byKey[valueKey(row[targetMeta.pkIndex])] = targetFns.hydrate(row)
     for m in parents:
       let v = ownerFns.toRow(m)[fkIndex]
-      let found = if v.kind == dvNull: nil else: byKey.getOrDefault(valueKey(v))
-      if found.isNil: rememberMissing(m, spec.name)
-      else: rememberSingle(m, spec.name, found)
+      let found =
+        if v.kind == dvNull:
+          nil
+        else:
+          byKey.getOrDefault(valueKey(v))
+      if found.isNil:
+        rememberMissing(m, spec.name)
+      else:
+        rememberSingle(m, spec.name, found)
   of pfReverse:
     let fkIndex = colIndex(targetMeta, spec.keyColumn)
     var keys: seq[DbValue]
-    for m in parents: keys.add ownerFns.toRow(m)[ownerMeta.pkIndex]
+    for m in parents:
+      keys.add ownerFns.toRow(m)[ownerMeta.pkIndex]
     var groups: Table[string, seq[FastormModel]]
     if keys.len > 0:
-      let rows = await queryWhere(targetMeta, inPredicate(spec.keyColumn, deduped(keys)), db)
+      let rows =
+        await queryWhere(targetMeta, inPredicate(spec.keyColumn, deduped(keys)), db)
       for row in rows:
         groups.mgetOrPut(valueKey(row[fkIndex]), @[]).add targetFns.hydrate(row)
     for m in parents:
       let k = valueKey(ownerFns.toRow(m)[ownerMeta.pkIndex])
       rememberMany(m, spec.name, groups.getOrDefault(k))
 
-proc applyPath(owner: string, models: seq[FastormModel], path: string, db: Database): Future[void] {.
-    async: (raises: [DatabaseError, QueryError, CancelledError]).} =
-  if models.len == 0 or path.len == 0: return
+proc applyPath(
+    owner: string, models: seq[FastormModel], path: string, db: Database
+): Future[void] {.async: (raises: [DatabaseError, QueryError, CancelledError]).} =
+  if models.len == 0 or path.len == 0:
+    return
   let dot = path.find('.')
-  let head = if dot < 0: path else: path[0 ..< dot]
+  let head =
+    if dot < 0:
+      path
+    else:
+      path[0 ..< dot]
   let spec = prefetchBy(owner, head)
   await loadPrefetch(spec, models, db)
-  if dot < 0: return
+  if dot < 0:
+    return
   var children: seq[FastormModel]
   for m in models:
     let many = cachedMany[FastormModel](m, head)
     if many.hit:
-      for child in many.value: children.add child
+      for child in many.value:
+        children.add child
     else:
       let one = cachedSingle[FastormModel](m, head)
-      if one.hit and one.value.isSome: children.add one.value.get
+      if one.hit and one.value.isSome:
+        children.add one.value.get
   await applyPath(spec.target, children, path[dot + 1 .. ^1], db)
 
-proc applyPrefetches(owner: string, models: seq[FastormModel], paths: seq[string],
-                     db: Database): Future[void] {.
-    async: (raises: [DatabaseError, QueryError, CancelledError]).} =
-  for path in paths: await applyPath(owner, models, path, db)
+proc applyPrefetches(
+    owner: string, models: seq[FastormModel], paths: seq[string], db: Database
+): Future[void] {.async: (raises: [DatabaseError, QueryError, CancelledError]).} =
+  for path in paths:
+    await applyPath(owner, models, path, db)
 
-proc attachJoins[T: FastormModel](model: T, row: seq[DbValue], joins: seq[Join]) {.
-    raises: [DatabaseError, QueryError].} =
+proc attachJoins[T: FastormModel](
+    model: T, row: seq[DbValue], joins: seq[Join]
+) {.raises: [DatabaseError, QueryError].} =
   mixin modelMeta
   var at = modelMeta(T).fields.len
   for j in joins:
     let slice = row[at ..< at + j.ncols]
     at += j.ncols
     let parent = relationParent(model, j.parentPath)
-    if parent.isNil: continue
-    if slice[j.pkIndex].kind == dvNull: rememberMissing(parent, j.field)
-    else: rememberSingle(parent, j.field, fnsOf(j.model).hydrate(slice))
+    if parent.isNil:
+      continue
+    if slice[j.pkIndex].kind == dvNull:
+      rememberMissing(parent, j.field)
+    else:
+      rememberSingle(parent, j.field, fnsOf(j.model).hydrate(slice))
 
 proc fetch[T](qs: QuerySet[T], limitOverride: int): Future[seq[T]] {.async.} =
   mixin fromRow, modelMeta
@@ -750,28 +939,36 @@ proc fetch[T](qs: QuerySet[T], limitOverride: int): Future[seq[T]] {.async.} =
   let sql = qs.selectSql(params, limitOverride)
   let db = resolveDb(qs.db)
   if qs.forUpdate and not db.inTransaction:
-    raise newException(QueryError, "selectForUpdate() needs an open transaction: " &
-      "run the query inside `atomic` and give it the handle, e.g. " &
-      modelMeta(T).name & ".objects.withDb(tx).selectForUpdate()")
+    raise newException(
+      QueryError,
+      "selectForUpdate() needs an open transaction: " &
+        "run the query inside `atomic` and give it the handle, e.g. " & modelMeta(T).name &
+        ".objects.withDb(tx).selectForUpdate()",
+    )
   let res = await db.query(sql, params)
   let meta = modelMeta(T)
   let selected = rootColumns(meta, qs.columns)
   let joins = planJoins(meta, qs.selects & qs.relPaths)
   var width = selected.len
-  for j in joins: width += j.ncols
+  for j in joins:
+    width += j.ncols
   var models: seq[T]
   for row in res.rows:
     if row.len != width:
-      raise newException(DatabaseError, "expected " & $width & " columns, got " & $row.len)
+      raise
+        newException(DatabaseError, "expected " & $width & " columns, got " & $row.len)
     let model = fromRow(T, row[0 ..< selected.len], qs.columns)
-    if joins.len > 0: attachJoins(model, row, joins)
+    if joins.len > 0:
+      attachJoins(model, row, joins)
     models.add model
   if qs.prefetches.len > 0 and models.len > 0:
     var refs: seq[FastormModel]
-    for m in models: refs.add m
+    for m in models:
+      refs.add m
     await applyPrefetches(meta.name, refs, qs.prefetches, db)
   if qs.expands.len > 0:
-    for m in models: rememberExpand(m, qs.expands)
+    for m in models:
+      rememberExpand(m, qs.expands)
   return models
 
 proc all*[T](qs: QuerySet[T]): Future[seq[T]] {.async.} =
@@ -780,7 +977,11 @@ proc all*[T](qs: QuerySet[T]): Future[seq[T]] {.async.} =
 
 proc first*[T](qs: QuerySet[T]): Future[Option[T]] {.async.} =
   let rows = await qs.fetch(1)
-  return if rows.len > 0: some(rows[0]) else: none(T)
+  return
+    if rows.len > 0:
+      some(rows[0])
+    else:
+      none(T)
 
 proc getImpl*[T](qs: QuerySet[T]): Future[Option[T]] {.async.} =
   ## Exactly one match gives `some`, no match gives `none`, and several
@@ -788,9 +989,14 @@ proc getImpl*[T](qs: QuerySet[T]): Future[Option[T]] {.async.} =
   mixin modelMeta
   let rows = await qs.fetch(2)
   if rows.len > 1:
-    raise newException(MultipleObjectsReturned,
-      "get() matched more than one " & modelMeta(T).name)
-  return if rows.len == 1: some(rows[0]) else: none(T)
+    raise newException(
+      MultipleObjectsReturned, "get() matched more than one " & modelMeta(T).name
+    )
+  return
+    if rows.len == 1:
+      some(rows[0])
+    else:
+      none(T)
 
 proc count*[T](qs: QuerySet[T]): Future[int] {.async.} =
   mixin modelMeta
@@ -813,8 +1019,9 @@ proc aggregateName(kind: AggregateKind): string =
   of akMin: "MIN"
   of akMax: "MAX"
 
-proc aggregateImpl*[T](qs: QuerySet[T], specs: seq[AggregateSpec]): Future[AggregateResult] {.
-    async.} =
+proc aggregateImpl*[T](
+    qs: QuerySet[T], specs: seq[AggregateSpec]
+): Future[AggregateResult] {.async.} =
   ## Evaluates several SQL aggregates with the QuerySet's filters and slice.
   ## Ordering and relation-loading directives do not affect aggregate values.
   mixin modelMeta
@@ -826,7 +1033,8 @@ proc aggregateImpl*[T](qs: QuerySet[T], specs: seq[AggregateSpec]): Future[Aggre
   for field in meta.fields:
     selected.add qcol(field.column) & " AS " & quoteIdent(field.column)
   let (fromSql, _, aliasOf) = joinedFrom(meta, qs.relPaths)
-  var source = "SELECT " & selected.join(", ") & " FROM " & fromSql &
+  var source =
+    "SELECT " & selected.join(", ") & " FROM " & fromSql &
     resolveRelMarkers(qs.whereClause(params), aliasOf)
   if qs.limitN >= 0 or qs.offsetN > 0:
     source.add " LIMIT ? OFFSET ?"
@@ -835,11 +1043,15 @@ proc aggregateImpl*[T](qs: QuerySet[T], specs: seq[AggregateSpec]): Future[Aggre
   var expressions: seq[string]
   for spec in specs:
     let operand =
-      if spec.column == "*": "*"
-      else: quoteIdent("aggregate_source") & "." & quoteIdent(spec.column)
-    expressions.add aggregateName(spec.kind) & "(" & operand & ") AS " & quoteIdent(spec.alias)
-  let sql = "SELECT " & expressions.join(", ") & " FROM (" & source &
-    ") AS " & quoteIdent("aggregate_source")
+      if spec.column == "*":
+        "*"
+      else:
+        quoteIdent("aggregate_source") & "." & quoteIdent(spec.column)
+    expressions.add aggregateName(spec.kind) & "(" & operand & ") AS " &
+      quoteIdent(spec.alias)
+  let sql =
+    "SELECT " & expressions.join(", ") & " FROM (" & source & ") AS " &
+    quoteIdent("aggregate_source")
   let rows = (await resolveDb(qs.db).query(sql, params)).rows
   if rows.len != 1:
     raise newException(DatabaseError, "aggregate query returned no result row")
@@ -862,16 +1074,21 @@ proc delete*[T](qs: QuerySet[T]): Future[int] {.async.} =
     return int((await resolveDb(qs.db).execute(sql, params)).changes)
   let (fromSql, _, aliasOf) = joinedFrom(meta, qs.relPaths)
   let whereSql = resolveRelMarkers(qs.whereClause(params), aliasOf)
-  let sql = "DELETE FROM " & quoteIdent(meta.table) & " WHERE " & quoteIdent(meta.pkField.column) &
-    " IN (SELECT " & qcol(meta.pkField.column) & " FROM " & fromSql & whereSql & ")"
+  let sql =
+    "DELETE FROM " & quoteIdent(meta.table) & " WHERE " & quoteIdent(
+      meta.pkField.column
+    ) & " IN (SELECT " & qcol(meta.pkField.column) & " FROM " & fromSql & whereSql & ")"
   return int((await resolveDb(qs.db).execute(sql, params)).changes)
 
-proc updateImpl*[T](qs: QuerySet[T], sets: seq[UpdateAssignment]): Future[int] {.async.} =
+proc updateImpl*[T](
+    qs: QuerySet[T], sets: seq[UpdateAssignment]
+): Future[int] {.async.} =
   ## Bulk update without validation; returns the number of rows changed. As
   ## with `delete`, a filter through a relation runs as a subquery since
   ## SQLite's `UPDATE` cannot join other tables.
   mixin modelMeta
-  if sets.len == 0: return 0
+  if sets.len == 0:
+    return 0
   let meta = modelMeta(T)
   var assigns: seq[string]
   var setParams: seq[DbValue]
@@ -880,13 +1097,17 @@ proc updateImpl*[T](qs: QuerySet[T], sets: seq[UpdateAssignment]): Future[int] {
     setParams.add s.params
   if qs.relPaths.len == 0:
     var params = setParams
-    let sql = "UPDATE " & meta.fromClause & " SET " & assigns.join(", ") & qs.whereClause(params)
+    let sql =
+      "UPDATE " & meta.fromClause & " SET " & assigns.join(", ") & qs.whereClause(
+        params
+      )
     return int((await resolveDb(qs.db).execute(sql, params)).changes)
   var whereParams: seq[DbValue]
   let (fromSql, _, aliasOf) = joinedFrom(meta, qs.relPaths)
   let whereSql = resolveRelMarkers(qs.whereClause(whereParams), aliasOf)
-  let sql = "UPDATE " & quoteIdent(meta.table) & " SET " & assigns.join(", ") &
-    " WHERE " & quoteIdent(meta.pkField.column) & " IN (SELECT " & qcol(meta.pkField.column) &
+  let sql =
+    "UPDATE " & quoteIdent(meta.table) & " SET " & assigns.join(", ") & " WHERE " &
+    quoteIdent(meta.pkField.column) & " IN (SELECT " & qcol(meta.pkField.column) &
     " FROM " & fromSql & whereSql & ")"
   var params = setParams
   params.add whereParams
@@ -894,18 +1115,23 @@ proc updateImpl*[T](qs: QuerySet[T], sets: seq[UpdateAssignment]): Future[int] {
 
 # -- instance persistence ----------------------------------------------------
 
-proc insertRow(db: Database, m: ModelMeta, row: seq[DbValue], skipPk: bool): Future[ExecResult] =
+proc insertRow(
+    db: Database, m: ModelMeta, row: seq[DbValue], skipPk: bool
+): Future[ExecResult] =
   var cols, marks: seq[string]
   var params: seq[DbValue]
   for i, f in m.fields:
-    if skipPk and i == m.pkIndex: continue
+    if skipPk and i == m.pkIndex:
+      continue
     cols.add quoteIdent(f.column)
     marks.add "?"
     params.add row[i]
   let sql =
-    if cols.len == 0: "INSERT INTO " & quoteIdent(m.table) & " DEFAULT VALUES"
-    else: "INSERT INTO " & quoteIdent(m.table) & " (" & cols.join(", ") & ") VALUES (" &
-      marks.join(", ") & ")"
+    if cols.len == 0:
+      "INSERT INTO " & quoteIdent(m.table) & " DEFAULT VALUES"
+    else:
+      "INSERT INTO " & quoteIdent(m.table) & " (" & cols.join(", ") & ") VALUES (" &
+        marks.join(", ") & ")"
   db.execute(sql, params)
 
 proc saveImpl*[T](model: T, db: Database = nil): Future[void] {.async.} =
@@ -918,51 +1144,69 @@ proc saveImpl*[T](model: T, db: Database = nil): Future[void] {.async.} =
   let creating = not fastormPkIsSet(model)
   if not creating:
     var names: seq[string]
-    for f in m.fields: names.add f.name
+    for f in m.fields:
+      names.add f.name
     if not isFullyLoaded(model, names):
-      raise newException(QueryError, m.name &
-        " was loaded with only()/defer() and cannot be saved; select every " &
-        "field, or use QuerySet.update")
+      raise newException(
+        QueryError,
+        m.name & " was loaded with only()/defer() and cannot be saved; select every " &
+          "field, or use QuerySet.update",
+      )
   let autoIncrement = creating and m.pkField.kind == fkInteger
   fastormPrepare(model, creating)
   let errors = validate(model)
-  if errors.len > 0: raise newValidationError(errors)
+  if errors.len > 0:
+    raise newValidationError(errors)
   let row = toRow(model)
   if creating:
     let res = await conn.insertRow(m, row, autoIncrement)
-    if autoIncrement: fastormSetRowId(model, res.lastInsertId)
+    if autoIncrement:
+      fastormSetRowId(model, res.lastInsertId)
     return
   var assigns: seq[string]
   var params: seq[DbValue]
   for i, f in m.fields:
-    if i == m.pkIndex: continue
+    if i == m.pkIndex:
+      continue
     assigns.add quoteIdent(f.column) & " = ?"
     params.add row[i]
   var changed = 0'i64
   if assigns.len > 0:
     params.add row[m.pkIndex]
-    let sql = "UPDATE " & quoteIdent(m.table) & " SET " & assigns.join(", ") &
-      " WHERE " & quoteIdent(m.pkField.column) & " = ?"
+    let sql =
+      "UPDATE " & quoteIdent(m.table) & " SET " & assigns.join(", ") & " WHERE " &
+      quoteIdent(m.pkField.column) & " = ?"
     changed = (await conn.execute(sql, params)).changes
   if changed == 0:
-    let exists = await conn.query("SELECT 1 FROM " & quoteIdent(m.table) & " WHERE " &
-      quoteIdent(m.pkField.column) & " = ?", @[row[m.pkIndex]])
+    let exists = await conn.query(
+      "SELECT 1 FROM " & quoteIdent(m.table) & " WHERE " & quoteIdent(m.pkField.column) &
+        " = ?",
+      @[row[m.pkIndex]],
+    )
     if exists.rows.len == 0:
       discard await conn.insertRow(m, row, false)
 
 proc deleteImpl*[T](model: T, db: Database = nil): Future[void] {.async.} =
   mixin modelMeta, toRow, fastormPkIsSet
   if not fastormPkIsSet(model):
-    raise newException(QueryError, "cannot delete a " & modelMeta(T).name &
-      " that has no primary key value")
+    raise newException(
+      QueryError,
+      "cannot delete a " & modelMeta(T).name & " that has no primary key value",
+    )
   let m = modelMeta(T)
   let row = toRow(model)
-  discard await resolveDb(db).execute("DELETE FROM " & quoteIdent(m.table) & " WHERE " &
-    quoteIdent(m.pkField.column) & " = ?", @[row[m.pkIndex]])
+  discard await resolveDb(db).execute(
+    "DELETE FROM " & quoteIdent(m.table) & " WHERE " & quoteIdent(m.pkField.column) &
+      " = ?",
+    @[row[m.pkIndex]],
+  )
 
-proc getByPk*[T](t: typedesc[T], pk: DbValue, db: Database = nil): Future[Option[T]] {.async.} =
+proc getByPk*[T](
+    t: typedesc[T], pk: DbValue, db: Database = nil
+): Future[Option[T]] {.async.} =
   mixin modelMeta
-  if pk.kind == dvNull: return none(T)
+  if pk.kind == dvNull:
+    return none(T)
   let m = modelMeta(T)
   var qs = initQuerySet[T]()
   qs.db = db

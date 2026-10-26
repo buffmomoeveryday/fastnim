@@ -3,11 +3,14 @@ import chronos/unittest2/asynctests
 import fastnim/orm
 
 model Author:
-  name: CharField(maxLength: 50, unique: true)
+  name:
+    CharField(maxLength: 50, unique: true)
 
 model Book:
-  author: ForeignKey(Author, onDelete: Restrict)
-  title: CharField(maxLength: 50, minLength: 1)
+  author:
+    ForeignKey(Author, onDelete: Restrict)
+  title:
+    CharField(maxLength: 50, minLength: 1)
 
 proc freshDb(): Future[(Database, string)] {.async.} =
   let dir = createTempDir("fastorm_", "_outcome")

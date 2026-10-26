@@ -2,21 +2,35 @@ import std/[json, os, tempfiles]
 import chronos/unittest2/asynctests
 import fastnim/orm
 
-type Status = enum statusDraft, statusPublished
+type Status = enum
+  statusDraft
+  statusPublished
 
 model Product:
-  name: CharField()
-  price: DecimalField(maxDigits: 6, decimalPlaces: 2, default: decimal("0.00"))
-  released: DateField(autoNowAdd: true)
-  opensAt: TimeField()
-  warranty: DurationField()
-  extra: JSONField(default: """{"ok":true}""")
-  blob: BinaryField(maxLength: 8, null: true)
-  email: EmailField(null: true)
-  site: URLField()
-  slug: SlugField(unique: true)
-  level: IntegerField(choices: [1, 2, 3], default: 1)
-  status: CharField(choices: Status, default: statusDraft)
+  name:
+    CharField()
+  price:
+    DecimalField(maxDigits: 6, decimalPlaces: 2, default: decimal("0.00"))
+  released:
+    DateField(autoNowAdd: true)
+  opensAt:
+    TimeField()
+  warranty:
+    DurationField()
+  extra:
+    JSONField(default: """{"ok":true}""")
+  blob:
+    BinaryField(maxLength: 8, null: true)
+  email:
+    EmailField(null: true)
+  site:
+    URLField()
+  slug:
+    SlugField(unique: true)
+  level:
+    IntegerField(choices: [1, 2, 3], default: 1)
+  status:
+    CharField(choices: Status, default: statusDraft)
 
 proc freshDb(): Future[(Database, string)] {.async.} =
   let dir = createTempDir("fastorm_fields_", "_test")
@@ -59,9 +73,12 @@ suite "field types":
     let info = await db.query("PRAGMA table_info(product)")
     var types: seq[string]
     for row in info.rows:
-      if row[1].s == "price": types.add row[2].s
-      if row[1].s == "warranty": types.add row[2].s
-      if row[1].s == "blob": types.add row[2].s
+      if row[1].s == "price":
+        types.add row[2].s
+      if row[1].s == "warranty":
+        types.add row[2].s
+      if row[1].s == "blob":
+        types.add row[2].s
     check "TEXT" in types
     check "INTEGER" in types
     check "BLOB" in types

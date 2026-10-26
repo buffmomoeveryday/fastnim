@@ -55,8 +55,9 @@ block routerTypedRoutes:
 
   var headers = initTable[string, string]()
   headers["content-type"] = "application/json"
-  let created =
-    app.handleSync(initRequest(HttpMethod.Post, "/items/", headers, """{"name":"Widget"}"""))
+  let created = app.handleSync(
+    initRequest(HttpMethod.Post, "/items/", headers, """{"name":"Widget"}""")
+  )
   doAssert created.status == 201
   doAssert created.body == "{\"id\":1,\"name\":\"Widget\"}"
 
@@ -127,11 +128,7 @@ block routerMiddlewareList:
 
 block routerTagsMerge:
   let router = initRouter(prefix = "/users", tags = @["users"])
-  router.get(
-    "/",
-    responses = @[(200, Item)],
-    tags = @["custom"],
-  ):
+  router.get("/", responses = @[(200, Item)], tags = @["custom"]):
     ok Item(id: 1, name: "Ada")
 
   let app = initFastNim(logs = false)
@@ -179,7 +176,11 @@ block routerValidation:
 
   raised = false
   try:
-    router.put("nope", proc(request: Request): Response = json("{}"))
+    router.put(
+      "nope",
+      proc(request: Request): Response =
+        json("{}"),
+    )
   except ValueError:
     raised = true
   doAssert raised

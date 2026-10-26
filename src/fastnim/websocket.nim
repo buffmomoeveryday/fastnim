@@ -27,15 +27,14 @@ type
     connections: seq[WebSocket]
 
 proc newWebSocket*(
-    session: rawWs.WSSession,
-    maxMessageSize = 1024 * 1024,
-    idleTimeout = 30.seconds,
+    session: rawWs.WSSession, maxMessageSize = 1024 * 1024, idleTimeout = 30.seconds
 ): WebSocket =
   ## Wraps an accepted nim-websock session.
   if maxMessageSize <= 0:
     raise newException(ValueError, "WebSocket maximum message size must be positive")
   if not idleTimeout.isInfinite() and idleTimeout <= ZeroDuration:
-    raise newException(ValueError, "WebSocket idle timeout must be positive or infinite")
+    raise
+      newException(ValueError, "WebSocket idle timeout must be positive or infinite")
   WebSocket(
     session: session,
     state: WebSocketState.Connecting,
@@ -60,8 +59,9 @@ proc waitForIo(
     websocket: WebSocket, pending: rawWs.WSSendFuture
 ): Future[void] {.
     async: (
-      raises: [CancelledError, AsyncStreamError, rawWs.WebSocketError,
-        WebSocketDisconnectError]
+      raises: [
+        CancelledError, AsyncStreamError, rawWs.WebSocketError, WebSocketDisconnectError
+      ]
     )
 .} =
   if websocket.idleTimeout.isInfinite():
@@ -186,10 +186,13 @@ proc receiveBytes*(
   except AsyncTimeoutError:
     raiseDisconnect("WebSocket I/O timed out", 1001)
 
-proc sendHeartbeat*(websocket: WebSocket): Future[void] {.
+proc sendHeartbeat*(
+    websocket: WebSocket
+): Future[void] {.
     async: (
-      raises: [CancelledError, AsyncStreamError, rawWs.WebSocketError,
-        WebSocketDisconnectError]
+      raises: [
+        CancelledError, AsyncStreamError, rawWs.WebSocketError, WebSocketDisconnectError
+      ]
     )
 .} =
   ## Sends one WebSocket ping frame, subject to the connection idle timeout.

@@ -54,11 +54,12 @@ block serializesApiError:
     ),
   )
   doAssert response.status == 422
-  doAssert parseJson(response.body) == %*{
-    "code": "validation_failed",
-    "message": "validation failed",
-    "fields": {"body.name": "must not be empty"},
-  }
+  doAssert parseJson(response.body) ==
+    %*{
+      "code": "validation_failed",
+      "message": "validation failed",
+      "fields": {"body.name": "must not be empty"},
+    }
 
 block mapsKnownApplicationErrors:
   let app = errorApp()
@@ -84,17 +85,15 @@ block rendersApplicationErrorFields:
 block sanitizesUnknownCatchableErrors:
   let response = errorApp().handleSync(initRequest(HttpMethod.Get, "/500"))
   doAssert response.status == 500
-  doAssert parseJson(response.body) == %*{
-    "code": "internal_server_error",
-    "message": "Internal Server Error",
-    "fields": {},
-  }
+  doAssert parseJson(response.body) ==
+    %*{
+      "code": "internal_server_error", "message": "Internal Server Error", "fields": {}
+    }
   doAssert "password" notin response.body
 
 block usesStandardDefaultNotFound:
   let app = initFastNim(logs = false)
   let response = app.handleSync(initRequest(HttpMethod.Get, "/missing"))
   doAssert response.status == 404
-  doAssert parseJson(response.body) == %*{
-    "code": "not_found", "message": "Not Found", "fields": {}
-  }
+  doAssert parseJson(response.body) ==
+    %*{"code": "not_found", "message": "Not Found", "fields": {}}

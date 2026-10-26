@@ -34,20 +34,20 @@ import ./values
 
 type
   ErrorKind* = enum
-    ekUniqueViolation     ## a UNIQUE or PRIMARY KEY constraint was violated
+    ekUniqueViolation ## a UNIQUE or PRIMARY KEY constraint was violated
     ekForeignKeyViolation ## a FOREIGN KEY constraint was violated
-    ekNotNullViolation    ## a NOT NULL constraint was violated
-    ekCheckViolation      ## a CHECK constraint was violated
-    ekBusy                ## the database was locked by another transaction
-    ekValidation          ## field validation failed before saving
-    ekQuery               ## a bad filter/orderBy/get (`QueryError`)
-    ekOther                ## anything else (closed connection, I/O, ...)
+    ekNotNullViolation ## a NOT NULL constraint was violated
+    ekCheckViolation ## a CHECK constraint was violated
+    ekBusy ## the database was locked by another transaction
+    ekValidation ## field validation failed before saving
+    ekQuery ## a bad filter/orderBy/get (`QueryError`)
+    ekOther ## anything else (closed connection, I/O, ...)
 
   FastormOutcomeError* = object
     kind*: ErrorKind
     message*: string
-    issues*: seq[FieldIssue]  ## populated when `kind == ekValidation`
-    cause*: ref FastOrmError  ## the original exception (to log or re-raise)
+    issues*: seq[FieldIssue] ## populated when `kind == ekValidation`
+    cause*: ref FastOrmError ## the original exception (to log or re-raise)
 
   FastormResult*[T] = object
     case ok*: bool
@@ -62,11 +62,11 @@ type
     of false: err*: FastormOutcomeError
 
 const
-  uniqueOrPkCodes = [2067'i32, 1555'i32]  ## SQLITE_CONSTRAINT_{UNIQUE,PRIMARYKEY}
-  foreignKeyCodes = [787'i32]             ## SQLITE_CONSTRAINT_FOREIGNKEY
-  notNullCodes = [1299'i32]               ## SQLITE_CONSTRAINT_NOTNULL
-  checkCodes = [275'i32]                  ## SQLITE_CONSTRAINT_CHECK
-  busyCodes = [5'i32, 261'i32, 517'i32]   ## SQLITE_BUSY{,_RECOVERY,_SNAPSHOT}
+  uniqueOrPkCodes = [2067'i32, 1555'i32] ## SQLITE_CONSTRAINT_{UNIQUE,PRIMARYKEY}
+  foreignKeyCodes = [787'i32] ## SQLITE_CONSTRAINT_FOREIGNKEY
+  notNullCodes = [1299'i32] ## SQLITE_CONSTRAINT_NOTNULL
+  checkCodes = [275'i32] ## SQLITE_CONSTRAINT_CHECK
+  busyCodes = [5'i32, 261'i32, 517'i32] ## SQLITE_BUSY{,_RECOVERY,_SNAPSHOT}
 
 proc classify*(e: ref FastOrmError): FastormOutcomeError =
   ## Classifies any FastORM exception. `DatabaseError`s are classified by
@@ -80,34 +80,61 @@ proc classify*(e: ref FastOrmError): FastormOutcomeError =
   elif e of DatabaseError:
     let code = (ref DatabaseError)(e).sqliteCode
     result.kind =
-      if code in uniqueOrPkCodes: ekUniqueViolation
-      elif code in foreignKeyCodes: ekForeignKeyViolation
-      elif code in notNullCodes: ekNotNullViolation
-      elif code in checkCodes: ekCheckViolation
-      elif code in busyCodes: ekBusy
-      else: ekOther
+      if code in uniqueOrPkCodes:
+        ekUniqueViolation
+      elif code in foreignKeyCodes:
+        ekForeignKeyViolation
+      elif code in notNullCodes:
+        ekNotNullViolation
+      elif code in checkCodes:
+        ekCheckViolation
+      elif code in busyCodes:
+        ekBusy
+      else:
+        ekOther
   elif e of QueryError:
     result.kind = ekQuery
   else:
     result.kind = ekOther
 
-proc isUniqueViolation*(e: FastormOutcomeError): bool {.inline.} = e.kind == ekUniqueViolation
-proc isForeignKeyViolation*(e: FastormOutcomeError): bool {.inline.} = e.kind == ekForeignKeyViolation
-proc isNotNullViolation*(e: FastormOutcomeError): bool {.inline.} = e.kind == ekNotNullViolation
-proc isCheckViolation*(e: FastormOutcomeError): bool {.inline.} = e.kind == ekCheckViolation
-proc isBusy*(e: FastormOutcomeError): bool {.inline.} = e.kind == ekBusy
+proc isUniqueViolation*(e: FastormOutcomeError): bool {.inline.} =
+  e.kind == ekUniqueViolation
+
+proc isForeignKeyViolation*(e: FastormOutcomeError): bool {.inline.} =
+  e.kind == ekForeignKeyViolation
+
+proc isNotNullViolation*(e: FastormOutcomeError): bool {.inline.} =
+  e.kind == ekNotNullViolation
+
+proc isCheckViolation*(e: FastormOutcomeError): bool {.inline.} =
+  e.kind == ekCheckViolation
+
+proc isBusy*(e: FastormOutcomeError): bool {.inline.} =
   ## Another transaction held the write lock past the busy timeout. Retrying
   ## the whole transaction is usually the right response.
-proc isValidation*(e: FastormOutcomeError): bool {.inline.} = e.kind == ekValidation
+  e.kind == ekBusy
 
-proc isOk*[T](r: FastormResult[T]): bool {.inline.} = r.ok
-proc isErr*[T](r: FastormResult[T]): bool {.inline.} = not r.ok
-proc isOk*(r: FastormVoidResult): bool {.inline.} = r.ok
-proc isErr*(r: FastormVoidResult): bool {.inline.} = not r.ok
+proc isValidation*(e: FastormOutcomeError): bool {.inline.} =
+  e.kind == ekValidation
+
+proc isOk*[T](r: FastormResult[T]): bool {.inline.} =
+  r.ok
+
+proc isErr*[T](r: FastormResult[T]): bool {.inline.} =
+  not r.ok
+
+proc isOk*(r: FastormVoidResult): bool {.inline.} =
+  r.ok
+
+proc isErr*(r: FastormVoidResult): bool {.inline.} =
+  not r.ok
 
 proc get*[T](r: FastormResult[T]): T =
   ## The value, or re-raises the original exception for an error result.
-  if r.ok: r.value else: raise r.err.cause
+  if r.ok:
+    r.value
+  else:
+    raise r.err.cause
 
 proc valueOr*[T](r: FastormResult[T], default: T): T =
   if r.ok: r.value else: default
@@ -126,7 +153,8 @@ proc attempt*[T](fut: Future[T]): Future[FastormResult[T]] {.async.} =
 proc raiseIfErr*(r: FastormVoidResult) =
   ## Re-raises the original exception if `r` is an error result; the `void`
   ## counterpart to `get()`.
-  if not r.ok: raise r.err.cause
+  if not r.ok:
+    raise r.err.cause
 
 proc attempt*(fut: Future[void]): Future[FastormVoidResult] {.async.} =
   ## The `Future[void]` overload, for `save()`/`delete()`-style calls that

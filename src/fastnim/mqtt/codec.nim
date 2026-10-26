@@ -31,9 +31,7 @@ proc encodeRemainingLength*(value: int): seq[byte] =
     if remaining == 0:
       break
 
-proc frameLength(
-    data: openArray[byte], headerLength, totalLength: var int
-): bool =
+proc frameLength(data: openArray[byte], headerLength, totalLength: var int): bool =
   if data.len < 2:
     return false
   var multiplier = 1
@@ -75,4 +73,4 @@ proc feed*(decoder: var MqttDecoder, data: openArray[byte]): seq[MqttPacket] =
     if totalLength == decoder.buffer.len:
       decoder.buffer.setLen(0)
     else:
-      decoder.buffer = decoder.buffer[totalLength..^1]
+      decoder.buffer = decoder.buffer[totalLength ..^ 1]

@@ -2,7 +2,8 @@
 import fastnim/orm
 
 model M:
-  name: CharField()
+  name:
+    CharField()
   Meta:
     indexes:
       Index(fields: ["missing"])

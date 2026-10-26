@@ -12,19 +12,22 @@ when fileExists(root / "migrations" / "all.nim"):
   import ../migrations/all
 
 model Author:
-  name: CharField(maxLength: 80, minLength: 1, unique: true)
+  name:
+    CharField(maxLength: 80, minLength: 1, unique: true)
 
 model Book:
-  author: ForeignKey(Author, onDelete: Cascade)
-  title: CharField(maxLength: 200, minLength: 1)
+  author:
+    ForeignKey(Author, onDelete: Cascade)
+  title:
+    CharField(maxLength: 200, minLength: 1)
   Meta:
-    ordering: ["title"]
+    ordering:
+      ["title"]
     uniqueTogether:
       ["author", "title"]
 
-type
-  BookQuery = object
-    authorId: Option[int]
+type BookQuery = object
+  authorId: Option[int]
 
 proc validationError(issues: seq[FieldIssue]): ApiError =
   var fields = initTable[string, string]()
@@ -44,10 +47,11 @@ proc openLibrary(ctx: Context) =
 proc closeLibrary(ctx: Context) =
   waitFor ctx.get("database", Database).close()
 
-let app = initFastNim(openApi = initOpenApiSettings(
-  title = "Library",
-  description = "Authors and books stored with FastORM",
-))
+let app = initFastNim(
+  openApi = initOpenApiSettings(
+    title = "Library", description = "Authors and books stored with FastORM"
+  )
+)
 
 app.onLoad openLibrary
 app.onUnload closeLibrary
@@ -56,11 +60,11 @@ app.get("/authors", responses = @[(200, seq[Author])], tags = @["authors"]):
   let authors = await Author.objects.orderBy("id").expand(books).all()
   ok authors
 
-
 app.post(
   "/authors",
   body = Author.ignore(id),
-  responses = @[(created, Author), (conflict, ApiError), (unprocessableContent, ApiError)],
+  responses =
+    @[(created, Author), (conflict, ApiError), (unprocessableContent, ApiError)],
   tags = @["authors"],
 ):
   let saved = await body.save().attempt()
@@ -88,13 +92,10 @@ app.get(
     ok author.get
 
 app.get(
-  "/books",
-  queryParams = BookQuery,
-  responses = @[(200, seq[Book])],
-  tags = @["books"],
+  "/books", queryParams = BookQuery, responses = @[(200, seq[Book])], tags = @["books"]
 ):
   var books = Book.objects.expand(author)
-  
+
   if queryParams.authorId.isSome:
     books = books.filter(author = queryParams.authorId.get)
 
@@ -110,7 +111,6 @@ app.post(
 
   if author.isNone:
     notFound initApiError("author_not_found", "author not found")
-
   else:
     let saved = await body.save().attempt()
     case saved.ok
@@ -119,16 +119,16 @@ app.post(
     of false:
       case saved.err.kind
       of ekUniqueViolation:
-        conflict initApiError("book_exists", "that author already has a book with this title")
+        conflict initApiError(
+          "book_exists", "that author already has a book with this title"
+        )
       of ekValidation:
         unprocessableContent validationError(saved.err.issues)
       else:
         raise saved.err.cause
 
 app.delete(
-  "/books/{id:int}",
-  responses = @[(204, void), (404, ApiError)],
-  tags = @["books"],
+  "/books/{id:int}", responses = @[(204, void), (404, ApiError)], tags = @["books"]
 ):
   let book = await Book.get(id = id)
   if book.isNone:

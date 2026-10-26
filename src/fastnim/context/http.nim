@@ -99,8 +99,7 @@ type
     statusNotExtended = 510
     statusNetworkAuthenticationRequired = 511
 
-  Headers* = object
-    ## Case-insensitive HTTP headers that retain repeated field values.
+  Headers* = object ## Case-insensitive HTTP headers that retain repeated field values.
     values: Table[string, seq[string]]
 
   ApiError* = object
@@ -119,14 +118,19 @@ type
 
   BadRequestError* = object of ApiErrorException
     ## Application error translated to HTTP 400.
+
   UnauthorizedError* = object of ApiErrorException
     ## Application error translated to HTTP 401.
+
   ForbiddenError* = object of ApiErrorException
     ## Application error translated to HTTP 403.
+
   NotFoundError* = object of ApiErrorException
     ## Application error translated to HTTP 404.
+
   ConflictError* = object of ApiErrorException
     ## Application error translated to HTTP 409.
+
   UnprocessableEntityError* = object of ApiErrorException
     ## Application error translated to HTTP 422.
 
@@ -191,9 +195,9 @@ proc getOrDefault*(
   else:
     default
 
-proc getAllHeaders*(headers: Headers, name: string): seq[string] {.
-    inline, raises: []
-.} =
+proc getAllHeaders*(
+    headers: Headers, name: string
+): seq[string] {.inline, raises: [].} =
   ## Returns every value for ``name`` in insertion order.
   let values = headers.values.getOrDefault(name.toLowerAscii())
   result = newSeqOfCap[string](values.len)
@@ -231,64 +235,50 @@ iterator pairs*(headers: Headers): tuple[key, value: string] =
       yield (name, value)
 
 proc initApiError*(
-    code, message: string,
-    fields = initTable[string, string](),
+    code, message: string, fields = initTable[string, string]()
 ): ApiError {.raises: [].} =
   ## Creates the standard FastNim error value.
   ApiError(code: code, message: message, fields: fields)
 
 proc newApiErrorException[T: ApiErrorException](
-    errorType: typedesc[T], message, code: string,
-    fields: Table[string, string],
+    errorType: typedesc[T], message, code: string, fields: Table[string, string]
 ): ref T =
   result = newException(errorType, message)
   result.code = code
   result.fields = fields
 
 proc newBadRequestError*(
-    message: string,
-    code = "bad_request",
-    fields = initTable[string, string](),
+    message: string, code = "bad_request", fields = initTable[string, string]()
 ): ref BadRequestError =
   ## Creates an application exception translated to HTTP 400.
   newApiErrorException(BadRequestError, message, code, fields)
 
 proc newUnauthorizedError*(
-    message: string,
-    code = "unauthorized",
-    fields = initTable[string, string](),
+    message: string, code = "unauthorized", fields = initTable[string, string]()
 ): ref UnauthorizedError =
   ## Creates an application exception translated to HTTP 401.
   newApiErrorException(UnauthorizedError, message, code, fields)
 
 proc newForbiddenError*(
-    message: string,
-    code = "forbidden",
-    fields = initTable[string, string](),
+    message: string, code = "forbidden", fields = initTable[string, string]()
 ): ref ForbiddenError =
   ## Creates an application exception translated to HTTP 403.
   newApiErrorException(ForbiddenError, message, code, fields)
 
 proc newNotFoundError*(
-    message: string,
-    code = "not_found",
-    fields = initTable[string, string](),
+    message: string, code = "not_found", fields = initTable[string, string]()
 ): ref NotFoundError =
   ## Creates an application exception translated to HTTP 404.
   newApiErrorException(NotFoundError, message, code, fields)
 
 proc newConflictError*(
-    message: string,
-    code = "conflict",
-    fields = initTable[string, string](),
+    message: string, code = "conflict", fields = initTable[string, string]()
 ): ref ConflictError =
   ## Creates an application exception translated to HTTP 409.
   newApiErrorException(ConflictError, message, code, fields)
 
 proc newUnprocessableEntityError*(
-    message: string,
-    code = "unprocessable_entity",
-    fields = initTable[string, string](),
+    message: string, code = "unprocessable_entity", fields = initTable[string, string]()
 ): ref UnprocessableEntityError =
   ## Creates an application exception translated to HTTP 422.
   newApiErrorException(UnprocessableEntityError, message, code, fields)
@@ -562,15 +552,15 @@ proc addHeader*(response: var Response, name, value: string) {.raises: [].} =
   ## Appends a response header value without replacing existing values.
   response.headers.addHeader(name, value)
 
-proc getAllHeaders*(request: Request, name: string): seq[string] {.
-    inline, raises: []
-.} =
+proc getAllHeaders*(
+    request: Request, name: string
+): seq[string] {.inline, raises: [].} =
   ## Returns every request header value for ``name`` in wire order.
   request.headers.getAllHeaders(name)
 
-proc getAllHeaders*(response: Response, name: string): seq[string] {.
-    inline, raises: []
-.} =
+proc getAllHeaders*(
+    response: Response, name: string
+): seq[string] {.inline, raises: [].} =
   ## Returns every response header value for ``name`` in insertion order.
   response.headers.getAllHeaders(name)
 
@@ -666,9 +656,7 @@ proc ok*[T](model: JsonResponseFields[T]): Response =
   ## Creates a filtered 200 JSON response.
   response(200, model)
 
-proc apiErrorResponse*(
-    status: int, error: ApiError
-): Response {.gcsafe, raises: [].} =
+proc apiErrorResponse*(status: int, error: ApiError): Response {.gcsafe, raises: [].} =
   ## Serializes ``error`` using FastNim's standard JSON error envelope.
   var fields = newJObject()
   for name, message in error.fields:
@@ -743,7 +731,10 @@ proc fieldName(node: NimNode): string {.compileTime.} =
   of nnkPostfix, nnkPragmaExpr:
     fieldName(node[^1])
   of nnkAccQuoted:
-    if node.len == 1: fieldName(node[0]) else: node.repr
+    if node.len == 1:
+      fieldName(node[0])
+    else:
+      node.repr
   else:
     node.repr
 
@@ -868,11 +859,13 @@ proc responseTypeShape(typeNode: NimNode): string {.compileTime.} =
   var seen: seq[string]
   shapeOf(node, seen)
 
-macro responseTypeMismatch(status: static[int], expected: typed, model: typed): untyped =
+macro responseTypeMismatch(
+    status: static[int], expected: typed, model: typed
+): untyped =
   error(
     "response model does not match the type declared for status " & $status &
-      "\nexpected: " & responseTypeShape(expected) &
-      "\nreceived: " & responseTypeShape(model),
+      "\nexpected: " & responseTypeShape(expected) & "\nreceived: " &
+      responseTypeShape(model),
     model,
   )
 

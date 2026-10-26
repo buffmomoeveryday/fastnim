@@ -5,44 +5,61 @@ proc titleCase(value: string): string =
   if value.len > 0 and value[0].isLowerAscii: "must start with a capital letter" else: ""
 
 model Base {.abstract.}:
-  id: UUIDField(primaryKey: true)
-  createdAt: DateTimeField(autoNowAdd: true)
-  title: CharField(maxLength: 100)
+  id:
+    UUIDField(primaryKey: true)
+  createdAt:
+    DateTimeField(autoNowAdd: true)
+  title:
+    CharField(maxLength: 100)
 
 model Person = ref Base:
-  name: CharField(maxLength: 19, minLength: 2, validator: titleCase)
-  title: CharField(maxLength: 10)
+  name:
+    CharField(maxLength: 19, minLength: 2, validator: titleCase)
+  title:
+    CharField(maxLength: 10)
 
 model Employee = ref Person:
-  salary: IntegerField(default: 1000)
+  salary:
+    IntegerField(default: 1000)
 
 model Tag {.table: "tags".}:
-  label: CharField(unique: true)
+  label:
+    CharField(unique: true)
 
 model Node:
-  parent: ForeignKey(Node, onDelete: SetNull, null: true)
-  name: TextField(null: true)
+  parent:
+    ForeignKey(Node, onDelete: SetNull, null: true)
+  name:
+    TextField(null: true)
 
 model Publishable {.abstract.}:
-  title: CharField()
-  published: BooleanField()
-  createdAt: DateTimeField()
+  title:
+    CharField()
+  published:
+    BooleanField()
+  createdAt:
+    DateTimeField()
   Meta:
-    ordering: ["-createdAt", "title"]
+    ordering:
+      ["-createdAt", "title"]
     indexes:
       Index(fields: ["title", "published"], name: "{model}_title_pub")
 
 model Story = ref Publishable:
   Meta:
-    table: "stories"
+    table:
+      "stories"
     uniqueTogether:
       ["title", "published"]
 
 model Slug:
-  title: CharField(index: true)
-  slug: CharField()
+  title:
+    CharField(index: true)
+  slug:
+    CharField()
   Meta:
-    ordering: ["title"]
+    ordering:
+      ["title"]
     indexes:
       Index(fields: ["-slug"], name: "slug_recent")
 
@@ -58,12 +75,14 @@ suite "model metadata":
   test "abstract base contributes fields but no table":
     check not compiles(modelMeta(Base))
     check not compiles(Base.objects)
-    for m in registeredModels(): check m.name != "Base"
+    for m in registeredModels():
+      check m.name != "Base"
 
   test "inheritance merges fields in declaration order":
     let m = modelMeta(Person)
     var names: seq[string]
-    for f in m.fields: names.add f.name
+    for f in m.fields:
+      names.add f.name
     check names == @["id", "createdAt", "title", "name"]
     check m.table == "person"
     check m.parent == "Base"
@@ -76,7 +95,8 @@ suite "model metadata":
     let e = Employee(name: "Grace", salary: 5)
     check e of Person
     var names: seq[string]
-    for f in modelMeta(Employee).fields: names.add f.name
+    for f in modelMeta(Employee).fields:
+      names.add f.name
     check names == @["id", "createdAt", "title", "name", "salary"]
     check modelMeta(Employee).table == "employee"
 
@@ -104,7 +124,8 @@ suite "model metadata":
     check story.table == "stories"
     check story.ordering == @["-created_at", "title"]
     var names: seq[string]
-    for ix in story.indexes: names.add ix.name
+    for ix in story.indexes:
+      names.add ix.name
     check names == @["story_title_pub", "stories_title_published_uniq"]
     check story.indexes[1].unique
     let slug = modelMeta(Slug)
@@ -114,7 +135,8 @@ suite "model metadata":
     check slug.indexes[0].columns == @["slug"]
     check slug.indexes[0].descending == @[true]
     var schemaNames: seq[string]
-    for ix in snapshotOf([modelMeta(Slug)]).tables[0].indexes: schemaNames.add ix.name
+    for ix in snapshotOf([modelMeta(Slug)]).tables[0].indexes:
+      schemaNames.add ix.name
     check "slug_title_idx" in schemaNames
     check "slug_recent" in schemaNames
 
@@ -122,7 +144,8 @@ suite "model metadata":
     check validate(Person(name: "Ada", title: "Dr")).len == 0
     let issues = validate(Person(name: "a", title: "much too long title"))
     var fields: seq[string]
-    for i in issues: fields.add i.field
+    for i in issues:
+      fields.add i.field
     check "title" in fields
     check fields.count("name") == 2
 
@@ -171,8 +194,10 @@ suite "model metadata":
     person.id = parseUUID("00112233-4455-6677-8899-aabbccddeeff")
     check person.omit(createdAt).serialize() ==
       """{"id":"00112233-4455-6677-8899-aabbccddeeff","title":"Dr","name":"Ada"}"""
-    check person.omit(id).omit(createdAt).serialize() == """{"title":"Dr","name":"Ada"}"""
-    check @[person].omit(id, createdAt).serialize() == """[{"title":"Dr","name":"Ada"}]"""
+    check person.omit(id).omit(createdAt).serialize() ==
+      """{"title":"Dr","name":"Ada"}"""
+    check @[person].omit(id, createdAt).serialize() ==
+      """[{"title":"Dr","name":"Ada"}]"""
     check (none(Person)).serialize() == "null"
     var gone: Person = nil
     check gone.serialize() == "null"

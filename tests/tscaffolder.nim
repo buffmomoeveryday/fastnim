@@ -19,21 +19,19 @@ proc nimCheck(paths: openArray[string], file: string): string =
   for path in paths:
     command.add(" --path:" & quoteShell(path))
   let log = paths[0] / "nimcheck.log"
-  let code = execShellCmd(command & " " & quoteShell(file) & " > " &
-    quoteShell(log) & " 2>&1")
+  let code =
+    execShellCmd(command & " " & quoteShell(file) & " > " & quoteShell(log) & " 2>&1")
   if code == 0:
     ""
   else:
     readFile(log)
 
 proc scaffoldCombo(
-    box, name: string, frontend: InertiaFrontend, pkgManager: string,
-    css: InertiaCss,
+    box, name: string, frontend: InertiaFrontend, pkgManager: string, css: InertiaCss
 ): string =
   result = box / name
   scaffoldInertiajs(
-    result, name,
-    InertiaChoices(frontend: frontend, pkgManager: pkgManager, css: css),
+    result, name, InertiaChoices(frontend: frontend, pkgManager: pkgManager, css: css)
   )
 
 proc expectedFiles(box, name, entry: string): seq[string] =
@@ -216,8 +214,13 @@ block cliInitScaffoldsProject:
   let box = sandbox("cli")
   let code = cliMain(
     @[
-      "init", "demo", "--template:inertiajs", "--frontend:react", "--css:none",
-      "--pkgmanager:npm", "--dir:" & box,
+      "init",
+      "demo",
+      "--template:inertiajs",
+      "--frontend:react",
+      "--css:none",
+      "--pkgmanager:npm",
+      "--dir:" & box,
     ],
     interactive = false,
   )
@@ -230,12 +233,10 @@ block cliInitScaffoldsProject:
 block cliUsesSensibleDefaults:
   let box = sandbox("cli-defaults")
   let code = cliMain(
-    @["init", "plain", "--template=inertiajs", "--dir=" & box],
-    interactive = false,
+    @["init", "plain", "--template=inertiajs", "--dir=" & box], interactive = false
   )
   doAssert code == 0
-  let manifest =
-    parseJson(readFile(box / "plain" / "package.json"))
+  let manifest = parseJson(readFile(box / "plain" / "package.json"))
   doAssert "@inertiajs/svelte" in manifest["dependencies"]
   doAssert "tailwindcss" in manifest["devDependencies"]
   doAssert manifest["packageManager"].getStr() == "pnpm@10.0.0"
@@ -243,10 +244,7 @@ block cliUsesSensibleDefaults:
 block cliAcceptsSpaceSeparatedValues:
   let box = sandbox("cli-space")
   let code = cliMain(
-    @[
-      "init", "spaced", "--template", "inertiajs", "--frontend", "svelte",
-      "--dir", box,
-    ],
+    @["init", "spaced", "--template", "inertiajs", "--frontend", "svelte", "--dir", box],
     interactive = false,
   )
   doAssert code == 0
@@ -260,19 +258,24 @@ block cliReportsVersion:
 
 block cliRejectsBadInput:
   let box = sandbox("cli-bad")
-  doAssert cliMain(@["init", "x", "--template:nope", "--dir=" & box],
-    interactive = false) == 2
+  doAssert cliMain(
+    @["init", "x", "--template:nope", "--dir=" & box], interactive = false
+  ) == 2
   doAssert cliMain(
     @["init", "x", "--template:inertiajs", "--frontend:vue", "--dir=" & box],
-    interactive = false) == 2
+    interactive = false,
+  ) == 2
   doAssert cliMain(
     @["init", "x", "--template:inertiajs", "--pkgmanager:yarn", "--dir=" & box],
-    interactive = false) == 2
+    interactive = false,
+  ) == 2
   doAssert cliMain(
     @["init", "x", "--template:inertiajs", "--css:bootstrap", "--dir=" & box],
-    interactive = false) == 2
-  doAssert cliMain(@["init", "a/b", "--template:inertiajs", "--dir=" & box],
-    interactive = false) == 2
+    interactive = false,
+  ) == 2
+  doAssert cliMain(
+    @["init", "a/b", "--template:inertiajs", "--dir=" & box], interactive = false
+  ) == 2
   doAssert cliMain(@["bogus"], interactive = false) == 2
   doAssert cliMain(@["--help"], interactive = false) == 0
   doAssert cliMain(@[], interactive = false) == 0
@@ -281,11 +284,12 @@ block cliRefusesNonEmptyDir:
   let box = sandbox("cli-force")
   createDir(box / "myapp")
   writeFile(box / "myapp" / "taken.txt", "occupied")
-  doAssert cliMain(@["init", "--template:inertiajs", "--dir=" & box],
-    interactive = false) == 1
   doAssert cliMain(
-    @["init", "--template:inertiajs", "--dir=" & box, "--force"],
-    interactive = false) == 0
+    @["init", "--template:inertiajs", "--dir=" & box], interactive = false
+  ) == 1
+  doAssert cliMain(
+    @["init", "--template:inertiajs", "--dir=" & box, "--force"], interactive = false
+  ) == 0
   doAssert fileExists(box / "myapp" / "src" / "main.nim")
 
 block scaffoldApiProject:
@@ -293,9 +297,13 @@ block scaffoldApiProject:
   let root = box / "shop"
   scaffoldApi(root, "shop")
   for path in [
-    root / "shop.nimble", root / "config.nims", root / "src" / "main.nim",
-    root / "src" / "models.nim", root / "src" / "routes" / "users.nim",
-    root / "tests" / "test_users.nim", root / "README.md",
+    root / "shop.nimble",
+    root / "config.nims",
+    root / "src" / "main.nim",
+    root / "src" / "models.nim",
+    root / "src" / "routes" / "users.nim",
+    root / "tests" / "test_users.nim",
+    root / "README.md",
   ]:
     doAssert fileExists(path), path
 
@@ -317,9 +325,11 @@ block scaffoldKaraxSsrProject:
   let root = box / "pages"
   scaffoldKaraxSsr(root, "pages")
   for path in [
-    root / "pages.nimble", root / "src" / "main.nim",
+    root / "pages.nimble",
+    root / "src" / "main.nim",
     root / "src" / "routes" / "pages.nim",
-    root / "tests" / "test_pages.nim", root / "README.md",
+    root / "tests" / "test_pages.nim",
+    root / "README.md",
   ]:
     doAssert fileExists(path), path
 
@@ -338,9 +348,12 @@ block scaffoldKaraxCsrProject:
   let root = box / "app"
   scaffoldKaraxCsr(root, "app")
   for path in [
-    root / "app.nimble", root / "src" / "main.nim",
-    root / "src" / "routes" / "api.nim", root / "client" / "app.nim",
-    root / "public" / "index.html", root / "tests" / "test_api.nim",
+    root / "app.nimble",
+    root / "src" / "main.nim",
+    root / "src" / "routes" / "api.nim",
+    root / "client" / "app.nim",
+    root / "public" / "index.html",
+    root / "tests" / "test_api.nim",
     root / "README.md",
   ]:
     doAssert fileExists(path), path
@@ -355,9 +368,8 @@ block scaffoldKaraxCsrProject:
 
   let jsLog = root / "client" / "app.js.log"
   let jsCode = execShellCmd(
-    "nim js --hints:off -o:" & quoteShell(root / "public" / "assets" / "app.js") &
-      " " & quoteShell(root / "client" / "app.nim") & " > " & quoteShell(jsLog) &
-      " 2>&1"
+    "nim js --hints:off -o:" & quoteShell(root / "public" / "assets" / "app.js") & " " &
+      quoteShell(root / "client" / "app.nim") & " > " & quoteShell(jsLog) & " 2>&1"
   )
   doAssert jsCode == 0, readFile(jsLog)
 
@@ -365,15 +377,18 @@ block cliScaffoldsEveryTemplate:
   let box = sandbox("cli-all")
   doAssert cliMain(@["init", "shop", "--dir=" & box], interactive = false) == 0
   doAssert fileExists(box / "shop" / "src" / "routes" / "users.nim")
-  doAssert cliMain(@["init", "ssr", "--template:karax_ssr", "--dir=" & box],
-    interactive = false) == 0
+  doAssert cliMain(
+    @["init", "ssr", "--template:karax_ssr", "--dir=" & box], interactive = false
+  ) == 0
   doAssert fileExists(box / "ssr" / "src" / "routes" / "pages.nim")
-  doAssert cliMain(@["init", "csr", "--template:karax_csr", "--dir=" & box],
-    interactive = false) == 0
+  doAssert cliMain(
+    @["init", "csr", "--template:karax_csr", "--dir=" & box], interactive = false
+  ) == 0
   doAssert fileExists(box / "csr" / "client" / "app.nim")
   doAssert cliMain(
     @["init", "old", "--template:api", "--frontend:svelte", "--dir=" & box],
-    interactive = false) == 0
+    interactive = false,
+  ) == 0
   doAssert fileExists(box / "old" / "src" / "main.nim")
 
 block cliScaffoldsAuthForEveryTemplate:
@@ -397,18 +412,15 @@ block cliScaffoldsAuthForEveryTemplate:
     doAssert "authentication()" in readFile(src / "main.nim")
     doAssert nimCheck([src], src / "main.nim") == ""
 
-  doAssert fileExists(
-    box / "inertiaapp" / "client" / "src" / "pages" / "Login.svelte"
-  )
+  doAssert fileExists(box / "inertiaapp" / "client" / "src" / "pages" / "Login.svelte")
   doAssert "JWT_SECRET" in readFile(box / "apiapp" / "README.md")
   doAssert "localstorage" in readFile(box / "csrapp" / "client" / "app.nim")
 
   let csrRoot = box / "csrapp"
   let jsLog = csrRoot / "client" / "auth_app.js.log"
   let jsCode = execShellCmd(
-    "nim js --hints:off -o:" & quoteShell(csrRoot / "public" / "assets" / "app.js") &
-      " " & quoteShell(csrRoot / "client" / "app.nim") & " > " & quoteShell(jsLog) &
-      " 2>&1"
+    "nim js --hints:off -o:" & quoteShell(csrRoot / "public" / "assets" / "app.js") & " " &
+      quoteShell(csrRoot / "client" / "app.nim") & " > " & quoteShell(jsLog) & " 2>&1"
   )
   doAssert jsCode == 0, readFile(jsLog)
 
@@ -420,7 +432,8 @@ block scaffoldInertiaAuthHandlesFailedLogins:
   for (name, frontend) in [("svelteapp", feSvelte), ("reactapp", feReact)]:
     let root = box / name
     scaffoldInertiajs(
-      root, name,
+      root,
+      name,
       InertiaChoices(frontend: frontend, pkgManager: "pnpm", css: cssTailwind),
       auth = true,
     )
@@ -428,14 +441,11 @@ block scaffoldInertiaAuthHandlesFailedLogins:
     doAssert "isInertiaRequest" in routes
     doAssert "inertia(\"Login\", %*{\"errors\"" in routes
     doAssert "json(statusUnauthorized" in routes
-  let svelteLogin = readFile(
-    box / "svelteapp" / "client" / "src" / "pages" / "Login.svelte"
-  )
+  let svelteLogin =
+    readFile(box / "svelteapp" / "client" / "src" / "pages" / "Login.svelte")
   doAssert "errors" in svelteLogin
   doAssert "Invalid credentials" notin svelteLogin
-  let reactLogin = readFile(
-    box / "reactapp" / "client" / "src" / "pages" / "Login.tsx"
-  )
+  let reactLogin = readFile(box / "reactapp" / "client" / "src" / "pages" / "Login.tsx")
   doAssert "errors" in reactLogin
   doAssert "Invalid credentials" notin reactLogin
 

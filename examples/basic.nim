@@ -18,7 +18,6 @@ type
 
 let app = initFastNim()
 
-
 middleware helloMiddleware:
   echo "hello brefore request"
   var response = await next(request)
@@ -28,7 +27,6 @@ middleware helloMiddleware:
 app.middlewares:
   requestId()
   helloMiddleware()
-
 
 app.get("/"):
   ok %*{"message": "Hello from FastNim"}

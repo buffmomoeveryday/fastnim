@@ -40,9 +40,9 @@ type
     closure, async: (raises: [CatchableError])
   .} ## Internal protobuf-bytes handler used by the transport.
 
-  GrpcRawReceive* = proc(): Future[Option[seq[byte]]] {.
-    closure, async: (raises: [CatchableError])
-  .} ## Receives the next framed protobuf payload or ``none`` at end of input.
+  GrpcRawReceive* =
+    proc(): Future[Option[seq[byte]]] {.closure, async: (raises: [CatchableError]).}
+    ## Receives the next framed protobuf payload or ``none`` at end of input.
 
   GrpcRawSend* = proc(payload: seq[byte]): Future[void] {.
     closure, async: (raises: [CatchableError])

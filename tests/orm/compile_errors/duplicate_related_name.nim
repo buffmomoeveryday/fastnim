@@ -2,8 +2,11 @@
 import fastnim/orm
 
 model User:
-  name: CharField()
+  name:
+    CharField()
 
 model Book:
-  writer: ForeignKey(User)
-  editor: ForeignKey(User)
+  writer:
+    ForeignKey(User)
+  editor:
+    ForeignKey(User)

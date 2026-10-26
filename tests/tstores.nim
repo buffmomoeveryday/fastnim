@@ -10,7 +10,8 @@ block inMemorySessionStoreContract:
   var now = 100.0
   let store = newInMemorySessionStore(
     defaultTtlSeconds = 30,
-    clock = proc(): float {.gcsafe, raises: [].} = now,
+    clock = proc(): float {.gcsafe, raises: [].} =
+      now,
   )
   let data = SessionData(subject: "ada", createdAt: now, expiresAt: 0)
   waitFor store.saveSession("session-1", data, ttlSeconds = 10)
@@ -33,9 +34,9 @@ block customSessionStoreIsPluggable:
     savedTtl: int
 
   let state = FakeState(rows: initTable[string, SessionData]())
-  let load: SessionLoad = proc(id: string): Future[SessionData] {.
-      async: (raises: [CatchableError])
-  .} =
+  let load: SessionLoad = proc(
+      id: string
+  ): Future[SessionData] {.async: (raises: [CatchableError]).} =
     {.cast(gcsafe).}:
       return state.rows.getOrDefault(id)
   let save: SessionSave = proc(
@@ -44,9 +45,9 @@ block customSessionStoreIsPluggable:
     {.cast(gcsafe).}:
       state.rows[id] = data
       state.savedTtl = ttlSeconds
-  let delete: SessionDelete = proc(id: string): Future[void] {.
-      async: (raises: [CatchableError])
-  .} =
+  let delete: SessionDelete = proc(
+      id: string
+  ): Future[void] {.async: (raises: [CatchableError]).} =
     {.cast(gcsafe).}:
       state.rows.del(id)
 
@@ -60,7 +61,8 @@ block customSessionStoreIsPluggable:
 block inMemoryRateLimitCountingAndReset:
   var now = 100.0
   let store = newInMemoryRateLimitStore(
-    clock = proc(): float {.gcsafe, raises: [].} = now
+    clock = proc(): float {.gcsafe, raises: [].} =
+      now
   )
   let first = waitFor store.increment("client-a", 5)
   let second = waitFor store.increment("client-a", 5)
@@ -95,7 +97,8 @@ block customRateLimitStoreIsUsedByPlugin:
       initRateLimitOptions(
         limit = 1,
         windowSeconds = 20,
-        key = proc(request: Request): string = "shared-client",
+        key = proc(request: Request): string =
+          "shared-client",
         store = store,
       )
     )

@@ -14,14 +14,16 @@ suite "N+1 detection (-d:raiseNPlusOne)":
     let name = path.extractFilename
     test name:
       let (output, code) = execCmdEx(
-        "nim check --hints:off -d:raiseNPlusOne --path:" & quoteShell(root / "src") &
-          " " & quoteShell(path)
+        "nim check --hints:off -d:raiseNPlusOne --path:" & quoteShell(root / "src") & " " &
+          quoteShell(path)
       )
       if name.startsWith("bad_"):
         let expected = readFile(path).splitLines()[0].replace("# expect:", "").strip
         check code != 0
         check expected in output
-        if expected notin output: echo output
+        if expected notin output:
+          echo output
       else:
         check code == 0
-        if code != 0: echo output
+        if code != 0:
+          echo output

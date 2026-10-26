@@ -2,9 +2,8 @@
 
 import std/[sysrand, strutils, hashes]
 
-type
-  UUID* = object
-    bytes*: array[16, uint8]
+type UUID* = object
+  bytes*: array[16, uint8]
 
 proc genUUID*(): UUID {.raises: [OSError].} =
   ## Generates a random (version 4) UUID.
@@ -15,13 +14,15 @@ proc genUUID*(): UUID {.raises: [OSError].} =
 
 proc isZero*(u: UUID): bool =
   for b in u.bytes:
-    if b != 0: return false
+    if b != 0:
+      return false
   true
 
 proc `$`*(u: UUID): string =
   result = newStringOfCap(36)
   for i, b in u.bytes:
-    if i in [4, 6, 8, 10]: result.add '-'
+    if i in [4, 6, 8, 10]:
+      result.add '-'
     result.add toHex(b.int, 2).toLowerAscii
 
 proc parseUUID*(s: string): UUID {.raises: [ValueError].} =
@@ -31,4 +32,5 @@ proc parseUUID*(s: string): UUID {.raises: [ValueError].} =
   for i in 0 ..< 16:
     result.bytes[i] = uint8(parseHexInt(hex[i * 2 .. i * 2 + 1]))
 
-proc hash*(u: UUID): Hash = hash(u.bytes)
+proc hash*(u: UUID): Hash =
+  hash(u.bytes)

@@ -30,7 +30,8 @@ proc authentication*(): Plugin =
   authPlugin(initAuthOptions(
     schemes = {AuthScheme.Session},
     sessionStore = sessionStore,
-    excludePaths = """ & exclusions & """,
+    excludePaths = """ &
+    exclusions & """,
   ))
 """
 
@@ -79,7 +80,8 @@ proc authentication*(): Plugin =
   authPlugin(initAuthOptions(
     schemes = {AuthScheme.Jwt},
     jwtSecrets = @[JwtSecret],
-    includePaths = """ & inclusions & """,
+    includePaths = """ &
+    inclusions & """,
     excludePaths = """ & exclusions & """,
   ))
 """

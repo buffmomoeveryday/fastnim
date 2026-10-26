@@ -117,7 +117,8 @@ proc apiMain(name: string, auth: bool): string =
 import chronos
 
 import fastnim
-""" & authImports & """
+""" &
+    authImports & """
 import routes/users
 
 let api = initFastNim()
@@ -226,7 +227,8 @@ curl http://127.0.0.1:8000/v1/users/
 curl -X POST http://127.0.0.1:8000/v1/users/ \
   -d '{"name":"Grace","email":"g@example.com"}'
 ```
-""" & authDocs & """
+""" &
+    authDocs & """
 
 ## Test
 
