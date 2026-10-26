@@ -5,8 +5,6 @@ type SearchQuery = object
 
 let app = initFastNim()
 app.get(
-  "/items/{queryParams:int}",
-  queryParams = SearchQuery,
-  responses = @[(200, void)],
+  "/items/{queryParams:int}", queryParams = SearchQuery, responses = @[(200, void)]
 ):
   ok void

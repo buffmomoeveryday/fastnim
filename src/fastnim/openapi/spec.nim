@@ -81,9 +81,7 @@ proc initOpenApiOperation*(
 
 proc typeSchema(node: NimNode): JsonNode {.compileTime.}
 proc responseTypeSchema(
-    node: NimNode,
-    ignoredFields, includedFields: seq[string],
-    root: bool,
+  node: NimNode, ignoredFields, includedFields: seq[string], root: bool
 ): JsonNode {.compileTime.}
 
 proc isOptionType(node: NimNode): bool {.compileTime.} =
@@ -233,9 +231,7 @@ proc typeSchema(node: NimNode): JsonNode {.compileTime.} =
       let item = current[^1]
       return %*{"type": "array", "items": typeSchema(item)}
     if container in ["Table", "OrderedTable"] and current.len == 3:
-      return %*{
-        "type": "object", "additionalProperties": typeSchema(current[2])
-      }
+      return %*{"type": "object", "additionalProperties": typeSchema(current[2])}
     if container == "Option":
       result = typeSchema(current[1])
       result["nullable"] = newJBool(true)
@@ -267,14 +263,12 @@ proc selected(fields: seq[string], name: string): bool {.compileTime.} =
       return true
 
 proc responseFieldVisible(
-    field: JsonFieldInfo,
-    ignoredFields, includedFields: seq[string],
-    root: bool,
+    field: JsonFieldInfo, ignoredFields, includedFields: seq[string], root: bool
 ): bool {.compileTime.} =
-  let explicitlyIgnored = ignoredFields.selected(field.nimName) or
-    ignoredFields.selected(field.jsonName)
-  let explicitlyIncluded = includedFields.selected(field.nimName) or
-    includedFields.selected(field.jsonName)
+  let explicitlyIgnored =
+    ignoredFields.selected(field.nimName) or ignoredFields.selected(field.jsonName)
+  let explicitlyIncluded =
+    includedFields.selected(field.nimName) or includedFields.selected(field.jsonName)
   if root and explicitlyIgnored:
     return false
   not field.responseIgnored or (root and explicitlyIncluded)
@@ -287,9 +281,8 @@ proc addResponseField(
 ) {.compileTime.} =
   if not field.responseFieldVisible(ignoredFields, includedFields, root):
     return
-  var fieldSchema = responseTypeSchema(
-    field.fieldType, ignoredFields, includedFields, false
-  )
+  var fieldSchema =
+    responseTypeSchema(field.fieldType, ignoredFields, includedFields, false)
   fieldSchema.applyValidationSchema(field.source)
   schema["properties"][field.jsonName] = fieldSchema
   if not field.fieldType.isOptionType():
@@ -299,9 +292,7 @@ proc newObjectSchema(): JsonNode {.compileTime.} =
   %*{"type": "object", "properties": newJObject(), "required": newJArray()}
 
 proc responseObjectSchema(
-    objectType: NimNode,
-    ignoredFields, includedFields: seq[string],
-    root: bool,
+    objectType: NimNode, ignoredFields, includedFields: seq[string], root: bool
 ): JsonNode {.compileTime.} =
   var variant = newEmptyNode()
   var commonFields: seq[JsonFieldInfo]
@@ -344,9 +335,7 @@ proc responseEnumSchema(enumType: NimNode): JsonNode {.compileTime.} =
       inc ordinal
 
 proc responseTypeSchema(
-    node: NimNode,
-    ignoredFields, includedFields: seq[string],
-    root: bool,
+    node: NimNode, ignoredFields, includedFields: seq[string], root: bool
 ): JsonNode {.compileTime.} =
   var current = node
   if current.kind == nnkBracketExpr and current.len == 2 and
@@ -358,9 +347,7 @@ proc responseTypeSchema(
       return named
     let impl = current.getImpl
     if impl.kind == nnkTypeDef:
-      return responseTypeSchema(
-        impl[^1], ignoredFields, includedFields, root
-      )
+      return responseTypeSchema(impl[^1], ignoredFields, includedFields, root)
   if current.kind == nnkIdent:
     return namedTypeSchema($current)
   if current.kind == nnkBracketExpr:
@@ -368,21 +355,16 @@ proc responseTypeSchema(
     if container in ["seq", "array"]:
       return %*{
         "type": "array",
-        "items": responseTypeSchema(
-          current[^1], ignoredFields, includedFields, false
-        ),
+        "items": responseTypeSchema(current[^1], ignoredFields, includedFields, false),
       }
     if container in ["Table", "OrderedTable"] and current.len == 3:
       return %*{
         "type": "object",
-        "additionalProperties": responseTypeSchema(
-          current[2], ignoredFields, includedFields, false
-        ),
+        "additionalProperties":
+          responseTypeSchema(current[2], ignoredFields, includedFields, false),
       }
     if container == "Option":
-      result = responseTypeSchema(
-        current[1], ignoredFields, includedFields, false
-      )
+      result = responseTypeSchema(current[1], ignoredFields, includedFields, false)
       result["nullable"] = newJBool(true)
       return
   if current.kind == nnkRefTy:
@@ -403,8 +385,7 @@ proc stringLiterals(node: NimNode): seq[string] {.compileTime.} =
     return
   if values.kind != nnkBracket:
     error(
-      "response field overrides must be a sequence literal, got " & values.repr,
-      node,
+      "response field overrides must be a sequence literal, got " & values.repr, node
     )
   for value in values:
     if value.kind notin {nnkStrLit, nnkRStrLit, nnkTripleStrLit}:
@@ -478,12 +459,7 @@ proc addPathParameters(operation: var JsonNode) =
         of PathParamKind.String:
           %*{"type": "string"}
       parameters.add(
-        %*{
-          "name": spec.name,
-          "in": "path",
-          "required": true,
-          "schema": schema,
-        }
+        %*{"name": spec.name, "in": "path", "required": true, "schema": schema}
       )
   if parameters.len > 0:
     operation["parameters"] = parameters

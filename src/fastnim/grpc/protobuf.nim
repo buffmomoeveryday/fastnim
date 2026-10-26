@@ -166,7 +166,7 @@ proc decodeValue(
   wireType.requireWire(2)
   let length = data.readLength(position)
   field = newString(length)
-  for index in 0..<length:
+  for index in 0 ..< length:
     field[index] = char(data[position + index])
   position += length
 

@@ -63,9 +63,8 @@ block indexAndRedirect:
   doAssert redirect.status == 307
   doAssert redirect.headers["location"] == "/static/docs/"
 
-  let repeated = app.handleSync(
-    initRequest(HttpMethod.Get, "/static/docs?tag=nim&tag=web")
-  )
+  let repeated =
+    app.handleSync(initRequest(HttpMethod.Get, "/static/docs?tag=nim&tag=web"))
   doAssert repeated.headers["location"] == "/static/docs/?tag=nim&tag=web"
 
   let docs = app.handleSync(initRequest(HttpMethod.Get, "/static/docs/"))
@@ -76,7 +75,9 @@ block fallthroughToAppHandlers:
   let dir = makeDiskFixtures()
   let app = initFastNim(logs = false)
   app.onError(
-    404, proc(request: Request): Response = text(statusNotFound, "custom:" & request.path)
+    404,
+    proc(request: Request): Response =
+      text(statusNotFound, "custom:" & request.path),
   )
   app.serveStatic("/static", directory = dir)
   app.get("/hello"):
@@ -101,8 +102,7 @@ block traversalBlocked:
   doAssert app.handleSync(
     initRequest(HttpMethod.Get, "/static/%2e%2e/%2e%2e/etc/passwd")
   ).status == 404
-  doAssert app.handleSync(initRequest(HttpMethod.Get, "/static/%2e%2e/x")).status ==
-    404
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/static/%2e%2e/x")).status == 404
 
 block headAndConditional:
   let dir = makeDiskFixtures()
@@ -118,7 +118,8 @@ block headAndConditional:
 
   let cached = app.handleSync(
     initRequest(
-      HttpMethod.Get, "/static/hello.txt",
+      HttpMethod.Get,
+      "/static/hello.txt",
       headersOf({"If-None-Match": get.headers["etag"]}),
     )
   )
@@ -126,15 +127,14 @@ block headAndConditional:
   doAssert cached.body == ""
 
   let wildcard = app.handleSync(
-    initRequest(
-      HttpMethod.Get, "/static/hello.txt", headersOf({"If-None-Match": "*"})
-    )
+    initRequest(HttpMethod.Get, "/static/hello.txt", headersOf({"If-None-Match": "*"}))
   )
   doAssert wildcard.status == 304
 
   let since = app.handleSync(
     initRequest(
-      HttpMethod.Get, "/static/hello.txt",
+      HttpMethod.Get,
+      "/static/hello.txt",
       headersOf({"If-Modified-Since": get.headers["last-modified"]}),
     )
   )
@@ -142,8 +142,7 @@ block headAndConditional:
 
   let stale = app.handleSync(
     initRequest(
-      HttpMethod.Get, "/static/hello.txt",
-      headersOf({"If-None-Match": "\"0-0\""}),
+      HttpMethod.Get, "/static/hello.txt", headersOf({"If-None-Match": "\"0-0\""})
     )
   )
   doAssert stale.status == 200
@@ -154,9 +153,7 @@ block rangeRequests:
   app.serveStatic("/static", directory = dir)
 
   let first = app.handleSync(
-    initRequest(
-      HttpMethod.Get, "/static/hello.txt", headersOf({"Range": "bytes=0-4"})
-    )
+    initRequest(HttpMethod.Get, "/static/hello.txt", headersOf({"Range": "bytes=0-4"}))
   )
   doAssert first.status == 206
   doAssert first.body == "hello"
@@ -164,17 +161,13 @@ block rangeRequests:
   doAssert first.headers["content-length"] == "5"
 
   let suffix = app.handleSync(
-    initRequest(
-      HttpMethod.Get, "/static/hello.txt", headersOf({"Range": "bytes=-6"})
-    )
+    initRequest(HttpMethod.Get, "/static/hello.txt", headersOf({"Range": "bytes=-6"}))
   )
   doAssert suffix.status == 206
   doAssert suffix.body == "static"
 
   let openEnded = app.handleSync(
-    initRequest(
-      HttpMethod.Get, "/static/hello.txt", headersOf({"Range": "bytes=6-"})
-    )
+    initRequest(HttpMethod.Get, "/static/hello.txt", headersOf({"Range": "bytes=6-"}))
   )
   doAssert openEnded.body == "static"
   doAssert openEnded.headers["content-range"] == "bytes 6-11/12"
@@ -188,25 +181,20 @@ block rangeRequests:
   doAssert clamped.body == "static"
 
   let unsat = app.handleSync(
-    initRequest(
-      HttpMethod.Get, "/static/hello.txt", headersOf({"Range": "bytes=999-"})
-    )
+    initRequest(HttpMethod.Get, "/static/hello.txt", headersOf({"Range": "bytes=999-"}))
   )
   doAssert unsat.status == 416
   doAssert unsat.headers["content-range"] == "bytes */12"
 
   let multi = app.handleSync(
     initRequest(
-      HttpMethod.Get, "/static/hello.txt",
-      headersOf({"Range": "bytes=0-1,3-4"}),
+      HttpMethod.Get, "/static/hello.txt", headersOf({"Range": "bytes=0-1,3-4"})
     )
   )
   doAssert multi.status == 416
 
   let malformed = app.handleSync(
-    initRequest(
-      HttpMethod.Get, "/static/hello.txt", headersOf({"Range": "bytes=abc"})
-    )
+    initRequest(HttpMethod.Get, "/static/hello.txt", headersOf({"Range": "bytes=abc"}))
   )
   doAssert malformed.status == 200
   doAssert malformed.body == "hello static"
@@ -268,22 +256,20 @@ block embeddedDirectory:
   doAssert css.status == 200
   doAssert css.headers["content-type"] == "text/css; charset=utf-8"
 
-  doAssert app.handleSync(initRequest(HttpMethod.Get, "/emb/missing.txt")).status ==
-    404
+  doAssert app.handleSync(initRequest(HttpMethod.Get, "/emb/missing.txt")).status == 404
   doAssert app.handleSync(initRequest(HttpMethod.Get, "/emb/%2e%2e/x")).status == 404
 
   let cached = app.handleSync(
     initRequest(
-      HttpMethod.Get, "/emb/hello.txt",
+      HttpMethod.Get,
+      "/emb/hello.txt",
       headersOf({"If-None-Match": txt.headers["etag"]}),
     )
   )
   doAssert cached.status == 304
 
   let ranged = app.handleSync(
-    initRequest(
-      HttpMethod.Get, "/emb/hello.txt", headersOf({"Range": "bytes=0-7"})
-    )
+    initRequest(HttpMethod.Get, "/emb/hello.txt", headersOf({"Range": "bytes=0-7"}))
   )
   doAssert ranged.status == 206
   doAssert ranged.body == "embedded"
@@ -299,9 +285,7 @@ block singleEmbeddedFile:
 block spaFallbackAndNoCache:
   let dir = makeDiskFixtures()
   let app = initFastNim(logs = false)
-  app.serveStatic(
-    "/app", directory = dir, spaFallback = "index.html", maxAge = 0
-  )
+  app.serveStatic("/app", directory = dir, spaFallback = "index.html", maxAge = 0)
 
   let fallback = app.handleSync(initRequest(HttpMethod.Get, "/app/unknown/route"))
   doAssert fallback.status == 200

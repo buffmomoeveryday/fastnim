@@ -73,7 +73,8 @@ requires "fastnim >= 0.1.0"
 before build:
   # `nimble build` and `nimble run` bundle the client into client/dist first.
   if not dirExists("node_modules"):
-    exec """" & commands.install & """"
+    exec """" &
+    commands.install & """"
   exec """" & commands.build & """"
 
 task dev, "Run Vite and the Nim server, rebuilding the server on changes":
@@ -243,8 +244,10 @@ proc serverMain(name: string, choices: InertiaChoices, auth: bool): string =
   let framework = if choices.frontend == feReact: "React" else: "Svelte"
   let authImports = if auth: "import auth\nimport routes/auth as auth_routes\n" else: ""
   let authSetup =
-    if auth: "api.installPlugin(authentication())\napi.addRouter(auth_routes.authRouter)\n"
-    else: ""
+    if auth:
+      "api.installPlugin(authentication())\napi.addRouter(auth_routes.authRouter)\n"
+    else:
+      ""
   """## """ & name & """ - FastNim + Inertia + """ & framework & """.
 
 ## Development (Vite dev server feeds client assets to the Nim server,
@@ -260,13 +263,13 @@ import chronos
 
 import fastnim
 import fastnim/plugins/inertia
-""" & authImports & """
+""" &
+    authImports & """
 import routes/pages
 
 """ &
-    devTemplateLines("http://localhost:5173/assets", entry, choices.frontend == feReact).join(
-      "\n"
-    ) & "\n" & """
+    devTemplateLines("http://localhost:5173/assets", entry, choices.frontend == feReact)
+    .join("\n") & "\n" & """
 
 proc prodRootTemplate(pageJson: string): string =
   "<!doctype html><html><head>" &
@@ -780,7 +783,9 @@ export default function Login({ errors = {} }: { errors?: LoginErrors }) {
     )
 
 proc projectReadme(
-    name: string, choices: InertiaChoices, commands: tuple[install, dev, build: string],
+    name: string,
+    choices: InertiaChoices,
+    commands: tuple[install, dev, build: string],
     auth: bool,
 ): string =
   let framework =
@@ -846,7 +851,8 @@ clients pick up fresh assets.
 
 Server components in `src/routes/pages.nim` (`inertia("Dashboard", ...)`)
 must match files in `client/src/pages/` (`Dashboard`, `Users`).
-""" & authDocs
+""" &
+    authDocs
 
 proc scaffoldInertiajs*(dir, name: string, choices: InertiaChoices, auth = false) =
   ## Writes an Inertia.js project into ``dir``.

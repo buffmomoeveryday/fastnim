@@ -50,11 +50,11 @@ proc subscribe*(
       subscription.noLocal = noLocal
       subscription.retainAsPublished = retainAsPublished
       return false
-  peer.subscriptions.add(MqttSubscription(
-    filter: filter,
-    noLocal: noLocal,
-    retainAsPublished: retainAsPublished,
-  ))
+  peer.subscriptions.add(
+    MqttSubscription(
+      filter: filter, noLocal: noLocal, retainAsPublished: retainAsPublished
+    )
+  )
   true
 
 proc unsubscribe*(peer: MqttPeer, filter: string): bool =
@@ -65,9 +65,9 @@ proc unsubscribe*(peer: MqttPeer, filter: string): bool =
       return true
   false
 
-proc writePacket*(peer: MqttPeer, packet: seq[byte]): Future[void] {.
-    async: (raises: [CancelledError, TransportError])
-.} =
+proc writePacket*(
+    peer: MqttPeer, packet: seq[byte]
+): Future[void] {.async: (raises: [CancelledError, TransportError]).} =
   ## Writes one complete packet without interleaving concurrent broker output.
   await peer.writeLock.acquire()
   try:

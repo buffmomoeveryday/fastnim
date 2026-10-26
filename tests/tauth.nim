@@ -64,7 +64,8 @@ block bearerAcceptsKnownTokens:
   )
   app.get("/me"):
     json(%*{"user": request.authSubject(), "scheme": request.authScheme()})
-  let response = app.handleSync(initRequest(HttpMethod.Get, "/me", bearerHeaders("tok-1")))
+  let response =
+    app.handleSync(initRequest(HttpMethod.Get, "/me", bearerHeaders("tok-1")))
   doAssert response.status == 200
   doAssert response.body == "{\"user\":\"ada\",\"scheme\":\"bearer\"}"
 
@@ -120,9 +121,8 @@ block basicRejectsWrongPassword:
   app.installPlugin(authPlugin(basicOptions()))
   app.get("/me"):
     text("unreachable")
-  let wrong = app.handleSync(
-    initRequest(HttpMethod.Get, "/me", basicHeaders("ada", "wrong"))
-  )
+  let wrong =
+    app.handleSync(initRequest(HttpMethod.Get, "/me", basicHeaders("ada", "wrong")))
   doAssert wrong.status == 401
   doAssert "Basic" in wrong.headers.getOrDefault("www-authenticate", "")
   var malformed = initTable[string, string]()
@@ -189,7 +189,8 @@ block jwtRejectsBadTokens:
   doAssertRaises ValueError:
     discard verifyJwtHs256("not.a.token", secret)
   doAssertRaises ValueError:
-    discard verifyJwtHs256(token.split('.')[0] & ".tampered." & token.split('.')[2], secret)
+    discard
+      verifyJwtHs256(token.split('.')[0] & ".tampered." & token.split('.')[2], secret)
   let noneToken =
     base64UrlEncode($(%*{"alg": "none", "typ": "JWT"})) & "." &
     base64UrlEncode($(%*{"sub": "ada"})) & "."
@@ -213,21 +214,19 @@ block jwtExpiredRejected:
   doAssertRaises ValueError:
     discard verifyJwtHs256(signTestJwt(past, secret), secret)
   let future = %*{"sub": "ada", "iat": now, "exp": now + 3600}
-  doAssert verifyJwtHs256(signTestJwt(future, secret), secret)["sub"].getStr() ==
-    "ada"
+  doAssert verifyJwtHs256(signTestJwt(future, secret), secret)["sub"].getStr() == "ada"
 
 block jwtMiddlewareAcceptsBearerJwt:
   let secret = "demo-secret-change-me"
   let app = initFastNim(logs = false)
   app.installPlugin(
-    authPlugin(
-      initAuthOptions(schemes = {AuthScheme.Jwt}, jwtSecrets = @[secret])
-    )
+    authPlugin(initAuthOptions(schemes = {AuthScheme.Jwt}, jwtSecrets = @[secret]))
   )
   app.get("/me"):
     json(%*{"user": request.authSubject(), "scheme": request.authScheme()})
   let token = issueJwtHs256("ada", secret)
-  let response = app.handleSync(initRequest(HttpMethod.Get, "/me", bearerHeaders(token)))
+  let response =
+    app.handleSync(initRequest(HttpMethod.Get, "/me", bearerHeaders(token)))
   doAssert response.status == 200
   doAssert response.body == "{\"user\":\"ada\",\"scheme\":\"jwt\"}"
   doAssert app.handleSync(initRequest(HttpMethod.Get, "/me")).status == 401
@@ -272,9 +271,7 @@ block sessionMiddlewareFlow:
   app.installPlugin(
     authPlugin(
       initAuthOptions(
-        schemes = {AuthScheme.Session},
-        sessionStore = store,
-        excludePaths = @["/login"],
+        schemes = {AuthScheme.Session}, sessionStore = store, excludePaths = @["/login"]
       )
     )
   )

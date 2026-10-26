@@ -72,8 +72,10 @@ pageRouter.get("/users/{name}"):
 proc ssrMain(name: string, auth: bool): string =
   let authImports = if auth: "import auth\nimport routes/auth as auth_routes\n" else: ""
   let authSetup =
-    if auth: "api.installPlugin(authentication())\napi.addRouter(auth_routes.authRouter)\n"
-    else: ""
+    if auth:
+      "api.installPlugin(authentication())\napi.addRouter(auth_routes.authRouter)\n"
+    else:
+      ""
   """## """ & name & """ - FastNim + Karax SSR.
 ##
 ## Run with: nim c -r --path:src src/main.nim
@@ -81,7 +83,8 @@ proc ssrMain(name: string, auth: bool): string =
 import chronos
 
 import fastnim
-""" & authImports & """
+""" &
+    authImports & """
 import routes/pages
 
 let api = initFastNim()
@@ -177,7 +180,8 @@ nim c -r --path:src src/main.nim
 ```
 
 Open http://127.0.0.1:8000 and http://127.0.0.1:8000/users/Ada.
-""" & authDocs & """
+""" &
+    authDocs & """
 
 ## Test
 

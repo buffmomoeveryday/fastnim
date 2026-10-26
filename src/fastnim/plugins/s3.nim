@@ -9,7 +9,11 @@ import chronos/apps/http/httpclient
 import nimcrypto/[sha2, hmac]
 
 import
-  ../context/state, ../params/multipart, ../params/uploadsink, ../plugin, ../routing/router
+  ../context/state,
+  ../params/multipart,
+  ../params/uploadsink,
+  ../plugin,
+  ../routing/router
 from ../context/http import Request
 
 const
@@ -422,7 +426,8 @@ proc signedRequest(
     bodyBytes[i] = byte(ch)
   let addressResult = getHttpAddress(target)
   if addressResult.isErr:
-    raise newException(IOError, "unable to construct S3 request: " & $addressResult.error)
+    raise
+      newException(IOError, "unable to construct S3 request: " & $addressResult.error)
   let request = HttpClientRequestRef.new(
     session, addressResult.get(), httpMethod, headers = headers, body = bodyBytes
   )

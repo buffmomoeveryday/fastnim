@@ -7,7 +7,7 @@ let fixtureDir = projectDir / "tests" / "compile_fail"
 proc checkCompileFailure(fileName, expectedMessage: string) =
   let command =
     quoteShell(getCurrentCompilerExe()) & " check --hints:off --path:" &
-      quoteShell(sourceDir) & " " & quoteShell(fixtureDir / fileName)
+    quoteShell(sourceDir) & " " & quoteShell(fixtureDir / fileName)
   let (output, exitCode) = execCmdEx(command)
   check exitCode != 0
   check expectedMessage in output
@@ -24,6 +24,4 @@ suite "dependency compile-time validation":
     )
 
   test "rejects a provider with the wrong type":
-    checkCompileFailure(
-      "tdependency_wrong_provider.nim", "expected 'int'"
-    )
+    checkCompileFailure("tdependency_wrong_provider.nim", "expected 'int'")

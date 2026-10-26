@@ -11,12 +11,7 @@ suite "Typed path parameters":
     router.patch("/{id:int}/status"):
       %*{"id": id, "raw": request.pathParam("id")}
     router.get("/{page:positiveInt}/{enabled:bool}/{format:string}/{tags:csv}"):
-      %*{
-        "page": page,
-        "enabled": enabled,
-        "format": format,
-        "tags": tags,
-      }
+      %*{"page": page, "enabled": enabled, "format": format, "tags": tags}
 
     let app = initFastNim(logs = false)
     app.addRouter(router)
@@ -25,16 +20,11 @@ suite "Typed path parameters":
     check patched.status == 200
     check patched.json() == %*{"id": 42, "raw": "42"}
 
-    let converted = app.handleSync(
-      initRequest(HttpMethod.Get, "/orders/3/yes/json/red,green,blue")
-    )
+    let converted =
+      app.handleSync(initRequest(HttpMethod.Get, "/orders/3/yes/json/red,green,blue"))
     check converted.status == 200
-    check converted.json() == %*{
-      "page": 3,
-      "enabled": true,
-      "format": "json",
-      "tags": ["red", "green", "blue"],
-    }
+    check converted.json() ==
+      %*{"page": 3, "enabled": true, "format": "json", "tags": ["red", "green", "blue"]}
 
   test "does not invoke handlers for invalid converted values":
     var calls = 0
@@ -81,7 +71,8 @@ suite "Typed path parameters":
 
   test "rejects invalid path declarations":
     let app = initFastNim(logs = false)
-    let handler: SyncRouteHandler = proc(request: Request): Response = text("never")
+    let handler: SyncRouteHandler = proc(request: Request): Response =
+      text("never")
 
     expect ValueError:
       app.addRoute(HttpMethod.Get, "/items/{id:float}", handler)
@@ -104,8 +95,7 @@ suite "Typed path parameters":
     let document = app.openApiDocument()
     check "/items/{id}" in document["paths"]
     check "/items/{id:int}" notin document["paths"]
-    let intSchema =
-      document["paths"]["/items/{id}"]["get"]["parameters"][0]["schema"]
+    let intSchema = document["paths"]["/items/{id}"]["get"]["parameters"][0]["schema"]
     check intSchema["type"].getStr() == "integer"
     let positiveSchema =
       document["paths"]["/pages/{page}"]["get"]["parameters"][0]["schema"]

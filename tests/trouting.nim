@@ -31,9 +31,10 @@ block responseReturnSyntax:
   app.get("/items/{itemId}"):
     if request.pathParam("itemId") == "missing":
       return (notFound, %*{"detail": "item not found"})
-    return (200, %*{
-      "itemId": request.pathParam("itemId"), "page": request.queryParam("page", "1"),
-    })
+    return (
+      200,
+      %*{"itemId": request.pathParam("itemId"), "page": request.queryParam("page", "1")},
+    )
 
   let found = app.handleSync(initRequest(HttpMethod.Get, "/items/42?page=3"))
   doAssert found.status == 200
@@ -105,6 +106,7 @@ block simplePostBlockBindsRequest:
 block simplePostBlockBindsCtx:
   type Greeting = ref object of RootObj
     message: string
+
   let app = initFastNim()
   app.context.setContext("greeting", Greeting(message: "hi"))
   app.post("/greet"):
@@ -114,9 +116,11 @@ block simplePostBlockBindsCtx:
 block namedTypedPostBody:
   type PItem = object
     name: string
+
   type PCreated = object
     id: int
     name: string
+
   let app = initFastNim()
   app.post("/items", body = PItem, responses = @[(201, PCreated)]):
     created PCreated(id: 1, name: body.name)
@@ -129,16 +133,23 @@ block namedTypedPostBody:
 
 block customNotFoundHandler:
   let app = initFastNim()
-  app.onError(404, proc(request: Request): Response = text(statusNotFound, "Route not found: " & request.path))
+  app.onError(
+    404,
+    proc(request: Request): Response =
+      text(statusNotFound, "Route not found: " & request.path),
+  )
   let response = app.handleSync(initRequest(HttpMethod.Get, "/missing"))
   doAssert response.status == 404
   doAssert response.body == "Route not found: /missing"
 
 block customInternalServerErrorHandler:
   let app = initFastNim()
-  app.errorHandlers[500] = proc(request: Request): Response = text(statusInternalServerError, "Oops")
-  app.get("/fail", proc(request: Request): Response =
-    raise newException(ValueError, "test error")
+  app.errorHandlers[500] = proc(request: Request): Response =
+    text(statusInternalServerError, "Oops")
+  app.get(
+    "/fail",
+    proc(request: Request): Response =
+      raise newException(ValueError, "test error"),
   )
   let response = app.handleSync(initRequest(HttpMethod.Get, "/fail"))
   doAssert response.status == 500

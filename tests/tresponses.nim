@@ -36,8 +36,11 @@ type
       strVal: string
 
 let app = initFastNim()
-app.get("/items", responses = @[(200, Success), (400, Failure)]):
+app.get("/items", responses = @[ok, Success, badRequest, Failure]):
   ok Success(id: 1)
+
+app.get("/items/named-tuple", responses = @[(ok, Success), (notFound, Failure)]):
+  notFound Failure(detail: "missing")
 
 app.get("/items/return", responses = @[(200, Success)]):
   return (ok, Success(id: 2))
@@ -52,6 +55,12 @@ block declaredSuccessResponse:
   let response = app.handleSync(initRequest(HttpMethod.Get, "/items"))
   doAssert response.status == 200
   doAssert response.body == "{\"id\":1}"
+  let missing = app.handleSync(initRequest(HttpMethod.Get, "/items/named-tuple"))
+  doAssert missing.status == 404
+  doAssert missing.body == """{"detail":"missing"}"""
+  let operation = app.openApiDocument()["paths"]["/items"]["get"]
+  doAssert "200" in operation["responses"]
+  doAssert "400" in operation["responses"]
 
 block namedHttpStatusCodes:
   doAssert statusCode(statusCreated) == 201
@@ -82,9 +91,8 @@ block responseHeadersRetainRepeatedValues:
   response.addHeader("Set-Cookie", "theme=dark; Path=/")
   response.addHeader("set-cookie", "session=abc; HttpOnly")
   doAssert response.headers["SET-COOKIE"] == "session=abc; HttpOnly"
-  doAssert response.getAllHeaders("Set-Cookie") == @[
-    "theme=dark; Path=/", "session=abc; HttpOnly"
-  ]
+  doAssert response.getAllHeaders("Set-Cookie") ==
+    @["theme=dark; Path=/", "session=abc; HttpOnly"]
   var cookies: seq[string]
   for name, value in response.headers:
     if name == "set-cookie":
@@ -100,9 +108,8 @@ block requestHeadersRetainRepeatedValues:
   headers.addHeader("warning", "299 second warning")
   let request = initRequest(HttpMethod.Get, "/", headers)
   doAssert request.headers["WARNING"] == "299 second warning"
-  doAssert request.getAllHeaders("Warning") == @[
-    "199 first warning", "299 second warning"
-  ]
+  doAssert request.getAllHeaders("Warning") ==
+    @["199 first warning", "299 second warning"]
 
 block legacyHeaderTablesRemainAccepted:
   var headers = initTable[string, string]()
@@ -139,11 +146,12 @@ block invalidJsonBody:
   let response =
     app.handleSync(initRequest(HttpMethod.Post, "/items/from-body", body = "not json"))
   doAssert response.status == 400
-  doAssert parseJson(response.body) == %*{
-    "code": "invalid_request_body",
-    "message": "invalid JSON request body",
-    "fields": {},
-  }
+  doAssert parseJson(response.body) ==
+    %*{
+      "code": "invalid_request_body",
+      "message": "invalid JSON request body",
+      "fields": {},
+    }
 
 block jsonNameEncodesAndDecodesRequestBodies:
   let helper = initFastNim(logs = false)
@@ -172,9 +180,7 @@ block jsonNameAppliesToTypedResponses:
 
 block jsonNameRejectsAmbiguousInput:
   let helper = initFastNim(logs = false)
-  helper.post(
-    "/profile", body = RenamedProfile, responses = @[(200, RenamedProfile)]
-  ):
+  helper.post("/profile", body = RenamedProfile, responses = @[(200, RenamedProfile)]):
     ok body
 
   let response = helper.handleSync(
@@ -231,10 +237,9 @@ block responseFieldOverridesWorkInTypedRoutes:
   doAssert "boolVal" notin stringProperties
   doAssert stringProperties["strVal"]["type"].getStr == "string"
 
-type
-  Member = object
-    name: string
-    age: int
+type Member = object
+  name: string
+  age: int
 
 block jsonHelperSerializesValues:
   let helper = initFastNim(logs = false)

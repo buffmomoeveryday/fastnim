@@ -63,10 +63,7 @@ proc initMqttOptions*(
   if maxPacketSize <= 0:
     raise newException(ValueError, "MQTT maximum packet size must be positive")
   MqttOptions(
-    address: address,
-    port: port,
-    versions: versions,
-    maxPacketSize: maxPacketSize,
+    address: address, port: port, versions: versions, maxPacketSize: maxPacketSize
   )
 
 proc mqttPlugin*(options = initMqttOptions()): Plugin =
@@ -75,9 +72,7 @@ proc mqttPlugin*(options = initMqttOptions()): Plugin =
     MqttPluginName,
     "0.1.0",
     proc(app: Application) =
-      let runtime = MqttRuntime(
-        options: options, routes: @[], broker: newMqttBroker()
-      )
+      let runtime = MqttRuntime(options: options, routes: @[], broker: newMqttBroker())
       app.pluginContext(MqttPluginName).setContext(MqttRuntimeKey, runtime),
   )
 
@@ -114,9 +109,7 @@ proc replaceMqttNames(
     return node
   result = copyNimNode(node)
   for child in node:
-    result.add(
-      replaceMqttNames(child, messageParam, connectionParam, contextParam)
-    )
+    result.add(replaceMqttNames(child, messageParam, connectionParam, contextParam))
 
 macro mqtt*(app: Application, pattern: typed, body: untyped): untyped =
   ## Registers an asynchronous MQTT PUBLISH route.
@@ -128,10 +121,8 @@ macro mqtt*(app: Application, pattern: typed, body: untyped): untyped =
   let connectionParam = genSym(nskParam, "connection")
   let contextParam = genSym(nskParam, "ctx")
   let handler = genSym(nskLet, "mqttHandler")
-  let handlerBody = replaceMqttNames(
-    body, messageParam, connectionParam, contextParam
-  )
-  result = quote do:
+  let handlerBody = replaceMqttNames(body, messageParam, connectionParam, contextParam)
+  result = quote:
     let `handler`: MqttHandler = proc(
         `messageParam`: MqttMessage,
         `connectionParam`: MqttConnection,
@@ -165,7 +156,8 @@ proc readByte(cursor: var PacketCursor): byte =
 
 proc readUint16(cursor: var PacketCursor): uint16 =
   cursor.require(2)
-  result = (uint16(cursor.data[cursor.position]) shl 8) or
+  result =
+    (uint16(cursor.data[cursor.position]) shl 8) or
     uint16(cursor.data[cursor.position + 1])
   cursor.position += 2
 
@@ -227,8 +219,7 @@ proc parseConnect(packet: MqttPacket, options: MqttOptions): MqttConnection =
     raise newException(MqttProtocolError, "MQTT protocol version is disabled")
 
   let flags = int(cursor.readByte())
-  if (flags and 0x01) != 0 or
-      ((flags and 0x40) != 0 and (flags and 0x80) == 0):
+  if (flags and 0x01) != 0 or ((flags and 0x40) != 0 and (flags and 0x80) == 0):
     raise newException(MqttProtocolError, "invalid MQTT CONNECT flags")
   discard cursor.readUint16()
   if version == MqttVersion.V5:
@@ -334,12 +325,18 @@ proc parseSubscribe(
         raise newException(MqttProtocolError, "invalid MQTT subscription options")
     elif (options and 0xFC) != 0:
       raise newException(MqttProtocolError, "invalid MQTT subscription options")
-    result.subscriptions.add(MqttSubscriptionRequest(
-      filter: filter,
-      noLocal: version == MqttVersion.V5 and (options and 0x04) != 0,
-      retainAsPublished: version == MqttVersion.V5 and (options and 0x08) != 0,
-      retainHandling: if version == MqttVersion.V5: (options shr 4) and 0x03 else: 0,
-    ))
+    result.subscriptions.add(
+      MqttSubscriptionRequest(
+        filter: filter,
+        noLocal: version == MqttVersion.V5 and (options and 0x04) != 0,
+        retainAsPublished: version == MqttVersion.V5 and (options and 0x08) != 0,
+        retainHandling:
+          if version == MqttVersion.V5:
+            (options shr 4) and 0x03
+          else:
+            0,
+      )
+    )
   if result.subscriptions.len == 0:
     raise newException(MqttProtocolError, "MQTT SUBSCRIBE payload cannot be empty")
 
@@ -349,13 +346,11 @@ proc addRemainingLength(packet: var seq[byte], length: int) =
   except ValueError:
     raiseAssert "validated MQTT packet exceeded the protocol packet limit"
 
-proc subscribeAck(
-    packetId: uint16, count: int, version: MqttVersion
-): seq[byte] =
+proc subscribeAck(packetId: uint16, count: int, version: MqttVersion): seq[byte] =
   var body = @[byte(packetId shr 8), byte(packetId and 0xFF)]
   if version == MqttVersion.V5:
     body.add(0'u8)
-  for _ in 0..<count:
+  for _ in 0 ..< count:
     body.add(0'u8)
   result = @[0x90'u8]
   result.addRemainingLength(body.len)
@@ -396,9 +391,7 @@ proc processPacket(
     packet: MqttPacket,
     state: MqttConnectionState,
     runtime: MqttRuntime,
-): Future[bool] {.
-    async: (raises: [CancelledError, TransportError, MqttProtocolError])
-.} =
+): Future[bool] {.async: (raises: [CancelledError, TransportError, MqttProtocolError]).} =
   let packetType = int(packet.fixedHeader shr 4)
   if state.peer.connection.isNil:
     state.peer.connection = parseConnect(packet, runtime.options)
@@ -421,18 +414,20 @@ proc processPacket(
     let acknowledgment = publishAck(message, state.peer.connection, decision)
     if acknowledgment.len > 0:
       await state.peer.writePacket(acknowledgment)
-    result = decision.kind == MqttDecisionKind.Accepted or
-      (state.peer.connection.version == MqttVersion.V5 and
-        message.qos != MqttQoS.AtMostOnce)
+    result =
+      decision.kind == MqttDecisionKind.Accepted or (
+        state.peer.connection.version == MqttVersion.V5 and
+        message.qos != MqttQoS.AtMostOnce
+      )
   of 8:
     let parsed = parseSubscribe(packet, state.peer.connection.version)
     var newlyAdded: seq[bool]
     for subscription in parsed.subscriptions:
-      newlyAdded.add(state.peer.subscribe(
-        subscription.filter,
-        subscription.noLocal,
-        subscription.retainAsPublished,
-      ))
+      newlyAdded.add(
+        state.peer.subscribe(
+          subscription.filter, subscription.noLocal, subscription.retainAsPublished
+        )
+      )
     await state.peer.writePacket(
       subscribeAck(
         parsed.packetId, parsed.subscriptions.len, state.peer.connection.version
@@ -464,9 +459,7 @@ proc processPacket(
   else:
     raise newException(MqttProtocolError, "unsupported MQTT control packet")
 
-proc serveMqtt*(
-    app: Application, address = "", port: uint16 = 0
-): MqttServer =
+proc serveMqtt*(app: Application, address = "", port: uint16 = 0): MqttServer =
   ## Starts the installed MQTT plugin's Chronos TCP listener.
   app.load()
   let runtime = app.mqttRuntime()
@@ -498,9 +491,8 @@ proc serveMqtt*(
       runtime.broker.remove(state.peer)
       await client.closeWait()
 
-  let stream = createStreamServer(
-    initTAddress(selectedAddress, Port(selectedPort)), callback
-  )
+  let stream =
+    createStreamServer(initTAddress(selectedAddress, Port(selectedPort)), callback)
   stream.start()
   MqttServer(stream: stream)
 

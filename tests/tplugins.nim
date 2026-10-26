@@ -55,9 +55,9 @@ block ordersMiddlewareByPhaseAndPriority:
       order.add("default")
     await next(request)
   middleware firstOrderMiddleware:
-      {.cast(gcsafe).}:
-        order.add("first")
-      await next(request)
+    {.cast(gcsafe).}:
+      order.add("first")
+    await next(request)
   app.addMiddleware(defaultOrderMiddleware)
   app.addMiddleware(firstOrderMiddleware, priority = -10)
   app.get("/"):
@@ -67,7 +67,9 @@ block ordersMiddlewareByPhaseAndPriority:
 
 block rateLimitPluginBlocksAndDocuments:
   let app = initFastNim(logs = false)
-  app.installPlugin(rateLimitPlugin(initRateLimitOptions(limit = 1, windowSeconds = 60)))
+  app.installPlugin(
+    rateLimitPlugin(initRateLimitOptions(limit = 1, windowSeconds = 60))
+  )
   app.get("/items", responses = @[(200, string)]):
     "ok"
   let first = app.handleSync(initRequest(HttpMethod.Get, "/items"))

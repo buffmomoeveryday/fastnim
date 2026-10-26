@@ -15,9 +15,7 @@ type ProfileForm = object
 block decodesUrlEncodedFields:
   var form: LoginForm
   let request = initRequest(
-    HttpMethod.Post,
-    "/login",
-    body = "username=Ada+Lovelace&attempts=2&remember=true",
+    HttpMethod.Post, "/login", body = "username=Ada+Lovelace&attempts=2&remember=true"
   )
   doAssert parseFormBody(request, form)
   doAssert form.username == "Ada Lovelace"
@@ -31,20 +29,13 @@ block rejectsInvalidTypedFields:
 
 block requiresNonOptionalFields:
   var form: LoginForm
-  let request = initRequest(
-    HttpMethod.Post,
-    "/login",
-    body = "username=Ada&attempts=2",
-  )
+  let request = initRequest(HttpMethod.Post, "/login", body = "username=Ada&attempts=2")
   doAssert not parseFormBody(request, form)
 
 block honorsRenamedAndOptionalFields:
   var form: ProfileForm
-  let request = initRequest(
-    HttpMethod.Post,
-    "/profile",
-    body = "display_name=Ada&age=36",
-  )
+  let request =
+    initRequest(HttpMethod.Post, "/profile", body = "display_name=Ada&age=36")
   doAssert parseFormBody(request, form)
   doAssert form.displayName == "Ada"
   doAssert form.age == 36
@@ -53,9 +44,7 @@ block honorsRenamedAndOptionalFields:
 block decodesPresentOptionalFields:
   var form: ProfileForm
   let request = initRequest(
-    HttpMethod.Post,
-    "/profile",
-    body = "display_name=Ada&age=36&note=engineer",
+    HttpMethod.Post, "/profile", body = "display_name=Ada&age=36&note=engineer"
   )
   doAssert parseFormBody(request, form)
   doAssert form.note == some("engineer")
@@ -67,9 +56,7 @@ block bindsTypedFormsInPostRoutes:
 
   let response = app.handleSync(
     initRequest(
-      HttpMethod.Post,
-      "/login",
-      body = "username=Ada&attempts=1&remember=false",
+      HttpMethod.Post, "/login", body = "username=Ada&attempts=1&remember=false"
     )
   )
   doAssert response.status == 200
@@ -80,17 +67,12 @@ block rejectsMissingRequiredFieldsInTypedRoutes:
   app.post("/profile", form = ProfileForm, responses = @[(200, ProfileForm)]):
     respondOk(form)
 
-  let missing = app.handleSync(
-    initRequest(HttpMethod.Post, "/profile", body = "display_name=Ada")
-  )
+  let missing =
+    app.handleSync(initRequest(HttpMethod.Post, "/profile", body = "display_name=Ada"))
   doAssert missing.status == 400
 
   let valid = app.handleSync(
-    initRequest(
-      HttpMethod.Post,
-      "/profile",
-      body = "display_name=Ada&age=36",
-    )
+    initRequest(HttpMethod.Post, "/profile", body = "display_name=Ada&age=36")
   )
   doAssert valid.status == 200
   doAssert parseJson(valid.body) ==

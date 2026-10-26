@@ -110,7 +110,8 @@ func tlsEnabled*(options: GrpcOptions): bool =
   options.tls.certificate != nil and options.tls.privateKey != nil
 
 proc initGrpcOptions*(
-    address = "127.0.0.1", port: uint16 = 50051,
+    address = "127.0.0.1",
+    port: uint16 = 50051,
     maxMessageSize = 4 * 1024 * 1024,
     tls = GrpcTlsConfig(),
 ): GrpcOptions =
@@ -121,9 +122,7 @@ proc initGrpcOptions*(
     raise newException(ValueError, "gRPC maximum message size must be positive")
   if (tls.certificate == nil) != (tls.privateKey == nil):
     raise newException(ValueError, "gRPC TLS requires both certificate and key")
-  GrpcOptions(
-    address: address, port: port, maxMessageSize: maxMessageSize, tls: tls
-  )
+  GrpcOptions(address: address, port: port, maxMessageSize: maxMessageSize, tls: tls)
 
 proc grpcPlugin*(options = initGrpcOptions()): Plugin =
   ## Creates the native unary and streaming gRPC plugin.
@@ -146,14 +145,11 @@ proc grpcRuntime(app: Application): GrpcRuntime =
   pluginCtx.get(GrpcRuntimeKey, GrpcRuntime)
 
 proc addGrpcRoute*(
-    app: Application, path: string, kind: GrpcRouteKind,
-    handler: GrpcRawStreamHandler,
+    app: Application, path: string, kind: GrpcRouteKind, handler: GrpcRawStreamHandler
 ) =
   ## Registers a compiled gRPC handler.
   if path.len < 4 or path[0] != '/' or path.count('/') != 2:
-    raise newException(
-      ValueError, "gRPC paths must use /package.Service/Method"
-    )
+    raise newException(ValueError, "gRPC paths must use /package.Service/Method")
   if handler.isNil:
     raise newException(ValueError, "gRPC route handler cannot be nil")
   let runtime = app.grpcRuntime()
@@ -179,9 +175,7 @@ template checkedGrpcResponse*[T](model: T): seq[byte] =
 
 proc encodeReturns(node, responseType: NimNode): NimNode =
   if node.kind == nnkReturnStmt and node.len == 1:
-    let encoder = newTree(
-      nnkBracketExpr, ident("checkedGrpcResponse"), responseType
-    )
+    let encoder = newTree(nnkBracketExpr, ident("checkedGrpcResponse"), responseType)
     return newTree(nnkReturnStmt, newCall(encoder, node[0]))
   result = copyNimNode(node)
   for child in node:
@@ -239,30 +233,28 @@ macro grpc*(app: Application, path: typed, args: varargs[untyped]): untyped =
   let receiveParam = genSym(nskParam, "receive")
   let sendParam = genSym(nskParam, "send")
   let incoming = genSym(nskLet, "incoming")
-  var rewritten = encodeReturns(
-    replaceGrpcNames(routeBody, requestParam, callParam), responseType
-  )
+  var rewritten =
+    encodeReturns(replaceGrpcNames(routeBody, requestParam, callParam), responseType)
   let finalExpression = rewritten[^1]
   if finalExpression.kind != nnkReturnStmt:
     rewritten.del(rewritten.len - 1)
-    rewritten.add(quote do:
-      let `responseParam`: `responseType` = `finalExpression`
-      return encodeProtobuf(`responseParam`)
+    rewritten.add(
+      quote do:
+        let `responseParam`: `responseType` = `finalExpression`
+        return encodeProtobuf(`responseParam`)
     )
 
-  result = quote do:
+  result = quote:
     validateGrpcContract(
       `resolvedProtoPath`, `path`, `requestType`, `responseType`, false, false
     )
     let `unaryHandler`: GrpcRawHandler = proc(
         `callParam`: GrpcCall, `payloadParam`: seq[byte]
     ): Future[seq[byte]] {.async: (raises: [CatchableError]).} =
-      let `requestParam`: `requestType` =
-        decodeProtobuf(`payloadParam`, `requestType`)
+      let `requestParam`: `requestType` = decodeProtobuf(`payloadParam`, `requestType`)
       `rewritten`
     let `handler`: GrpcRawStreamHandler = proc(
-        `callParam`: GrpcCall, `receiveParam`: GrpcRawReceive,
-        `sendParam`: GrpcRawSend,
+        `callParam`: GrpcCall, `receiveParam`: GrpcRawReceive, `sendParam`: GrpcRawSend
     ): Future[void] {.async: (raises: [CatchableError]).} =
       let `incoming` = await `receiveParam`()
       if `incoming`.isNone:
@@ -271,14 +263,14 @@ macro grpc*(app: Application, path: typed, args: varargs[untyped]): untyped =
         let response = await `unaryHandler`(`callParam`, `incoming`.get())
         await `sendParam`(response)
       if (await `receiveParam`()).isSome:
-        raise grpcError(
-          GrpcStatus.InvalidArgument, "unary RPC received multiple messages"
-        )
+        raise
+          grpcError(GrpcStatus.InvalidArgument, "unary RPC received multiple messages")
     addGrpcRoute(`app`, `path`, GrpcRouteKind.Unary, `handler`)
 
 proc parseStreamingArgs(
-    path: NimNode, args: NimNode, requestType, responseType, protoPath,
-    routeBody: var NimNode,
+    path: NimNode,
+    args: NimNode,
+    requestType, responseType, protoPath, routeBody: var NimNode,
 ) {.compileTime.} =
   for argument in args:
     if argument.kind == nnkExprEqExpr:
@@ -304,9 +296,7 @@ proc parseStreamingArgs(
   if routeBody.kind != nnkStmtList:
     error("gRPC streaming routes require a handler block", path)
 
-proc replaceStreamNames(
-    node, requestParam, streamParam, callParam: NimNode
-): NimNode =
+proc replaceStreamNames(node, requestParam, streamParam, callParam: NimNode): NimNode =
   if node.kind == nnkIdent:
     if eqIdent(node, "request") and requestParam.kind != nnkEmpty:
       return requestParam
@@ -339,16 +329,13 @@ macro grpcServerStream*(
   let streamParam = genSym(nskLet, "stream")
   let incoming = genSym(nskLet, "incoming")
   let handler = genSym(nskLet, "grpcServerStreamHandler")
-  let boundBody = replaceStreamNames(
-    routeBody, requestParam, streamParam, callParam
-  )
-  result = quote do:
+  let boundBody = replaceStreamNames(routeBody, requestParam, streamParam, callParam)
+  result = quote:
     validateGrpcContract(
       `resolvedProtoPath`, `path`, `requestType`, `responseType`, false, true
     )
     let `handler`: GrpcRawStreamHandler = proc(
-        `callParam`: GrpcCall, `receiveParam`: GrpcRawReceive,
-        `sendParam`: GrpcRawSend,
+        `callParam`: GrpcCall, `receiveParam`: GrpcRawReceive, `sendParam`: GrpcRawSend
     ): Future[void] {.async: (raises: [CatchableError]).} =
       let `incoming` = await `receiveParam`()
       if `incoming`.isNone:
@@ -357,16 +344,12 @@ macro grpcServerStream*(
         decodeProtobuf(`incoming`.get(), `requestType`)
       if (await `receiveParam`()).isSome:
         raise grpcError(
-          GrpcStatus.InvalidArgument,
-          "server-streaming RPC received multiple requests",
+          GrpcStatus.InvalidArgument, "server-streaming RPC received multiple requests"
         )
-      let `streamParam` = initGrpcStream[`requestType`, `responseType`](
-        `receiveParam`, `sendParam`
-      )
+      let `streamParam` =
+        initGrpcStream[`requestType`, `responseType`](`receiveParam`, `sendParam`)
       `boundBody`
-    addGrpcRoute(
-      `app`, `path`, GrpcRouteKind.ServerStreaming, `handler`
-    )
+    addGrpcRoute(`app`, `path`, GrpcRouteKind.ServerStreaming, `handler`)
 
 macro grpcClientStream*(
     app: Application, path: typed, args: varargs[untyped]
@@ -384,26 +367,20 @@ macro grpcClientStream*(
   let streamParam = genSym(nskLet, "stream")
   let responseParam = genSym(nskLet, "response")
   let handler = genSym(nskLet, "grpcClientStreamHandler")
-  let boundBody = replaceStreamNames(
-    routeBody, newEmptyNode(), streamParam, callParam
-  )
-  result = quote do:
+  let boundBody = replaceStreamNames(routeBody, newEmptyNode(), streamParam, callParam)
+  result = quote:
     validateGrpcContract(
       `resolvedProtoPath`, `path`, `requestType`, `responseType`, true, false
     )
     let `handler`: GrpcRawStreamHandler = proc(
-        `callParam`: GrpcCall, `receiveParam`: GrpcRawReceive,
-        `sendParam`: GrpcRawSend,
+        `callParam`: GrpcCall, `receiveParam`: GrpcRawReceive, `sendParam`: GrpcRawSend
     ): Future[void] {.async: (raises: [CatchableError]).} =
-      let `streamParam` = initGrpcStream[`requestType`, `responseType`](
-        `receiveParam`, `sendParam`
-      )
+      let `streamParam` =
+        initGrpcStream[`requestType`, `responseType`](`receiveParam`, `sendParam`)
       let `responseParam`: `responseType` = block:
         `boundBody`
       await `sendParam`(encodeProtobuf(`responseParam`))
-    addGrpcRoute(
-      `app`, `path`, GrpcRouteKind.ClientStreaming, `handler`
-    )
+    addGrpcRoute(`app`, `path`, GrpcRouteKind.ClientStreaming, `handler`)
 
 macro grpcBidirectionalStream*(
     app: Application, path: typed, args: varargs[untyped]
@@ -423,24 +400,18 @@ macro grpcBidirectionalStream*(
   let sendParam = genSym(nskParam, "send")
   let streamParam = genSym(nskLet, "stream")
   let handler = genSym(nskLet, "grpcBidirectionalHandler")
-  let boundBody = replaceStreamNames(
-    routeBody, newEmptyNode(), streamParam, callParam
-  )
-  result = quote do:
+  let boundBody = replaceStreamNames(routeBody, newEmptyNode(), streamParam, callParam)
+  result = quote:
     validateGrpcContract(
       `resolvedProtoPath`, `path`, `requestType`, `responseType`, true, true
     )
     let `handler`: GrpcRawStreamHandler = proc(
-        `callParam`: GrpcCall, `receiveParam`: GrpcRawReceive,
-        `sendParam`: GrpcRawSend,
+        `callParam`: GrpcCall, `receiveParam`: GrpcRawReceive, `sendParam`: GrpcRawSend
     ): Future[void] {.async: (raises: [CatchableError]).} =
-      let `streamParam` = initGrpcStream[`requestType`, `responseType`](
-        `receiveParam`, `sendParam`
-      )
+      let `streamParam` =
+        initGrpcStream[`requestType`, `responseType`](`receiveParam`, `sendParam`)
       `boundBody`
-    addGrpcRoute(
-      `app`, `path`, GrpcRouteKind.BidirectionalStreaming, `handler`
-    )
+    addGrpcRoute(`app`, `path`, GrpcRouteKind.BidirectionalStreaming, `handler`)
 
 template grpcStream*(app, path: untyped, args: varargs[untyped]): untyped =
   ## Short alias for ``grpcBidirectionalStream``.
@@ -455,44 +426,42 @@ proc addUint32(output: var seq[byte], value: uint32) =
 proc readUint32(data: openArray[byte], position: int): uint32 =
   if position < 0 or position + 4 > data.len:
     raise newException(ValueError, "truncated HTTP/2 integer")
-  (uint32(data[position]) shl 24) or
-    (uint32(data[position + 1]) shl 16) or
+  (uint32(data[position]) shl 24) or (uint32(data[position + 1]) shl 16) or
     (uint32(data[position + 2]) shl 8) or uint32(data[position + 3])
 
-proc readExact(connection: GrpcConnection, length: int): Future[seq[byte]] {.
-    async: (raises: [CancelledError, AsyncStreamError, ValueError])
-.} =
+proc readExact(
+    connection: GrpcConnection, length: int
+): Future[seq[byte]] {.async: (raises: [CancelledError, AsyncStreamError, ValueError]).} =
   if length == 0:
     return @[]
   result = await connection.reader.read(length)
   if result.len != length:
     raise newException(ValueError, "unexpected end of HTTP/2 connection")
 
-proc readFrame(connection: GrpcConnection): Future[Http2Frame] {.
+proc readFrame(
+    connection: GrpcConnection
+): Future[Http2Frame] {.
     async: (raises: [CancelledError, AsyncStreamError, ValueError])
 .} =
   let header = await connection.readExact(9)
-  let length =
-    (int(header[0]) shl 16) or (int(header[1]) shl 8) or int(header[2])
+  let length = (int(header[0]) shl 16) or (int(header[1]) shl 8) or int(header[2])
   if length > 16_384:
     raise newException(ValueError, "HTTP/2 frame exceeds advertised maximum")
   result = Http2Frame(
-    kind: header[3], flags: header[4],
+    kind: header[3],
+    flags: header[4],
     streamId: int32(header.readUint32(5) and 0x7fff_ffff'u32),
     payload: await connection.readExact(length),
   )
 
 proc frameBytes(kind, flags: byte, streamId: int32, payload: seq[byte]): seq[byte] =
-  result = @[
-    byte(payload.len shr 16), byte(payload.len shr 8), byte(payload.len),
-    kind, flags,
-  ]
+  result =
+    @[byte(payload.len shr 16), byte(payload.len shr 8), byte(payload.len), kind, flags]
   result.addUint32(uint32(streamId) and 0x7fff_ffff'u32)
   result.add(payload)
 
 proc writeFrame(
-    connection: GrpcConnection, kind, flags: byte, streamId: int32,
-    payload: seq[byte],
+    connection: GrpcConnection, kind, flags: byte, streamId: int32, payload: seq[byte]
 ): Future[void] {.async: (raises: [CancelledError, AsyncStreamError]).} =
   await connection.writeLock.acquire()
   try:
@@ -515,7 +484,7 @@ proc headerFragment(frame: Http2Frame): seq[byte] =
     first += 5
   if first > last:
     raise newException(ValueError, "invalid HTTP/2 header padding")
-  result = frame.payload[first..<last]
+  result = frame.payload[first ..< last]
 
 proc dataFragment(frame: Http2Frame): seq[byte] =
   var first = 0
@@ -527,7 +496,7 @@ proc dataFragment(frame: Http2Frame): seq[byte] =
     last -= int(frame.payload[0])
   if first > last:
     raise newException(ValueError, "invalid HTTP/2 data padding")
-  result = frame.payload[first..<last]
+  result = frame.payload[first ..< last]
 
 proc grpcFrame(payload: seq[byte]): seq[byte] =
   result = @[0'u8]
@@ -539,29 +508,32 @@ proc findRoute(runtime: GrpcRuntime, path: string): GrpcRoute =
     if route.path == path:
       return route
 
-proc sendHeaders(state: GrpcStreamState): Future[void] {.
-    async: (raises: [CancelledError, AsyncStreamError, ValueError])
-.} =
+proc sendHeaders(
+    state: GrpcStreamState
+): Future[void] {.async: (raises: [CancelledError, AsyncStreamError, ValueError]).} =
   if not state.sentHeaders:
-    let headers = state.connection.encoder.encode([
-      (":status", "200"),
-      ("content-type", "application/grpc"),
-      ("grpc-encoding", "identity"),
-    ])
+    let headers = state.connection.encoder.encode(
+      [
+        (":status", "200"),
+        ("content-type", "application/grpc"),
+        ("grpc-encoding", "identity"),
+      ]
+    )
     await state.connection.writeFrame(
       FrameHeaders, FlagEndHeaders, state.streamId, headers
     )
     state.sentHeaders = true
 
-proc sendMessage(state: GrpcStreamState, payload: seq[byte]): Future[void] {.
+proc sendMessage(
+    state: GrpcStreamState, payload: seq[byte]
+): Future[void] {.
     async: (raises: [CancelledError, AsyncStreamError, ValueError, GrpcError])
 .} =
   if state.finished:
     raise newException(ValueError, "cannot send after the gRPC stream finished")
   if payload.len > state.maxMessageSize:
-    raise grpcError(
-      GrpcStatus.ResourceExhausted, "gRPC response exceeds configured limit"
-    )
+    raise
+      grpcError(GrpcStatus.ResourceExhausted, "gRPC response exceeds configured limit")
   await state.sendHeaders()
   let framed = grpcFrame(payload)
   var position = 0
@@ -578,16 +550,14 @@ proc sendMessage(state: GrpcStreamState, payload: seq[byte]): Future[void] {.
     state.connection.connectionWindow -= length
     state.sendWindow -= length
     await state.connection.writeFrame(
-      FrameData, 0, state.streamId, framed[position..<last]
+      FrameData, 0, state.streamId, framed[position ..< last]
     )
     position = last
   inc state.sentMessages
 
 proc finishStream(
     state: GrpcStreamState, status: GrpcStatus, message = ""
-): Future[void] {.
-    async: (raises: [CancelledError, AsyncStreamError, ValueError])
-.} =
+): Future[void] {.async: (raises: [CancelledError, AsyncStreamError, ValueError]).} =
   if state.finished:
     return
   await state.sendHeaders()
@@ -612,9 +582,9 @@ proc runRoute(
     result = await state.input.get()
     if result.isNone:
       inputEnded = true
-  let send: GrpcRawSend = proc(payload: seq[byte]): Future[void] {.
-      async: (raises: [CatchableError])
-  .} =
+  let send: GrpcRawSend = proc(
+      payload: seq[byte]
+  ): Future[void] {.async: (raises: [CatchableError]).} =
     await state.sendMessage(payload)
   try:
     let call = GrpcCall(
@@ -625,9 +595,7 @@ proc runRoute(
     await route.handler(call, receive, send)
     if route.kind in {GrpcRouteKind.Unary, GrpcRouteKind.ClientStreaming} and
         state.sentMessages != 1:
-      raise grpcError(
-        GrpcStatus.Internal, "RPC handler must send exactly one response"
-      )
+      raise grpcError(GrpcStatus.Internal, "RPC handler must send exactly one response")
     await state.finishStream(GrpcStatus.Ok)
   except GrpcError as exc:
     try:
@@ -654,9 +622,7 @@ proc startRoute(
   let contentType = state.headers.getOrDefault("content-type")
   if state.headers.getOrDefault(":method") != "POST" or
       not contentType.startsWith("application/grpc"):
-    await state.finishStream(
-      GrpcStatus.Internal, "invalid gRPC request headers"
-    )
+    await state.finishStream(GrpcStatus.Internal, "invalid gRPC request headers")
     return
   let route = runtime.findRoute(state.headers.getOrDefault(":path"))
   if route.handler.isNil:
@@ -664,43 +630,41 @@ proc startRoute(
     return
   asyncSpawn runRoute(app, route, state)
 
-proc feedMessages(state: GrpcStreamState, data: seq[byte]): Future[void] {.
-    async: (raises: [CancelledError, ProtobufError, ValueError])
-.} =
+proc feedMessages(
+    state: GrpcStreamState, data: seq[byte]
+): Future[void] {.async: (raises: [CancelledError, ProtobufError, ValueError]).} =
   state.body.add(data)
   while state.body.len >= 5:
     if state.body[0] != 0:
-      raise newException(
-        ProtobufError, "compressed gRPC messages are not supported"
-      )
+      raise newException(ProtobufError, "compressed gRPC messages are not supported")
     let length = int(state.body.readUint32(1))
     if length > state.maxMessageSize:
-      raise newException(
-        ProtobufError, "gRPC message exceeds configured limit"
-      )
+      raise newException(ProtobufError, "gRPC message exceeds configured limit")
     if state.body.len < length + 5:
       return
     let payload =
-      if length == 0: @[]
-      else: state.body[5..<length + 5]
+      if length == 0:
+        @[]
+      else:
+        state.body[5 ..< length + 5]
     await state.input.addLast(some(payload))
     if state.body.len == length + 5:
       state.body.setLen(0)
     else:
-      state.body = state.body[length + 5..^1]
+      state.body = state.body[length + 5 ..^ 1]
 
-proc endInput(state: GrpcStreamState): Future[void] {.
-    async: (raises: [CancelledError, ProtobufError])
-.} =
+proc endInput(
+    state: GrpcStreamState
+): Future[void] {.async: (raises: [CancelledError, ProtobufError]).} =
   if state.body.len != 0:
     raise newException(ProtobufError, "truncated gRPC message")
   if not state.endStream:
     state.endStream = true
     await state.input.addLast(none(seq[byte]))
 
-proc abortInput(state: GrpcStreamState): Future[void] {.
-    async: (raises: [CancelledError])
-.} =
+proc abortInput(
+    state: GrpcStreamState
+): Future[void] {.async: (raises: [CancelledError]).} =
   state.body.setLen(0)
   if not state.endStream:
     state.endStream = true
@@ -709,9 +673,7 @@ proc abortInput(state: GrpcStreamState): Future[void] {.
 proc processConnection(
     app: Application, runtime: GrpcRuntime, connection: GrpcConnection
 ): Future[void] {.
-    async: (
-      raises: [CancelledError, AsyncStreamError, ValueError, ProtobufError]
-    )
+    async: (raises: [CancelledError, AsyncStreamError, ValueError, ProtobufError])
 .} =
   let preface = await connection.readExact(Http2Preface.len)
   for index, value in Http2Preface:
@@ -807,9 +769,7 @@ proc processConnection(
           var increment: seq[byte]
           increment.addUint32(uint32(frame.payload.len))
           await connection.writeFrame(FrameWindowUpdate, 0, 0, increment)
-          await connection.writeFrame(
-            FrameWindowUpdate, 0, frame.streamId, increment
-          )
+          await connection.writeFrame(FrameWindowUpdate, 0, frame.streamId, increment)
       of FrameWindowUpdate:
         if frame.payload.len != 4:
           raise newException(ValueError, "invalid HTTP/2 window update")
@@ -845,9 +805,7 @@ proc processConnection(
           discard
     decoder.close()
 
-proc serveGrpc*(
-    app: Application, address = "", port: uint16 = 0
-): GrpcServer =
+proc serveGrpc*(app: Application, address = "", port: uint16 = 0): GrpcServer =
   ## Starts the installed gRPC HTTP/2 listener with configured TLS or h2c.
   app.load()
   let runtime = app.grpcRuntime()
@@ -901,9 +859,8 @@ proc serveGrpc*(
       if not connection.isNil:
         connection.encoder.close()
       await client.closeWait()
-  let stream = createStreamServer(
-    initTAddress(selectedAddress, Port(selectedPort)), callback
-  )
+  let stream =
+    createStreamServer(initTAddress(selectedAddress, Port(selectedPort)), callback)
   stream.start()
   GrpcServer(stream: stream)
 

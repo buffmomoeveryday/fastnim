@@ -46,8 +46,7 @@ block logsDocumentationUrlWhenServerStarts:
   receivedListeningLog = false
   receivedDocsLog = false
   let app = initFastNim(
-    logHandler = startupHandler,
-    openApi = initOpenApiSettings(docsPath = "reference"),
+    logHandler = startupHandler, openApi = initOpenApiSettings(docsPath = "reference")
   )
   let server = app.serve(port = 0)
   waitFor server.stop()

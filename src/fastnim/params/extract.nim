@@ -56,7 +56,10 @@ proc typedPathParam*[T](request: Request, name: string): T =
   elif T is seq[string]:
     result = raw.split(',')
   else:
-    {.error: "typed path parameters support string, int, Positive, bool, and seq[string]".}
+    {.
+      error:
+        "typed path parameters support string, int, Positive, bool, and seq[string]"
+    .}
 
 proc queryParam*(
     request: Request, name: string, default = ""

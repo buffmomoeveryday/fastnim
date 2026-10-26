@@ -66,13 +66,10 @@ when defined(websocketIntegration):
   proc exerciseMessageLimit() {.async: (raises: [CancelledError, Exception]).} =
     rejectedOversizedMessage = false
     let wsLimits = initWebSocketLimits(
-      maxMessageSize = 4,
-      idleTimeout = 1.seconds,
-      heartbeatInterval = InfiniteDuration,
+      maxMessageSize = 4, idleTimeout = 1.seconds, heartbeatInterval = InfiniteDuration
     )
-    let app = initFastNim(
-      logs = false, limits = initRequestLimits(websocket = wsLimits)
-    )
+    let app =
+      initFastNim(logs = false, limits = initRequestLimits(websocket = wsLimits))
     app.websocket("/limited"):
       await websocket.accept()
       try:

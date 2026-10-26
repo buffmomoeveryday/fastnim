@@ -22,10 +22,8 @@ proc addUint32(output: var seq[byte], value: uint32) =
   output.add(byte(value))
 
 proc frame(kind, flags: byte, streamId: int32, payload: seq[byte]): seq[byte] =
-  result = @[
-    byte(payload.len shr 16), byte(payload.len shr 8), byte(payload.len),
-    kind, flags,
-  ]
+  result =
+    @[byte(payload.len shr 16), byte(payload.len shr 8), byte(payload.len), kind, flags]
   result.addUint32(uint32(streamId))
   result.add(payload)
 
@@ -41,57 +39,72 @@ proc readFrame(
     client: StreamTransport
 ): Future[tuple[kind, flags: byte, streamId: int32, payload: seq[byte]]] {.async.} =
   let header = await client.readExact(9)
-  let length =
-    (int(header[0]) shl 16) or (int(header[1]) shl 8) or int(header[2])
+  let length = (int(header[0]) shl 16) or (int(header[1]) shl 8) or int(header[2])
   result.kind = header[3]
   result.flags = header[4]
-  result.streamId =
-    int32((uint32(header[5]) shl 24) or (uint32(header[6]) shl 16) or
-      (uint32(header[7]) shl 8) or uint32(header[8]))
+  result.streamId = int32(
+    (uint32(header[5]) shl 24) or (uint32(header[6]) shl 16) or (
+      uint32(header[7]) shl 8
+    ) or uint32(header[8])
+  )
   result.payload = await client.readExact(length)
 
 proc readFrame(
     reader: AsyncStreamReader
 ): Future[tuple[kind, flags: byte, streamId: int32, payload: seq[byte]]] {.async.} =
   let header = await reader.read(9)
-  let length =
-    (int(header[0]) shl 16) or (int(header[1]) shl 8) or int(header[2])
+  let length = (int(header[0]) shl 16) or (int(header[1]) shl 8) or int(header[2])
   result.kind = header[3]
   result.flags = header[4]
-  result.streamId =
-    int32((uint32(header[5]) shl 24) or (uint32(header[6]) shl 16) or
-      (uint32(header[7]) shl 8) or uint32(header[8]))
-  result.payload = if length == 0: @[] else: await reader.read(length)
+  result.streamId = int32(
+    (uint32(header[5]) shl 24) or (uint32(header[6]) shl 16) or (
+      uint32(header[7]) shl 8
+    ) or uint32(header[8])
+  )
+  result.payload =
+    if length == 0:
+      @[]
+    else:
+      await reader.read(length)
 
 proc grpcMessages(data: var seq[byte]): seq[seq[byte]] =
   while data.len >= 5:
     doAssert data[0] == 0
     let length =
-      (int(data[1]) shl 24) or (int(data[2]) shl 16) or
-      (int(data[3]) shl 8) or int(data[4])
+      (int(data[1]) shl 24) or (int(data[2]) shl 16) or (int(data[3]) shl 8) or
+      int(data[4])
     if data.len < length + 5:
       break
-    result.add(if length == 0: @[] else: data[5 ..< length + 5])
+    result.add(
+      if length == 0:
+        @[]
+      else:
+        data[5 ..< length + 5]
+    )
     if data.len == length + 5:
       data.setLen(0)
     else:
       data = data[length + 5 .. ^1]
 
 proc grpcExchange(
-    client: StreamTransport, path, authority: string, streamId: int32,
+    client: StreamTransport,
+    path, authority: string,
+    streamId: int32,
     requests: seq[seq[byte]],
 ): Future[tuple[responses: seq[seq[byte]], status: string]] {.async.} =
   var encoder = initHpackEncoder()
   var decoder = initHpackDecoder()
   try:
-    let headers = encoder.encode([
-      (":method", "POST"),
-      (":scheme", "http"),
-      (":path", path),
-      (":authority", authority),
-      ("content-type", "application/grpc"),
-      ("te", "trailers"),
-    ])
+    let headers = encoder.encode(
+      [
+        (":method", "POST"),
+        (":scheme", "http"),
+        (":path", path),
+        (":authority", authority),
+        ("content-type", "application/grpc"),
+        ("te", "trailers"),
+      ]
+    )
     discard await client.write(frame(1, 4, streamId, headers))
     var body: seq[byte]
     for request in requests:
@@ -137,10 +150,12 @@ block rejectsInvalidPluginSettings:
 
 block decodesRfcHuffmanHeadersWithoutNativeLibraries:
   var decoder = initHpackDecoder()
-  let fields = decoder.decode(@[
-    0x82'u8, 0x86, 0x84, 0x41, 0x8c, 0xf1, 0xe3, 0xc2, 0xe5,
-    0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
-  ])
+  let fields = decoder.decode(
+    @[
+      0x82'u8, 0x86, 0x84, 0x41, 0x8c, 0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0,
+      0xab, 0x90, 0xf4, 0xff,
+    ]
+  )
   doAssert fields[":method"] == "GET"
   doAssert fields[":scheme"] == "http"
   doAssert fields[":path"] == "/"
@@ -160,16 +175,19 @@ proc grpcClientExchange() {.async.} =
     doAssert settings.kind == 4
 
     let unary = await client.grpcExchange(
-      "/hello.Greeter/SayHello", "127.0.0.1:50186", 1,
+      "/hello.Greeter/SayHello",
+      "127.0.0.1:50186",
+      1,
       @[encodeProtobuf(HelloRequest(name: "Nim", count: 2))],
     )
     doAssert unary.status == "0"
     doAssert unary.responses.len == 1
-    doAssert decodeProtobuf(unary.responses[0], HelloReply).message ==
-      "Hello Nim Nim"
+    doAssert decodeProtobuf(unary.responses[0], HelloReply).message == "Hello Nim Nim"
 
     let serverStream = await client.grpcExchange(
-      "/hello.Greeter/ListHello", "127.0.0.1:50186", 3,
+      "/hello.Greeter/ListHello",
+      "127.0.0.1:50186",
+      3,
       @[encodeProtobuf(HelloRequest(name: "Ada", count: 3))],
     )
     doAssert serverStream.status == "0"
@@ -178,26 +196,30 @@ proc grpcClientExchange() {.async.} =
       "Hello Ada 2"
 
     let largeStream = await client.grpcExchange(
-      "/hello.Greeter/ListHello", "127.0.0.1:50186", 5,
+      "/hello.Greeter/ListHello",
+      "127.0.0.1:50186",
+      5,
       @[encodeProtobuf(HelloRequest(name: "large", count: 1))],
     )
     doAssert largeStream.status == "0"
-    doAssert decodeProtobuf(largeStream.responses[0], HelloReply).message.len ==
-      100_000
+    doAssert decodeProtobuf(largeStream.responses[0], HelloReply).message.len == 100_000
 
     let clientStream = await client.grpcExchange(
-      "/hello.Greeter/CollectHello", "127.0.0.1:50186", 7,
+      "/hello.Greeter/CollectHello",
+      "127.0.0.1:50186",
+      7,
       @[
         encodeProtobuf(HelloRequest(name: "one", count: 1)),
         encodeProtobuf(HelloRequest(name: "two", count: 1)),
       ],
     )
     doAssert clientStream.status == "0"
-    doAssert decodeProtobuf(clientStream.responses[0], HelloReply).message ==
-      "one,two"
+    doAssert decodeProtobuf(clientStream.responses[0], HelloReply).message == "one,two"
 
     let bidi = await client.grpcExchange(
-      "/hello.Greeter/ChatHello", "127.0.0.1:50186", 9,
+      "/hello.Greeter/ChatHello",
+      "127.0.0.1:50186",
+      9,
       @[
         encodeProtobuf(HelloRequest(name: "left", count: 1)),
         encodeProtobuf(HelloRequest(name: "right", count: 1)),
@@ -208,8 +230,7 @@ proc grpcClientExchange() {.async.} =
     doAssert decodeProtobuf(bidi.responses[1], HelloReply).message == "right"
 
     let invalid = await client.grpcExchange(
-      "/hello.Greeter/SayHello", "127.0.0.1:50186", 11,
-      @[@[0x0a'u8]],
+      "/hello.Greeter/SayHello", "127.0.0.1:50186", 11, @[@[0x0a'u8]]
     )
     doAssert invalid.status == $ord(GrpcStatus.InvalidArgument)
   finally:
@@ -236,9 +257,7 @@ block exchangesUnaryGrpcOverHttp2:
       await stream.send(HelloReply(message: repeat('x', 100_000)))
     else:
       for index in 0 ..< request.count:
-        await stream.send(
-          HelloReply(message: "Hello " & request.name & " " & $index)
-        )
+        await stream.send(HelloReply(message: "Hello " & request.name & " " & $index))
 
   app.grpcClientStream(
     "/hello.Greeter/CollectHello",

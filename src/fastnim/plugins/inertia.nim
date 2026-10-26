@@ -113,8 +113,7 @@ proc addVary(response: var Response, name: string) =
 proc requestedProps(request: Request, component: string, props: JsonNode): JsonNode =
   result = newJObject()
   let partialComponent = request.header("x-inertia-partial-component")
-  if not request.isInertiaRequest() or
-      partialComponent != component:
+  if not request.isInertiaRequest() or partialComponent != component:
     return props.copy()
 
   let only = request.header("x-inertia-partial-data")

@@ -5,7 +5,8 @@ type Dependencies = object
 
 let app = initFastNim()
 app.dependencies(Dependencies):
-  provide db: "ready"
+  provide db:
+    "ready"
 
 app.get("/"):
   ctx.get("cache")

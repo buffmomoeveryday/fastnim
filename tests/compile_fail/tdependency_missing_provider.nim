@@ -5,4 +5,5 @@ type Dependencies = object
 
 let app = initFastNim()
 app.dependencies(Dependencies):
-  cleanup db: discard db
+  cleanup db:
+    discard db

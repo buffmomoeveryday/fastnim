@@ -15,9 +15,8 @@ proc sandbox(name: string): string =
 
 proc runInstaller(target: string): tuple[code: int, output: string] =
   ## Runs the skill installer against ``target`` and returns its exit code and output.
-  let (output, code) = execCmdEx(
-    "bash " & quoteShell(installScript) & " " & quoteShell(target)
-  )
+  let (output, code) =
+    execCmdEx("bash " & quoteShell(installScript) & " " & quoteShell(target))
   (code, output)
 
 suite "skill installer":
@@ -30,7 +29,9 @@ suite "skill installer":
       check code == 0
       check "installed the FastNim skill" in output
       check fileExists(target / ".agents" / "skills" / "fastnim" / "SKILL.md")
-      check fileExists(target / ".agents" / "skills" / "fastnim" / "references" / "routing.md")
+      check fileExists(
+        target / ".agents" / "skills" / "fastnim" / "references" / "routing.md"
+      )
       check fileExists(target / "AGENTS.md")
       let agents = readFile(target / "AGENTS.md")
       check "skills/fastnim/SKILL.md" in agents

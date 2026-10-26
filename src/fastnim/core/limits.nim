@@ -49,8 +49,7 @@ type
   SseLimits* = object
     ## Resource limits applied independently to server-sent event routes.
     maxConnections*: int ## Maximum simultaneously active SSE handlers.
-    idleTimeout*: Duration
-      ## Maximum time allowed for an SSE write to make progress.
+    idleTimeout*: Duration ## Maximum time allowed for an SSE write to make progress.
     maxEventSize*: int ## Maximum encoded bytes in one event.
     heartbeatInterval*: Duration
       ## Interval for SSE comment heartbeats; ``InfiniteDuration`` disables them.
@@ -155,16 +154,12 @@ proc validateRequestLimits*(limits: RequestLimits) =
   validateDuration("keep-alive timeout", limits.keepAliveTimeout)
   validateDuration("handler timeout", limits.handlerTimeout)
   discard initSseLimits(
-    limits.sse.maxConnections,
-    limits.sse.idleTimeout,
-    limits.sse.maxEventSize,
+    limits.sse.maxConnections, limits.sse.idleTimeout, limits.sse.maxEventSize,
     limits.sse.heartbeatInterval,
   )
   discard initWebSocketLimits(
-    limits.websocket.maxConnections,
-    limits.websocket.idleTimeout,
-    limits.websocket.maxMessageSize,
-    limits.websocket.heartbeatInterval,
+    limits.websocket.maxConnections, limits.websocket.idleTimeout,
+    limits.websocket.maxMessageSize, limits.websocket.heartbeatInterval,
   )
 
 proc initRequestLimits*(
@@ -252,8 +247,7 @@ proc bodyLimitDetail*(
   if declared.len > 0:
     var size: BiggestInt
     try:
-      if parseBiggestInt(declared, size) == declared.len and
-          size > limits.maxBodySize:
+      if parseBiggestInt(declared, size) == declared.len and size > limits.maxBodySize:
         return BodyTooLargeDetail
     except ValueError:
       discard

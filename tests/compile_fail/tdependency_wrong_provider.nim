@@ -5,4 +5,5 @@ type Dependencies = object
 
 let app = initFastNim()
 app.dependencies(Dependencies):
-  provide retries: "wrong"
+  provide retries:
+    "wrong"

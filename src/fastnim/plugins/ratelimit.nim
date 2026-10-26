@@ -4,7 +4,8 @@ import std/[json, locks, math, strutils, tables, times]
 
 import chronos
 
-import ../context/http, ../context/state, ../params/extract, ../plugin, ../routing/router
+import
+  ../context/http, ../context/state, ../params/extract, ../plugin, ../routing/router
 
 type
   RateLimitKey* = proc(request: Request): string {.closure.}

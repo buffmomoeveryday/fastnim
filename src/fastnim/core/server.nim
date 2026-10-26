@@ -66,8 +66,7 @@ proc bodyReadWait(
     let rateAllowance =
       limits.bodyReadGracePeriod +
       chronosTimer.milliseconds(
-        (int64(budget.bytesRead) + 1) * 1000 div
-          int64(limits.minBodyBytesPerSecond)
+        (int64(budget.bytesRead) + 1) * 1000 div int64(limits.minBodyBytesPerSecond)
       )
     let rateRemaining = rateAllowance - elapsed
     if result.timeout.isInfinite() or rateRemaining < result.timeout:
@@ -82,9 +81,7 @@ proc readBodyChunk(
     limits: RequestLimits,
     maxBytes: int,
 ): Future[string] {.
-    async: (
-      raises: [CancelledError, AsyncStreamError, BodyReadLimitError]
-    )
+    async: (raises: [CancelledError, AsyncStreamError, BodyReadLimitError])
 .} =
   if maxBytes <= 0:
     return ""
@@ -101,7 +98,7 @@ proc readBodyChunk(
       (chronosTimer.Moment.now() - budget.startedAt) - limits.bodyReadGracePeriod
     if measured > chronosTimer.ZeroDuration and
         int64(budget.bytesRead) * 1000 <
-          int64(limits.minBodyBytesPerSecond) * measured.milliseconds:
+        int64(limits.minBodyBytesPerSecond) * measured.milliseconds:
       raiseBodyReadLimit(BodyRateTooLowDetail)
   chunk
 
@@ -117,15 +114,15 @@ proc toFastnimRequest(
     app: Application, request: chronosHttp.HttpRequestRef
 ): Future[IncomingRequest] {.
     async: (
-      raises:
-        [CancelledError, chronosHttp.HttpTransportError,
-          chronosHttp.HttpProtocolError, BodyReadLimitError]
+      raises: [
+        CancelledError, chronosHttp.HttpTransportError, chronosHttp.HttpProtocolError,
+        BodyReadLimitError,
+      ]
     )
 .} =
   let headers = copyHeaders(request)
-  result.request = fastnimHttp.initRequest(
-    toFastnimMethod(request.meth), request.rawPath, headers
-  )
+  result.request =
+    fastnimHttp.initRequest(toFastnimMethod(request.meth), request.rawPath, headers)
   let headerDetail = headerLimitDetail(headers, app.requestLimits)
   if headerDetail.len > 0:
     result.status = 431
@@ -197,16 +194,85 @@ proc toFastnimRequest(
       await reader.closeWait()
     result.request.attachBodySource(newRequestBodySource(read, close))
 
+proc sendCustomStatus(
+    request: chronosHttp.HttpRequestRef, response: fastnimHttp.Response
+): Future[chronosHttp.HttpResponseRef] {.
+    async: (raises: [CancelledError, chronosHttp.HttpWriteError])
+.} =
+  ## Writes a status Chronos has no ``HttpCode`` for, such as HTMX's ``286``.
+  let chronosResponse = request.getResponse()
+  chronosResponse.keepalive = false
+  var raw = $chronosResponse.version & " " & $response.status & " \r\n"
+  var
+    sawDate = false
+    sawType = false
+    sawLength = false
+    sawServer = false
+    sawConnection = false
+  for key, value in response.headers:
+    case key
+    of "date":
+      sawDate = true
+    of "content-type":
+      sawType = true
+    of "content-length":
+      sawLength = true
+    of "server":
+      sawServer = true
+    of "connection":
+      sawConnection = true
+    else:
+      discard
+    raw.add(key)
+    raw.add(": ")
+    raw.add(value)
+    raw.add("\r\n")
+  if not sawDate:
+    raw.add("date: ")
+    raw.add(chronosHttp.httpDate())
+    raw.add("\r\n")
+  if not sawType and response.body.len > 0:
+    raw.add("content-type: text/plain; charset=utf-8\r\n")
+  if not sawLength:
+    raw.add("content-length: ")
+    raw.add($response.body.len)
+    raw.add("\r\n")
+  if not sawServer and chronosResponse.connection.server.serverIdent.len > 0:
+    raw.add("server: ")
+    raw.add(chronosResponse.connection.server.serverIdent)
+    raw.add("\r\n")
+  if not sawConnection:
+    raw.add("connection: close\r\n")
+  raw.add("\r\n")
+  raw.add(response.body)
+  try:
+    await chronosResponse.connection.writer.write(raw)
+  except CancelledError as exc:
+    chronosResponse.state = chronosHttp.HttpResponseState.Cancelled
+    raise exc
+  except AsyncStreamError as exc:
+    chronosResponse.state = chronosHttp.HttpResponseState.Failed
+    chronosHttp.raiseHttpWriteError("Unable to send response body, reason: " & exc.msg)
+  chronosResponse.state = chronosHttp.HttpResponseState.Finished
+  chronosResponse
+
 proc toChronosResponse(
     request: chronosHttp.HttpRequestRef, response: fastnimHttp.Response
 ): Future[chronosHttp.HttpResponseRef] {.
     async: (raises: [CancelledError, chronosHttp.HttpWriteError])
 .} =
+  let known = chronosHttp.toHttpCode(response.status)
+  if known.isNone() and response.status in 100 .. 599:
+    return await sendCustomStatus(request, response)
   var headers = chronosHttp.HttpTable.init()
   for key, value in response.headers:
     headers.add(key, value)
-  result =
-    await request.respond(toChronosStatus(response.status), response.body, headers)
+  let status =
+    if known.isSome():
+      known.get()
+    else:
+      chronosHttp.Http500
+  result = await request.respond(status, response.body, headers)
 
 proc sendStaticFile(
     app: Application,
@@ -270,13 +336,14 @@ proc sendSse(
   response.setHeader("cache-control", "no-cache")
   await response.prepareSSE()
   let writeLock = newAsyncLock()
-  proc sendPayload(payload: string): Future[void] {.
-      async: (raises: [CancelledError, chronosHttp.HttpWriteError])
-  .} =
+  proc sendPayload(
+      payload: string
+  ): Future[void] {.async: (raises: [CancelledError, chronosHttp.HttpWriteError]).} =
     await writeLock.acquire()
     try:
-      if response.getResponseState() notin
-          {chronosHttp.HttpResponseState.Prepared, chronosHttp.HttpResponseState.Sending}:
+      if response.getResponseState() notin {
+        chronosHttp.HttpResponseState.Prepared, chronosHttp.HttpResponseState.Sending
+      }:
         raise newException(chronosHttp.HttpWriteError, "SSE connection is closed")
       try:
         if limits.idleTimeout.isInfinite():
@@ -296,7 +363,8 @@ proc sendSse(
   ): Future[void] {.async: (raises: [CancelledError, chronosHttp.HttpWriteError]).} =
     let payload = formatSseEvent(event)
     if payload.len > limits.maxEventSize:
-      raise newException(chronosHttp.HttpWriteError, "SSE event exceeds configured limit")
+      raise
+        newException(chronosHttp.HttpWriteError, "SSE event exceeds configured limit")
     await sendPayload(payload)
   var active = true
   proc heartbeat() {.async: (raises: []).} =
@@ -310,6 +378,7 @@ proc sendSse(
       except CatchableError:
         active = false
         return
+
   var heartbeatFuture: Future[void]
   if not limits.heartbeatInterval.isInfinite():
     heartbeatFuture = heartbeat()
@@ -367,7 +436,8 @@ proc serveWebSocket(
 .} =
   let rawRequest = chronosRequest.toWebSocketRequest()
   let frameSize = min(limits.maxMessageSize, 64 * 1024)
-  let session = await rawWs.WSServer.new(frameSize = frameSize).handleRequest(rawRequest)
+  let session =
+    await rawWs.WSServer.new(frameSize = frameSize).handleRequest(rawRequest)
   let websocket = newWebSocket(session, limits.maxMessageSize, limits.idleTimeout)
   var active = true
   proc heartbeat() {.async: (raises: []).} =
@@ -385,6 +455,7 @@ proc serveWebSocket(
         except CancelledError:
           discard
         return
+
   var heartbeatFuture: Future[void]
   if not limits.heartbeatInterval.isInfinite():
     heartbeatFuture = heartbeat()
@@ -431,12 +502,12 @@ proc sendLimit(
   await toChronosResponse(chronosRequest, response)
 
 proc serve*(
-    app: Application,
-    address = "127.0.0.1",
-    port: uint16 = 8000,
-    maxRequestBodySize = 0,
+    app: Application, address = "127.0.0.1", port: Port, maxRequestBodySize = 0
 ): chronosHttp.HttpServerRef =
   ## Creates and starts a Chronos server. Use ``waitFor server.join()`` to keep it running.
+  ##
+  ## ``port`` is a Chronos ``Port``. Numeric ports are accepted by the
+  ## ``uint16`` overload, which uses port ``8000`` when omitted.
   ##
   ## Request limits come from ``requestLimits``. A positive ``maxRequestBodySize``
   ## overrides ``maxBodySize`` for this server. Zero uses the application limit.
@@ -488,9 +559,8 @@ proc serve*(
             )
           inc activeWebSocketConnections
           try:
-            let response = await serveWebSocket(
-              app, request, chronosRequest, limits.websocket
-            )
+            let response =
+              await serveWebSocket(app, request, chronosRequest, limits.websocket)
             app.logRequest(request, 101, (getMonoTime() - startedAt).inMicroseconds)
             return response
           finally:
@@ -551,9 +621,7 @@ proc serve*(
           chronosRequest.rawPath,
           copyHeaders(chronosRequest),
         )
-        return await sendLimit(
-          app, chronosRequest, request, 408, exc.detail, startedAt
-        )
+        return await sendLimit(app, chronosRequest, request, 408, exc.detail, startedAt)
     except CancelledError as exc:
       raise exc
     except chronosHttp.HttpWriteError:
@@ -571,7 +639,7 @@ proc serve*(
       min(limits.headersTimeout, limits.keepAliveTimeout)
   result = chronosHttp.HttpServerRef
     .new(
-      initTAddress(address, Port(port)),
+      initTAddress(address, port),
       process,
       serverFlags = {chronosHttp.HttpServerFlags.Http11Pipeline},
       socketFlags = {chronosHttp.ReuseAddr, chronosHttp.TcpNoDelay},
@@ -616,6 +684,12 @@ proc serve*(
       else:
         "/" & app.openApiSettings.docsPath
     app.log(lvlInfo, "Docs served at " & baseUrl & docsPath)
+
+proc serve*(
+    app: Application, address = "127.0.0.1", port: uint16 = 8000, maxRequestBodySize = 0
+): chronosHttp.HttpServerRef =
+  ## Starts a server on a numeric port. Omitted ports use ``8000``.
+  serve(app, address, Port(port), maxRequestBodySize)
 
 proc stop*(server: chronosHttp.HttpServerRef): auto =
   ## Stops a server created by ``serve``.

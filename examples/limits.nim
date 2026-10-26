@@ -21,6 +21,5 @@ app.get("/", responses = @[(200, Message)]):
 app.post("/items"):
   ok Message(ok: true, message: $request.body.len)
 
-
 let server = app.serve(port = 8091)
 waitFor server.join()

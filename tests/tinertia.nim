@@ -35,8 +35,8 @@ block escapesEmbeddedScriptTerminators:
 
 block rendersInertiaJsonResponse:
   let response = newInertiaApp().handleSync(
-    initRequest(HttpMethod.Get, "/users?sort=name", inertiaHeaders("assets-v1"))
-  )
+      initRequest(HttpMethod.Get, "/users?sort=name", inertiaHeaders("assets-v1"))
+    )
   let page = parseJson(response.body)
   doAssert response.status == 200
   doAssert response.headers["content-type"] == "application/json; charset=utf-8"
@@ -49,12 +49,10 @@ block rendersInertiaJsonResponse:
   doAssert page["version"].getStr() == "assets-v1"
 
 block mergesSharedPropsWithRoutePrecedence:
-  let options = initInertiaOptions(
-    sharedProps = %*{"auth": {"name": "Ada"}, "page": 1}
-  )
+  let options = initInertiaOptions(sharedProps = %*{"auth": {"name": "Ada"}, "page": 1})
   let response = newInertiaApp(options).handleSync(
-    initRequest(HttpMethod.Get, "/users", inertiaHeaders())
-  )
+      initRequest(HttpMethod.Get, "/users", inertiaHeaders())
+    )
   let props = parseJson(response.body)["props"]
   doAssert props["auth"]["name"].getStr() == "Ada"
   doAssert props["page"].getInt() == 2
@@ -64,7 +62,8 @@ block filtersPartialReloadProps:
   headers["x-inertia-partial-component"] = "Users/Index"
   headers["x-inertia-partial-data"] = "users,page"
   headers["x-inertia-partial-except"] = "page"
-  let response = newInertiaApp().handleSync(initRequest(HttpMethod.Get, "/users", headers))
+  let response =
+    newInertiaApp().handleSync(initRequest(HttpMethod.Get, "/users", headers))
   let props = parseJson(response.body)["props"]
   doAssert "users" in props
   doAssert "page" notin props
@@ -74,19 +73,16 @@ block ignoresPartialReloadForAnotherComponent:
   var headers = inertiaHeaders()
   headers["x-inertia-partial-component"] = "Dashboard"
   headers["x-inertia-partial-data"] = "page"
-  let response = newInertiaApp().handleSync(initRequest(HttpMethod.Get, "/users", headers))
+  let response =
+    newInertiaApp().handleSync(initRequest(HttpMethod.Get, "/users", headers))
   let props = parseJson(response.body)["props"]
   doAssert "users" in props
   doAssert "page" in props
 
 block rejectsStaleAssetVersion:
   let response = newInertiaApp().handleSync(
-    initRequest(
-      HttpMethod.Get,
-      "/users?tag=nim&tag=web",
-      inertiaHeaders("assets-v0"),
+      initRequest(HttpMethod.Get, "/users?tag=nim&tag=web", inertiaHeaders("assets-v0"))
     )
-  )
   doAssert response.status == 409
   doAssert response.headers["x-inertia-location"] == "/users?tag=nim&tag=web"
   doAssert response.headers["x-inertia-version"] == "assets-v1"
@@ -99,7 +95,8 @@ block convertsPostRedirectToSeeOther:
     var response = initResponse(statusFound)
     response.setHeader("location", "/users")
     response
-  let response = app.handleSync(initRequest(HttpMethod.Post, "/users", inertiaHeaders()))
+  let response =
+    app.handleSync(initRequest(HttpMethod.Post, "/users", inertiaHeaders()))
   doAssert response.status == 303
 
 block createsExternalLocationVisit:
