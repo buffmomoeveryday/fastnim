@@ -433,10 +433,13 @@ proc sendLimit(
 proc serve*(
     app: Application,
     address = "127.0.0.1",
-    port: uint16 = 8000,
+    port: Port,
     maxRequestBodySize = 0,
 ): chronosHttp.HttpServerRef =
   ## Creates and starts a Chronos server. Use ``waitFor server.join()`` to keep it running.
+  ##
+  ## ``port`` is a Chronos ``Port``. Numeric ports are accepted by the
+  ## ``uint16`` overload, which uses port ``8000`` when omitted.
   ##
   ## Request limits come from ``requestLimits``. A positive ``maxRequestBodySize``
   ## overrides ``maxBodySize`` for this server. Zero uses the application limit.
@@ -571,7 +574,7 @@ proc serve*(
       min(limits.headersTimeout, limits.keepAliveTimeout)
   result = chronosHttp.HttpServerRef
     .new(
-      initTAddress(address, Port(port)),
+      initTAddress(address, port),
       process,
       serverFlags = {chronosHttp.HttpServerFlags.Http11Pipeline},
       socketFlags = {chronosHttp.ReuseAddr, chronosHttp.TcpNoDelay},
@@ -616,6 +619,15 @@ proc serve*(
       else:
         "/" & app.openApiSettings.docsPath
     app.log(lvlInfo, "Docs served at " & baseUrl & docsPath)
+
+proc serve*(
+    app: Application,
+    address = "127.0.0.1",
+    port: uint16 = 8000,
+    maxRequestBodySize = 0,
+): chronosHttp.HttpServerRef =
+  ## Starts a server on a numeric port. Omitted ports use ``8000``.
+  serve(app, address, Port(port), maxRequestBodySize)
 
 proc stop*(server: chronosHttp.HttpServerRef): auto =
   ## Stops a server created by ``serve``.

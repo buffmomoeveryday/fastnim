@@ -666,24 +666,44 @@ proc addMiddleware*(
   inc router.middlewareOrder
   insertRegistration(router.middleware, registration)
 
+proc registeredMiddleware(node: NimNode): NimNode {.compileTime.} =
+  ## Accepts ``helloMiddleware()`` for a middleware value and ``requestId()``
+  ## for a middleware factory.
+  if node.kind in {nnkCall, nnkCommand} and node.len == 1:
+    let callee = node[0]
+    let middlewareType = bindSym("Middleware")
+    result = quote do:
+      when typeof(`callee`) is `middlewareType`:
+        `callee`
+      else:
+        `node`
+  else:
+    result = node
+
 macro middlewares*(target: Application | Router, body: untyped): untyped =
   ## Adds one or more middleware values in declaration order.
   ##
-  ## Each expression in a colon block is registered as a separate middleware:
+  ## Each expression in a colon block is registered as a separate middleware.
+  ## A declared middleware value may be written with or without parentheses.
+  ## Factory procedures are called:
   ##
   ## ```nim
   ## app.middlewares:
   ##   requestId()
-  ##   responseTime()
+  ##   helloMiddleware()
   ## ```
   let targetSym = genSym(nskLet, "middlewareTarget")
   result = newStmtList(newLetStmt(targetSym, target))
 
   if body.kind == nnkStmtList:
     for middleware in body:
-      result.add(newCall(bindSym("addMiddleware"), targetSym, middleware))
+      result.add(
+        newCall(bindSym("addMiddleware"), targetSym, registeredMiddleware(middleware))
+      )
   else:
-    result.add(newCall(bindSym("addMiddleware"), targetSym, body))
+    result.add(
+      newCall(bindSym("addMiddleware"), targetSym, registeredMiddleware(body))
+    )
 
 proc initPlugin*(name, version: string, install: PluginInstall): Plugin =
   ## Creates a plugin definition for use with ``app.installPlugin``.
@@ -1206,6 +1226,61 @@ proc typedOpenApiOperation(
     )
   result[^1].add(operation)
 
+proc declaredStatus(node: NimNode): int {.compileTime.} =
+  ## Resolves a response status from ``200`` or a helper name such as ``ok``.
+  if node.kind in {nnkIntLit .. nnkInt64Lit}:
+    result = node.intVal.int
+  elif node.kind == nnkIdent and eqIdent(node, "noContent"):
+    result = 204
+  elif node.kind == nnkIdent:
+    result = responseAliasCode($node)
+  else:
+    result = -1
+
+proc normalizeResponses(responses: NimNode): NimNode {.compileTime.} =
+  ## Accepts ``@[(200, Model)]``, ``@[(ok, Model)]``, and ``@[ok, Model]``.
+  if responses.kind != nnkPrefix or $responses[0] != "@" or
+      responses[1].kind != nnkBracket:
+    error(
+      "responses must use @[(status, ModelType), ...] or @[ok, ModelType]",
+      responses,
+    )
+
+  var items = newNimNode(nnkBracket)
+  var seen: seq[int]
+  var index = 0
+  let bracket = responses[1]
+  while index < bracket.len:
+    let item = bracket[index]
+    var statusNode: NimNode
+    var model: NimNode
+    if item.kind == nnkTupleConstr:
+      if item.len != 2:
+        error("each response declaration must be (status, ModelType)", item)
+      statusNode = item[0]
+      model = item[1]
+      inc index
+    elif index + 1 < bracket.len and bracket[index + 1].kind != nnkTupleConstr:
+      statusNode = item
+      model = bracket[index + 1]
+      index += 2
+    else:
+      error(
+        "each response declaration must be (status, ModelType) or status, ModelType",
+        item,
+      )
+    let status = declaredStatus(statusNode)
+    if status < 0:
+      error(
+        "response status must be a code such as 200 or a name such as ok",
+        statusNode,
+      )
+    if status in seen:
+      error("a route may declare each status only once", item)
+    seen.add(status)
+    items.add(newTree(nnkTupleConstr, newLit(status), model))
+  newTree(nnkPrefix, ident("@"), items)
+
 proc buildTypedRoute(
     app, path, responses, body, `method`, bodyType: NimNode,
     inputName: string,
@@ -1217,18 +1292,10 @@ proc buildTypedRoute(
     queryValidator: NimNode = newEmptyNode(),
     queryInputName = "queryParams",
 ): NimNode =
-  if responses.kind != nnkPrefix or $responses[0] != "@" or
-      responses[1].kind != nnkBracket:
-    error("responses must use @[(status, ModelType), ...]", responses)
-
+  let normalizedResponses = normalizeResponses(responses)
   var models = initTable[int, NimNode]()
-  for item in responses[1]:
-    if item.kind != nnkTupleConstr or item.len != 2 or
-        item[0].kind notin {nnkIntLit .. nnkInt64Lit}:
-      error("each response declaration must be (status, ModelType)", item)
+  for item in normalizedResponses[1]:
     let status = item[0].intVal.int
-    if status in models:
-      error("a route may declare each status only once", item)
     models[status] = item[1]
 
   proc checkedResponses(node: NimNode): NimNode =
@@ -1319,7 +1386,8 @@ proc buildTypedRoute(
   let contentType =
     if inputName == "form": "application/x-www-form-urlencoded" else: "application/json"
   let documentation = typedOpenApiOperation(
-    `method`, path, responses, bodyType, queryType, routeDocs, body, contentType
+    `method`, path, normalizedResponses, bodyType, queryType, routeDocs, body,
+    contentType,
   )
   if bodyType.kind == nnkEmpty and queryType.kind == nnkEmpty:
     result = quote:
@@ -1401,7 +1469,8 @@ proc buildTypedRoute(
 macro get*(
     app: Application | Router, path: typed, responses: untyped, body: untyped
 ): untyped =
-  ## Registers a GET route with typed responses declared as ``@[(status, Model), ...]``.
+  ## Registers a GET route with typed responses declared as ``@[(ok, Model)]``
+  ## or ``@[ok, Model]``. Numeric statuses such as ``200`` are also accepted.
   buildTypedRoute(
     app,
     path,

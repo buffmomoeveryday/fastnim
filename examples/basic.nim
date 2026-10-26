@@ -19,19 +19,19 @@ type
 let app = initFastNim()
 
 
-
 middleware helloMiddleware:
-  echo "hello"
+  echo "hello brefore request"
   var response = await next(request)
+  echo "hello brefore request"
   response
 
 app.middlewares:
   requestId()
-  helloMiddleware
+  helloMiddleware()
 
 
 app.get("/"):
-  ok (%*{"message": "Hello from FastNim"})
+  ok %*{"message": "Hello from FastNim"}
 
 app.get("/async"):
   ok (%*{"message": "Completed without blocking the Chronos event loop"})
@@ -42,12 +42,11 @@ app.get("/items/{itemId}"):
 
   ok (%*{"itemId": itemId, "page": page})
 
-app.get("/request-info", responses = @[(200, RequestInfo)]):
+app.get("/request-info", responses = @[ok, RequestInfo]):
   ok RequestInfo(requestId: 1, path: request.path)
 
-app.post("/items", body = CreateItem, responses = @[(201, CreatedItem)]):
+app.post("/items", body = CreateItem, responses = @[created, CreatedItem]):
   created CreatedItem(id: 1, displayName: body.displayName)
 
-let server = app.serve(port = 8090)
-echo "Listening at http://127.0.0.1:8090"
+let server = app.serve(port = Port(8090))
 waitFor server.join()

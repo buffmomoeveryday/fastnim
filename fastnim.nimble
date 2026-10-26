@@ -15,6 +15,7 @@ requires "chronos >= 4.0.0"
 requires "websock >= 0.4.2"
 requires "nimcrypto >= 0.7.0"
 requires "cligen >= 1.11.0"
+requires "jsony >= 1.1.5"
 
 task docs, "Generate HTML API documentation with nim doc":
   ## Renders every library module into htmldocs/ using nim doc.

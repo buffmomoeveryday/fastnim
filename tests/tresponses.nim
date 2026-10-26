@@ -36,8 +36,11 @@ type
       strVal: string
 
 let app = initFastNim()
-app.get("/items", responses = @[(200, Success), (400, Failure)]):
+app.get("/items", responses = @[ok, Success, badRequest, Failure]):
   ok Success(id: 1)
+
+app.get("/items/named-tuple", responses = @[(ok, Success), (notFound, Failure)]):
+  notFound Failure(detail: "missing")
 
 app.get("/items/return", responses = @[(200, Success)]):
   return (ok, Success(id: 2))
@@ -52,6 +55,12 @@ block declaredSuccessResponse:
   let response = app.handleSync(initRequest(HttpMethod.Get, "/items"))
   doAssert response.status == 200
   doAssert response.body == "{\"id\":1}"
+  let missing = app.handleSync(initRequest(HttpMethod.Get, "/items/named-tuple"))
+  doAssert missing.status == 404
+  doAssert missing.body == """{"detail":"missing"}"""
+  let operation = app.openApiDocument()["paths"]["/items"]["get"]
+  doAssert "200" in operation["responses"]
+  doAssert "400" in operation["responses"]
 
 block namedHttpStatusCodes:
   doAssert statusCode(statusCreated) == 201
