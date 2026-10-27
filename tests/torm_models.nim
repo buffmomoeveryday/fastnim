@@ -196,6 +196,8 @@ suite "model metadata":
       """{"id":"00112233-4455-6677-8899-aabbccddeeff","title":"Dr","name":"Ada"}"""
     check person.omit(id).omit(createdAt).serialize() ==
       """{"title":"Dr","name":"Ada"}"""
+    check person.omit([id, createdAt]).serialize() ==
+      """{"title":"Dr","name":"Ada"}"""
     check @[person].omit(id, createdAt).serialize() ==
       """[{"title":"Dr","name":"Ada"}]"""
     check (none(Person)).serialize() == "null"

@@ -21,6 +21,7 @@ import
     plugin,
     plugins,
     routing/router,
+    shortcuts,
     static/embed,
     static/files,
     testing,
@@ -29,8 +30,8 @@ import
 
 export
   http, state, bytes, limits, server, jsonfields, logging, dsl, builtin, spec, extract,
-  multipart, uploadsink, validate, plugin, plugins, router, embed, files, testing,
-  websocket, chronos, jsonutils
+  multipart, uploadsink, validate, plugin, plugins, router, shortcuts, embed, files,
+  testing, websocket, chronos, jsonutils
 
 when isMainModule:
   import std/os

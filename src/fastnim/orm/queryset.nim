@@ -42,6 +42,7 @@ type
     selects*: seq[string] ## selectRelated paths
     prefetches*: seq[string] ## prefetchRelated paths
     expands*: seq[string] ## relation paths nested into JSON by `expand`
+    omits*: seq[string] ## field names dropped from JSON by `omit`
     relPaths*: seq[string] ## relation paths a filter condition reaches through
     limitN*: int ## -1 means no limit
     offsetN*: int
@@ -365,6 +366,12 @@ proc addExpand*[T](qs: QuerySet[T], path: string): QuerySet[T] =
   result = qs
   if path notin result.expands:
     result.expands.add path
+
+proc addOmit*[T](qs: QuerySet[T], field: string): QuerySet[T] =
+  ## Records `field` to drop from JSON after the query is evaluated.
+  result = qs
+  if field notin result.omits:
+    result.omits.add field
 
 proc addRelPath*[T](qs: QuerySet[T], path: string): QuerySet[T] =
   ## Records that a filter condition needs `path` joined to resolve a field
@@ -834,6 +841,8 @@ proc encodeModel(
     if tail.len > 0 and tail notin groups[head]:
       groups[head].add tail
   for rel, suffixes in groups.pairs:
+    if rel in skip:
+      continue
     let spec = findPrefetch(modelName, rel)
     let single = cachedSingle[FastormModel](model, rel)
     if single.hit:
@@ -1114,6 +1123,9 @@ proc fetch[T](qs: QuerySet[T], limitOverride: int): Future[seq[T]] {.async.} =
   if qs.expands.len > 0:
     for m in models:
       rememberExpand(m, qs.expands)
+  if qs.omits.len > 0:
+    for m in models:
+      rememberOmit(m, qs.omits)
   return models
 
 proc all*[T](qs: QuerySet[T]): Future[seq[T]] {.async.} =

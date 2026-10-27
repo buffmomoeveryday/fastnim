@@ -86,7 +86,9 @@ literal. `null: true` on `JSONField` is SQL NULL, which is distinct from a
 JSON `null`. `BinaryField` is base64 text when a model is serialized.
 `EmailField`, `URLField` and `SlugField` are `CharField`s with a shape check:
 one `@` and a dotted domain, an `http://` or `https://` prefix, or letters,
-digits, hyphens and underscores.
+digits, hyphens and underscores. Build a slug from a title with Django-style
+`slugify("Joel is a slug")` (`"joel-is-a-slug"`), also available from
+`import fastnim` / `fastnim/orm`.
 
 `choices` limits a string, integer or float field to a list of literals.
 On `CharField`, `EmailField`, `URLField` or `SlugField` it can instead name
@@ -204,14 +206,17 @@ await author.save()
 
 ### Serializers
 
-`serialize` writes a model, a `seq` of models, or an `Option[Model]` as JSON. `.omit` drops further fields, by the field name or the stored foreign-key name. `.expand` nests eager-loaded relations beside the key column.
+`serialize` writes a model, a `seq` of models, or an `Option[Model]` as JSON. `.omit` drops further fields, by the field name or the stored foreign-key name. `.expand` nests eager-loaded relations beside the key column. Both accept multiple names, a `[a, b]` list, or chained calls; QuerySet forms apply after `all()` / `get()`.
 
 ```nim
 echo author.serialize()
 echo author.omit(id, createdAt).serialize()
+echo author.omit([id, createdAt]).serialize()
 echo book.expand(author).serialize()
 let authors = await Author.objects.all()
 echo authors.omit(createdAt).serialize()
+ok await Book.objects.expand(author, publisher).omit(publisherId).all()
+ok await Book.objects.expand(author).expand(publisher).omit([publisher, publisherId]).all()
 ```
 
 FastNim's `ok` and `created` accept the model itself and encode it the same way. `.serialize()` returns a string, which does not match a route declared as `Author`.
@@ -527,6 +532,8 @@ Remaining suffixes are consumed while walking, so
 
 ```nim
 ok await Book.objects.expand(author).all()
+ok await Book.objects.expand(author, publisher).all()
+ok await Book.objects.expand(author).expand(publisher).all()
 ok await Book.objects.expand(author.publisher).all()
 ok await Author.objects.expand(articles).all()
 ```

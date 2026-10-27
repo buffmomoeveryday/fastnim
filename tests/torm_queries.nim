@@ -655,6 +655,8 @@ suite "querying":
     let omitted = parseJson(rows.omit(authorId).serialize())
     check "authorId" notin omitted[0]
     check omitted[1]["author"]["name"].getStr == "Ada"
+    let omittedList = parseJson(rows.omit([authorId]).serialize())
+    check "authorId" notin omittedList[0]
     let response = json(rows)
     let body = parseJson(response.body)
     check body[1]["author"]["publisher"]["name"].getStr == "Orbit"
@@ -662,6 +664,25 @@ suite "querying":
     let stamped = parseJson(cached.expand(author).serialize())
     check stamped[0]["author"]["name"].getStr == "Grace"
     check "publisher" notin stamped[0]["author"]
+    let multi = await Author.objects.expand(articles, publisher).orderBy("name").all()
+    let multiJson = parseJson(multi.serialize())
+    check multiJson[0]["name"].getStr == "Ada"
+    check multiJson[0]["articles"].len == 1
+    check multiJson[0]["publisher"]["name"].getStr == "Orbit"
+    let chained =
+      await Author.objects.expand(articles).expand(publisher).orderBy("name").all()
+    check parseJson(chained.serialize())[0]["publisher"]["name"].getStr == "Orbit"
+    let qsOmitted =
+      await Author.objects.expand(publisher).omit(publisherId, email).orderBy("name").all()
+    let qsJson = parseJson(qsOmitted.serialize())
+    check "publisherId" notin qsJson[0]
+    check "email" notin qsJson[0]
+    check qsJson[0]["publisher"]["name"].getStr == "Orbit"
+    let qsOmitRel =
+      await Author.objects.expand(publisher).omit([publisher]).orderBy("name").all()
+    let qsOmitRelJson = parseJson(qsOmitRel.serialize())
+    check "publisher" notin qsOmitRelJson[0]
+    check "publisherId" notin qsOmitRelJson[0]
     await cleanup(db, dir)
 
   asyncTest "expand prefetches reverse relations as JSON arrays":

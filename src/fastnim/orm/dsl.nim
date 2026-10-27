@@ -2549,29 +2549,69 @@ proc isIgnoredCall(n: NimNode): bool =
     else: false
   )
 
+proc fieldArgNodes(fields: NimNode): seq[NimNode] =
+  ## Accepts ``omit(a, b)`` or ``omit([a, b])``.
+  if fields.len == 1 and fields[0].kind == nnkBracket:
+    for item in fields[0]:
+      result.add item
+  else:
+    for field in fields:
+      result.add field
+
+proc omitQuery(qs: NimNode, fields: NimNode): NimNode =
+  let args = fieldArgNodes(fields)
+  if args.len == 0:
+    error("fastorm: omit() needs at least one field", qs)
+  let (_, spec) = querySetModel(qs)
+  var names: seq[string]
+  for field in args:
+    names.add inputFieldName(field)
+  discard ignoredFields(spec, names, args[0])
+  result = qs
+  for name in names:
+    result = newCall(bindSym"addOmit", result, newLit(name))
+
+macro omit*(qs: QuerySet, fields: varargs[untyped]): untyped =
+  ## Records fields to drop from JSON after the query is evaluated.
+  ##
+  ## ```nim
+  ## ok await Book.objects.expand(author).omit(publisherId).all()
+  ## ok await Book.objects.omit(publisher, publisherId).all()
+  ## ok await Book.objects.omit([publisher, publisherId]).all()
+  ## ```
+  omitQuery(qs, fields)
+
 macro omit*(value: typed, fields: varargs[untyped]): untyped =
   ## Marks fields to drop from a later `serialize`. Names are the model field
-  ## (`id`, `author`) or the stored foreign key (`authorId`).
+  ## (`id`, `author`) or the stored foreign key (`authorId`). Accepts multiple
+  ## names, a ``[a, b]`` list, or chained ``.omit`` calls.
   ##
   ## ```nim
   ## echo author.omit(id, createdAt).serialize()
+  ## echo author.omit([id, createdAt]).serialize()
+  ## echo author.omit(id).omit(createdAt).serialize()
   ## ```
   let typ = getTypeInst(value)
+  if typeHead(typ) == "QuerySet":
+    return omitQuery(value, fields)
   let modelName = typeTailName(typ)
   if modelName notin modelCache:
-    error("fastorm: ignore applies to a model, seq[Model], or Option[Model]", value)
+    error("fastorm: omit applies to a model, seq[Model], or Option[Model]", value)
   var names: seq[string]
   var base = value
   if isIgnoredCall(value):
     base = value[1]
     names = ignoredNames(value)
-  for field in fields:
+  let args = fieldArgNodes(fields)
+  for field in args:
     names.add inputFieldName(field)
+  if names.len == 0:
+    error("fastorm: omit() needs at least one field", value)
   discard ignoredFields(
     readModel(modelName),
     names,
-    if fields.len > 0:
-      fields[0]
+    if args.len > 0:
+      args[0]
     else:
       value,
   )
@@ -2581,11 +2621,12 @@ macro omit*(value: typed, fields: varargs[untyped]): untyped =
 
 proc expandQuery(qs: NimNode, rels: NimNode): NimNode =
   rejectProjectionWithEager(qs, eager = true)
-  if rels.len == 0:
+  let args = fieldArgNodes(rels)
+  if args.len == 0:
     error("fastorm: expand() needs at least one relation", qs)
   let (_, spec) = querySetModel(qs)
   result = qs
-  for r in rels:
+  for r in args:
     let path = relPath(r)
     let reversed = walkRelation(spec.name, path, r, forwardOnly = false)
     if reversed:
@@ -2599,9 +2640,13 @@ macro expand*(qs: QuerySet, rels: varargs[untyped]): untyped =
   ## `serialize`, `toJson`). Forward-only paths use `selectRelated`; a
   ## reverse hop uses `prefetchRelated`. Dotted paths write every prefix:
   ## `expand(author.publisher)` writes `author` and `author.publisher`.
+  ## Multiple relations may be listed, passed as ``[a, b]``, or chained.
   ##
   ## ```nim
   ## ok await Book.objects.expand(author).all()
+  ## ok await Book.objects.expand(author, publisher).all()
+  ## ok await Book.objects.expand([author, publisher]).all()
+  ## ok await Book.objects.expand(author).expand(publisher).all()
   ## ok await Book.objects.expand(author.publisher).all()
   ## ok await Author.objects.expand(articles).all()
   ## ```
@@ -2613,6 +2658,7 @@ macro expand*(value: typed, rels: varargs[untyped]): untyped =
   ##
   ## ```nim
   ## echo book.expand(author).serialize()
+  ## echo book.expand(author, publisher).serialize()
   ## ```
   let typ = getTypeInst(value)
   if typeHead(typ) == "QuerySet":
@@ -2620,7 +2666,8 @@ macro expand*(value: typed, rels: varargs[untyped]): untyped =
   let modelName = typeTailName(typ)
   if modelName notin modelCache:
     error("fastorm: expand applies to a model, seq[Model], or Option[Model]", value)
-  if rels.len == 0:
+  let args = fieldArgNodes(rels)
+  if args.len == 0:
     error("fastorm: expand() needs at least one relation", value)
   var paths: seq[string]
   var base = value
@@ -2629,7 +2676,7 @@ macro expand*(value: typed, rels: varargs[untyped]): untyped =
       ($value[0]).startsWith("fastormExpanded"):
     base = value[1]
     collectStrings(value, paths)
-  for r in rels:
+  for r in args:
     let path = relPath(r)
     discard walkRelation(modelName, path, r, forwardOnly = false)
     if path notin paths:
