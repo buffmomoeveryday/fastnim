@@ -25,17 +25,25 @@ Commands:
   sqlmigrate NAME  Print the SQL of a compiled migration
 
 Options:
-  --db:PATH        SQLite database (default: db.sqlite3, or $FASTORM_DB)
-  --dir:PATH       Migrations directory (default: migrations)
+  --db:PATH        Override the configured SQLite database
+  --dir:PATH       Override the configured migrations directory
   --name:NAME      Name for the new migration (makemigrations)
   --empty          Write an empty migration to edit by hand (makemigrations)
 """
 
-proc runCli*(args: seq[string] = commandLineParams()): int =
-  ## Runs a fastorm command and returns the process exit code.
+proc runCli*(
+    args: seq[string] = commandLineParams(),
+    defaultDbPath = getEnv("FASTORM_DB", "db.sqlite3"),
+    defaultMigrationsDir = "migrations",
+): int =
+  ## Runs a FastORM command and returns the process exit code.
+  ##
+  ## Generated projects pass the database and migrations paths from their
+  ## ``settings.nim``; explicit ``--db`` and ``--dir`` flags still override
+  ## those defaults.
   var command, target, name: string
-  var dbPath = getEnv("FASTORM_DB", "db.sqlite3")
-  var dir = "migrations"
+  var dbPath = defaultDbPath
+  var dir = defaultMigrationsDir
   var empty = false
   var p = initOptParser(args)
   for kind, key, val in p.getopt():

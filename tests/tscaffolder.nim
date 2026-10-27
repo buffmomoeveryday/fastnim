@@ -15,7 +15,8 @@ proc sandbox(name: string): string =
 proc nimCheck(paths: openArray[string], file: string): string =
   ## Runs `nim check` on a generated file; returns "" on success.
   let repoSrc = currentSourcePath().parentDir().parentDir() / "src"
-  var command = "nim check --hints:off --path:" & quoteShell(repoSrc)
+  var command = "nim check --hints:off --nimcache:" &
+    quoteShell(paths[0] / ".nimcache") & " --path:" & quoteShell(repoSrc)
   for path in paths:
     command.add(" --path:" & quoteShell(path))
   let log = paths[0] / "nimcheck.log"
@@ -204,7 +205,8 @@ block generatedServerCompiles:
     let genSrc = getTempDir() / "fastnim_tscaffolder" / box / name / "src"
     let log = genSrc / "nimcheck.log"
     let code = execShellCmd(
-      "nim check --hints:off --path:" & quoteShell(repoSrc) & " --path:" &
+      "nim check --hints:off --nimcache:" & quoteShell(genSrc / ".nimcache") &
+        " --path:" & quoteShell(repoSrc) & " --path:" &
         quoteShell(genSrc) & " " & quoteShell(genSrc / "main.nim") & " > " &
         quoteShell(log) & " 2>&1"
     )
@@ -277,6 +279,7 @@ block cliRejectsBadInput:
     @["init", "a/b", "--template:inertiajs", "--dir=" & box], interactive = false
   ) == 2
   doAssert cliMain(@["bogus"], interactive = false) == 2
+  doAssert cliMain(@["migrate"], interactive = false) == 1
   doAssert cliMain(@["--help"], interactive = false) == 0
   doAssert cliMain(@[], interactive = false) == 0
 
@@ -299,26 +302,41 @@ block scaffoldApiProject:
   for path in [
     root / "shop.nimble",
     root / "config.nims",
-    root / "src" / "main.nim",
-    root / "src" / "models.nim",
-    root / "src" / "routes" / "users.nim",
-    root / "tests" / "test_users.nim",
+    root / "src" / "shop.nim",
+    root / "src" / "settings.nim",
+    root / "src" / "manage.nim",
+    root / "src" / "migrations" / "all.nim",
+    root / "src" / "models" / "author.nim",
+    root / "src" / "models" / "index.nim",
+    root / "src" / "routers" / "authors.nim",
+    root / "src" / "services" / "authors_service.nim",
+    root / "tests" / "test_app.nim",
     root / "README.md",
   ]:
     doAssert fileExists(path), path
 
-  let routes = readFile(root / "src" / "routes" / "users.nim")
-  doAssert "let userRouter*" in routes
-  doAssert "responses = @[(201, User)]" in routes
-  doAssert "noContent void" in routes
+  let routes = readFile(root / "src" / "routers" / "authors.nim")
+  doAssert "let authorRouter*" in routes
+  doAssert "responses = @[(201, Author)]" in routes
+  doAssert "createAuthor" in routes
   doAssert "requires \"fastnim" in readFile(root / "shop.nimble")
-  let generatedTests = readFile(root / "tests" / "test_users.nim")
-  doAssert "initTestClient" in generatedTests
-  doAssert "suite \"users\"" in generatedTests
+  let nimbleFile = readFile(root / "shop.nimble")
+  doAssert "task bootstrap," in nimbleFile
+  doAssert "Generate and apply migrations" in nimbleFile
+  doAssert "task makemigrations," in nimbleFile
+  doAssert "exec \"fastnim makemigrations\"" in nimbleFile
+  doAssert "task migrate," in nimbleFile
+  doAssert "exec \"fastnim migrate\"" in nimbleFile
+  doAssert "databasePath" in readFile(root / "src" / "settings.nim")
+  doAssert "runCli" in readFile(root / "src" / "manage.nim")
+  doAssert "nimble bootstrap" in readFile(root / "README.md")
+  doAssert "nimble migrate" in readFile(root / "README.md")
+  doAssert ".migrate(" notin readFile(root / "src" / "shop.nim")
 
   let src = root / "src"
-  doAssert nimCheck([src], src / "main.nim") == ""
-  doAssert nimCheck([src], root / "tests" / "test_users.nim") == ""
+  doAssert nimCheck([src], src / "shop.nim") == ""
+  doAssert nimCheck([src], src / "manage.nim") == ""
+  doAssert nimCheck([src], root / "tests" / "test_app.nim") == ""
 
 block scaffoldKaraxSsrProject:
   let box = sandbox("ssr")
@@ -326,22 +344,29 @@ block scaffoldKaraxSsrProject:
   scaffoldKaraxSsr(root, "pages")
   for path in [
     root / "pages.nimble",
-    root / "src" / "main.nim",
-    root / "src" / "routes" / "pages.nim",
-    root / "tests" / "test_pages.nim",
+    root / "src" / "pages.nim",
+    root / "src" / "settings.nim",
+    root / "src" / "manage.nim",
+    root / "src" / "routers" / "pages.nim",
+    root / "src" / "templates" / "base.nim",
+    root / "src" / "templates" / "authors.nim",
+    root / "tests" / "test_app.nim",
     root / "README.md",
   ]:
     doAssert fileExists(path), path
 
-  let pages = readFile(root / "src" / "routes" / "pages.nim")
-  doAssert "import fastnim except text" in pages
-  doAssert "buildHtml" in pages
+  let pages = readFile(root / "src" / "routers" / "pages.nim")
+  doAssert "request.isHtmx" in pages
   doAssert "html layout" in pages
-  doAssert "requires \"karax" in readFile(root / "pages.nimble")
+  doAssert "hx-post" in readFile(root / "src" / "templates" / "authors.nim")
+  doAssert "htmx.org@2" in readFile(root / "src" / "templates" / "base.nim")
+  doAssert "htmxPlugin" in readFile(root / "src" / "pages.nim")
+  doAssert ".migrate(" notin readFile(root / "src" / "pages.nim")
 
   let src = root / "src"
-  doAssert nimCheck([src], src / "main.nim") == ""
-  doAssert nimCheck([src], root / "tests" / "test_pages.nim") == ""
+  doAssert nimCheck([src], src / "pages.nim") == ""
+  doAssert nimCheck([src], src / "manage.nim") == ""
+  doAssert nimCheck([src], root / "tests" / "test_app.nim") == ""
 
 block scaffoldKaraxCsrProject:
   let box = sandbox("csr")
@@ -368,7 +393,8 @@ block scaffoldKaraxCsrProject:
 
   let jsLog = root / "client" / "app.js.log"
   let jsCode = execShellCmd(
-    "nim js --hints:off -o:" & quoteShell(root / "public" / "assets" / "app.js") & " " &
+    "nim js --hints:off --nimcache:" & quoteShell(root / ".nimcache-js") & " -o:" &
+      quoteShell(root / "public" / "assets" / "app.js") & " " &
       quoteShell(root / "client" / "app.nim") & " > " & quoteShell(jsLog) & " 2>&1"
   )
   doAssert jsCode == 0, readFile(jsLog)
@@ -376,11 +402,11 @@ block scaffoldKaraxCsrProject:
 block cliScaffoldsEveryTemplate:
   let box = sandbox("cli-all")
   doAssert cliMain(@["init", "shop", "--dir=" & box], interactive = false) == 0
-  doAssert fileExists(box / "shop" / "src" / "routes" / "users.nim")
+  doAssert fileExists(box / "shop" / "src" / "routers" / "authors.nim")
   doAssert cliMain(
-    @["init", "ssr", "--template:karax_ssr", "--dir=" & box], interactive = false
+    @["init", "ssr", "--template:ssr", "--dir=" & box], interactive = false
   ) == 0
-  doAssert fileExists(box / "ssr" / "src" / "routes" / "pages.nim")
+  doAssert fileExists(box / "ssr" / "src" / "routers" / "pages.nim")
   doAssert cliMain(
     @["init", "csr", "--template:karax_csr", "--dir=" & box], interactive = false
   ) == 0
@@ -389,13 +415,13 @@ block cliScaffoldsEveryTemplate:
     @["init", "old", "--template:api", "--frontend:svelte", "--dir=" & box],
     interactive = false,
   ) == 0
-  doAssert fileExists(box / "old" / "src" / "main.nim")
+  doAssert fileExists(box / "old" / "src" / "old.nim")
 
 block cliScaffoldsAuthForEveryTemplate:
   let box = sandbox("cli-auth")
   for (name, templateName, scheme) in [
     ("apiapp", "api", "AuthScheme.Jwt"),
-    ("ssrapp", "karax_ssr", "AuthScheme.Session"),
+    ("ssrapp", "ssr", "AuthScheme.Session"),
     ("csrapp", "karax_csr", "AuthScheme.Jwt"),
     ("inertiaapp", "inertiajs", "AuthScheme.Session"),
   ]:
@@ -407,10 +433,14 @@ block cliScaffoldsAuthForEveryTemplate:
     let root = box / name
     let src = root / "src"
     doAssert fileExists(src / "auth.nim")
-    doAssert fileExists(src / "routes" / "auth.nim")
+    let structured = templateName in ["api", "ssr"]
+    doAssert fileExists(
+      src / (if structured: "routers" else: "routes") / "auth.nim"
+    )
     doAssert scheme in readFile(src / "auth.nim")
-    doAssert "authentication()" in readFile(src / "main.nim")
-    doAssert nimCheck([src], src / "main.nim") == ""
+    let mainFile = src / (if structured: name & ".nim" else: "main.nim")
+    doAssert "authentication()" in readFile(mainFile)
+    doAssert nimCheck([src], mainFile) == ""
 
   doAssert fileExists(box / "inertiaapp" / "client" / "src" / "pages" / "Login.svelte")
   doAssert "JWT_SECRET" in readFile(box / "apiapp" / "README.md")
@@ -419,7 +449,8 @@ block cliScaffoldsAuthForEveryTemplate:
   let csrRoot = box / "csrapp"
   let jsLog = csrRoot / "client" / "auth_app.js.log"
   let jsCode = execShellCmd(
-    "nim js --hints:off -o:" & quoteShell(csrRoot / "public" / "assets" / "app.js") & " " &
+    "nim js --hints:off --nimcache:" & quoteShell(csrRoot / ".nimcache-js") & " -o:" &
+      quoteShell(csrRoot / "public" / "assets" / "app.js") & " " &
       quoteShell(csrRoot / "client" / "app.nim") & " > " & quoteShell(jsLog) & " 2>&1"
   )
   doAssert jsCode == 0, readFile(jsLog)

@@ -371,11 +371,31 @@ available when a handler needs dynamic parameter names or custom control flow.
 
 ## Scaffolding
 
-Install the `fastnim` binary (`nimble install`) and generate a project:
+Install the `fastnim` binary (`nimble install`) and generate a structured API
+or server-rendered project:
 
 ```sh
-fastnim init myapp --template:inertiajs
+fastnim init myapp --template:api
+fastnim init website --template:ssr
 ```
+
+Both templates create `src/settings.nim`, `src/manage.nim`, and separate
+`models/`, `routers/`, `services/`, `templates/`, and `migrations/`
+directories. The SSR template includes HTMX and the FastNim HTMX plugin.
+
+Database schema changes are always explicit:
+
+```sh
+nimble setup
+nimble bootstrap
+nimble run
+```
+
+`nimble setup` is Nimble's built-in dependency-path setup command. The
+generated `.nimble` file supplies `bootstrap`, `makemigrations`, and `migrate`.
+`bootstrap` generates and applies the initial migration; later schema changes
+can use the two individual tasks.
+Starting the server never applies migrations automatically.
 
 Omitted choices prompt interactively (framework, package manager, CSS); piped
 or CI runs fall back to Svelte, pnpm, and Tailwind. Every choice also has a
@@ -386,7 +406,7 @@ fastnim init shop --template:inertiajs --frontend:react --pkgmanager:bun --css:n
 ```
 
 Add `--auth` to generate a complete starter login flow. The `api` and
-`karax_csr` templates use HS256 bearer JWTs; `inertiajs` and `karax_ssr` use
+`karax_csr` templates use HS256 bearer JWTs; `inertiajs` and `ssr` use
 HttpOnly server-side sessions. Every authenticated scaffold includes the
 development account `ada` / `s3cret` and notes showing what to replace before
 deployment.
@@ -398,16 +418,19 @@ fastnim init service --template:api --auth
 
 Available templates:
 
-- `api` (default) — versioned JSON API: typed models, a users router with
-  list/get/create/delete routes, and an in-process test suite.
+- `api` (default) — JSON API with FastORM models and explicit migrations.
   ```sh
   fastnim init myapp
-  nim c -r --path:src src/main.nim   # inside myapp/
+  cd myapp
+  nimble setup
+  nimble bootstrap
+  nimble run
   ```
-- `karax_ssr` — server-rendered Karax pages served as HTML.
+- `ssr` — server-rendered pages with HTMX forms and fragments.
   ```sh
-  fastnim init site --template:karax_ssr
+  fastnim init site --template:ssr
   ```
+- `karax_ssr` remains an alias for `ssr`.
 - `karax_csr` — Karax client compiled with `nim js`, served statically
   alongside a JSON API.
   ```sh

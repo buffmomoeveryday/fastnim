@@ -1,216 +1,186 @@
-## Server-rendered Karax project scaffolding for ``fastnim init``.
-##
-## Generates a Nim server whose routes render Karax markup to HTML strings.
-## Karax stays a dependency of the generated project, not of fastnim.
+## Server-rendered HTMX project scaffolding for ``fastnim init --template:ssr``.
 
 import std/os
 
-import ./auth
+import ./[api, auth]
 
 proc writeSsrFile(path, content: string) =
   createDir(path.parentDir())
   writeFile(path, content)
 
-proc ssrNimble(name: string): string =
-  """# Package
+proc serviceSource(): string =
+  """## Database operations used by the author pages.
 
-version = "0.1.0"
-author = "you"
-description = """" & name &
-    """ - FastNim + Karax SSR"
-license = "MIT"
-srcDir = "src"
+import fastnim/orm
+import ../models/author
 
-# Dependencies
+proc listAuthors*(): Future[seq[Author]] {.async.} =
+  ## Returns all authors ordered by name.
+  await Author.objects.orderBy("name").all()
 
-requires "nim >= 2.2.12"
-requires "chronos >= 4.0.0"
-requires "karax >= 1.5.0"
-# Install fastnim from its repository until it is published on nimble.
-requires "fastnim >= 0.1.0"
+proc createAuthor*(name: string): Future[Author] {.async.} =
+  ## Creates and returns an author.
+  let author = Author(name: name)
+  await author.save()
+  author
 """
 
-proc ssrPages(name: string): string =
-  """## Server-rendered Karax pages.
-##
-## Karax also exports `text`, so this module hides FastNim's to keep
-## `buildHtml` unambiguous.
+proc baseTemplateSource(): string =
+  """## Shared HTML document layout.
 
-import fastnim except text
-import karax/[karaxdsl, vdom]
+proc layout*(title, content: string): string =
+  ## Wraps page content and loads HTMX for progressively enhanced requests.
+  "<!doctype html><html><head><meta charset='utf-8'>" &
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>" &
+    "<title>" & title & "</title>" &
+    "<script src='https://unpkg.com/htmx.org@2.0.4'></script>" &
+    "</head><body><main>" & content & "</main></body></html>"
+"""
+
+proc authorsTemplateSource(): string =
+  """## Author page and HTMX fragment renderers.
+
+import std/xmltree
+import ../models/author
+
+proc authorItem*(author: Author): string =
+  ## Renders one author list item.
+  "<li id='author-" & $author.id & "'>" & xmltree.escape(author.name) & "</li>"
+
+proc authorList*(authors: openArray[Author]): string =
+  ## Renders the replaceable author list fragment.
+  result = "<ul id='authors'>"
+  for author in authors:
+    result.add authorItem(author)
+  result.add "</ul>"
+
+proc authorsPage*(authors: openArray[Author]): string =
+  ## Renders the page content; the form posts and swaps through HTMX.
+  "<h1>Authors</h1>" & authorList(authors) &
+    "<form hx-post='/authors' hx-target='#authors' hx-swap='beforeend'>" &
+    "<label>Name <input name='name' required maxlength='120'></label>" &
+    "<button type='submit'>Add author</button></form>"
+"""
+
+proc routerSource(): string =
+  """## Server-rendered author routes with HTMX fragments.
+
+import fastnim
+import ../services/authors_service
+import ../templates/[base, authors]
+
+type AuthorForm = object
+  name: string
 
 let pageRouter* = initRouter()
 
-proc layout(title, inner: string): string =
-  let node = buildHtml(html):
-    head:
-      title:
-        text title
-    body:
-      verbatim inner
-  "<!doctype html>" & $node
-
 pageRouter.get("/"):
-  let content = buildHtml(tdiv):
-    h1:
-      text "Hello from """ &
-    name & """"
-    p:
-      text "Rendered server-side with Karax."
-    p:
-      text "Try /users/Ada for a dynamic page."
-  html layout("Home", $content)
+  html layout("Authors", authorsPage(await listAuthors()))
 
-pageRouter.get("/users/{name}"):
-  let who = request.pathParam("name")
-  let content = buildHtml(tdiv):
-    h1:
-      text "Hello, " & who
-  html layout("User", $content)
+pageRouter.post(
+  "/authors", form = AuthorForm,
+  responses = @[(200, string), (303, void)],
+):
+  let author = await createAuthor(form.name)
+  if request.isHtmx:
+    html authorItem(author)
+  else:
+    var response = initResponse(statusSeeOther)
+    response.setHeader("location", "/")
+    response
 """
 
-proc ssrMain(name: string, auth: bool): string =
-  let authImports = if auth: "import auth\nimport routes/auth as auth_routes\n" else: ""
+proc mainSource(name: string, auth: bool): string =
+  let authImports = if auth: "import auth\nimport routers/auth as auth_routes\n" else: ""
   let authSetup =
     if auth:
-      "api.installPlugin(authentication())\napi.addRouter(auth_routes.authRouter)\n"
+      "app.installPlugin(authentication())\napp.addRouter(auth_routes.authRouter)\n"
     else:
       ""
-  """## """ & name & """ - FastNim + Karax SSR.
-##
-## Run with: nim c -r --path:src src/main.nim
+  """## """ & name & """ server-rendered application.
 
 import chronos
-
 import fastnim
-""" &
-    authImports & """
-import routes/pages
+import fastnim/orm
 
-let api = initFastNim()
-""" & authSetup & """
-api.addRouter(pageRouter)
+import settings
+""" & authImports & """import routers/pages
 
-let server = api.serve(port = 8000)
-echo "Listening at http://127.0.0.1:8000"
-waitFor server.join()
+let app = initFastNim()
+app.installPlugin(htmxPlugin())
+""" & authSetup & """app.addRouter(pageRouter)
+
+proc openApp(ctx: Context) =
+  let database = waitFor openDatabase(databasePath)
+  ctx.setContext("database", database)
+
+proc closeApp(ctx: Context) =
+  waitFor ctx.get("database", Database).close()
+
+app.onLoad openApp
+app.onUnload closeApp
+
+when isMainModule:
+  let server = app.serve(port = appPort())
+  echo "Listening at http://127.0.0.1:" & $appPort()
+  waitFor server.join()
 """
 
-proc ssrAuthRoutes(): string =
-  """## HTML login and logout routes for session authentication.
+proc authRoutesSource(): string =
+  """## Session login and logout routes.
 
 import fastnim
 import ../auth
 
 let authRouter* = initRouter()
 
-proc redirectTo(path: string): Response =
-  result = initResponse(statusSeeOther)
-  result.setHeader("location", path)
-
 authRouter.get("/login"):
-  html "<!doctype html><html><body><h1>Sign in</h1>" &
-    "<form method='post' action='/login'>" &
-    "<label>Username <input name='username' value='ada'></label>" &
-    "<label>Password <input name='password' type='password'></label>" &
-    "<button type='submit'>Sign in</button></form></body></html>"
+  html "<h1>Sign in</h1><form method='post' action='/login'>" &
+    "<input name='username'><input name='password' type='password'>" &
+    "<button type='submit'>Sign in</button></form>"
 
 authRouter.post(
-  "/login", form = LoginInput, responses = @[(303, void), (401, string)]
+  "/login", form = LoginInput,
+  responses = @[(303, void), (401, string)],
 ):
   if not credentialsValid(form):
     html(statusUnauthorized, "<h1>Invalid credentials</h1>")
   else:
-    var response = redirectTo("/")
+    var response = initResponse(statusSeeOther)
+    response.setHeader("location", "/")
     discard await loginSession(sessionStore, response, form.username)
     response
-
-authRouter.post("/logout", responses = @[(303, void)]):
-  var response = redirectTo("/login")
-  await logoutSession(sessionStore, request, response)
-  response
 """
 
-proc ssrTests(name: string): string =
-  """import std/strutils
+proc testSource(name: string): string =
+  """import std/[strutils, unittest]
 
-import fastnim
-import routes/pages
+import models/author
+import templates/[base, authors]
 
-block homePage:
-  let api = initFastNim(logs = false)
-  api.addRouter(pageRouter)
+suite """" & name & """ templates":
+  test "layout includes HTMX":
+    check "htmx.org@2" in layout("Test", "<p>Body</p>")
 
-  let response = api.handleSync(initRequest(HttpMethod.Get, "/"))
-  doAssert response.status == 200
-  doAssert response.headers["content-type"] == "text/html; charset=utf-8"
-  doAssert response.body.startsWith("<!doctype html>")
-  doAssert "<h1>Hello from """ &
-    name & """</h1>" in response.body
-
-block userPage:
-  let api = initFastNim(logs = false)
-  api.addRouter(pageRouter)
-
-  let response = api.handleSync(initRequest(HttpMethod.Get, "/users/Ada"))
-  doAssert response.status == 200
-  doAssert "<h1>Hello, Ada</h1>" in response.body
-"""
-
-proc ssrReadme(name: string, auth: bool): string =
-  let authDocs =
-    if auth:
-      """
-## Authentication
-
-Pages use an HttpOnly server-side session. Sign in at `/login` with the
-generated development account `ada` / `s3cret`. Replace the demo user table
-and in-memory session store before deploying.
-"""
-    else:
-      ""
-  """# """ & name & "\n" & """
-
-FastNim server with server-rendered Karax pages.
-
-## Run
-
-```sh
-nim c -r --path:src src/main.nim
-```
-
-Open http://127.0.0.1:8000 and http://127.0.0.1:8000/users/Ada.
-""" &
-    authDocs & """
-
-## Test
-
-```sh
-nimble test
-```
-
-## Notes
-
-- Pages are plain Karax `buildHtml` markup stringified with `$` and sent
-  with the `html` helper. Rendering is static: Karax event handlers do not
-  survive server-side rendering.
-- `src/routes/pages.nim` uses `import fastnim except text` because Karax
-  exports its own `text` routine for `buildHtml`.
-- For interactive pages, scaffold with `--template:karax_csr` instead and
-  compile the client with `nim js`.
+  test "author names are escaped":
+    check "&lt;Ada&gt;" in authorItem(Author(id: 1, name: "<Ada>"))
 """
 
 proc scaffoldKaraxSsr*(dir, name: string, auth = false) =
-  ## Writes a Karax SSR project into ``dir``.
-  ##
-  ## ``dir`` should be the empty project root; ``name`` is the project and
-  ## Nimble package name.
-  writeSsrFile(dir / name & ".nimble", ssrNimble(name))
-  writeSsrFile(dir / "config.nims", "switch(\"path\", \"src\")\n")
-  writeSsrFile(dir / "src" / "main.nim", ssrMain(name, auth))
-  writeSsrFile(dir / "src" / "routes" / "pages.nim", ssrPages(name))
+  ## Writes a structured server-rendered HTMX project into ``dir``.
+  scaffoldStructuredProject(dir, name, ssr = true)
+  writeSsrFile(dir / "src" / "services" / "authors_service.nim", serviceSource())
+  writeSsrFile(dir / "src" / "templates" / "base.nim", baseTemplateSource())
+  writeSsrFile(dir / "src" / "templates" / "authors.nim", authorsTemplateSource())
+  writeSsrFile(dir / "src" / "routers" / "pages.nim", routerSource())
+  writeSsrFile(dir / "src" / name & ".nim", mainSource(name, auth))
   if auth:
     writeSsrFile(dir / "src" / "auth.nim", sessionAuthSource(["/login"]))
-    writeSsrFile(dir / "src" / "routes" / "auth.nim", ssrAuthRoutes())
-  writeSsrFile(dir / "tests" / "test_pages.nim", ssrTests(name))
-  writeSsrFile(dir / "README.md", ssrReadme(name, auth))
+    writeSsrFile(dir / "src" / "routers" / "auth.nim", authRoutesSource())
+    writeSsrFile(
+      dir / "README.md",
+      readFile(dir / "README.md") &
+        "\n## Authentication\n\nThe SSR starter uses an HttpOnly server-side session. " &
+        "Replace the generated demo account before deployment.\n",
+    )
+  writeSsrFile(dir / "tests" / "test_app.nim", testSource(name))

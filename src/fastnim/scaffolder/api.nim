@@ -1,7 +1,4 @@
-## JSON API project scaffolding for ``fastnim init``.
-##
-## Generates a small versioned API: typed models, an exported users router
-## with list/get/create/delete routes, an in-process test suite, and docs.
+## Structured JSON API project scaffolding for ``fastnim init --template:api``.
 
 import std/os
 
@@ -11,129 +8,156 @@ proc writeApiFile(path, content: string) =
   createDir(path.parentDir())
   writeFile(path, content)
 
-proc apiNimble(name: string): string =
+proc projectNimble(name: string): string =
   """# Package
 
 version = "0.1.0"
 author = "you"
 description = """" & name &
-    """ - FastNim JSON API"
+    """ - FastNim application"
 license = "MIT"
 srcDir = "src"
+bin = @["""" & name & """"]
+binDir = "."
 
 # Dependencies
 
 requires "nim >= 2.2.12"
 requires "chronos >= 4.0.0"
-# Install fastnim from its repository until it is published on nimble.
-requires "fastnim >= 0.1.0"
+requires "fastnim >= 1.0.0"
+
+# Database tasks
+
+task bootstrap, "Generate and apply migrations for first-time setup":
+  exec "fastnim makemigrations"
+  exec "fastnim migrate"
+
+task makemigrations, "Generate migrations from the current models":
+  exec "fastnim makemigrations"
+
+task migrate, "Apply pending database migrations":
+  exec "fastnim migrate"
 """
 
-proc apiModels(): string =
-  """## Shared request/response models.
+proc settingsSource(name: string): string =
+  """## Application settings shared by the server and management commands.
 
-type
-  CreateUser* = object
-    ## Fields accepted when creating a user.
-    name*: string
-    email*: string
+import std/[os, strutils]
 
-  User* = object
-    ## A stored user.
-    id*: int
-    name*: string
-    email*: string
+const
+  appName* = """" & name & """"
+  migrationsDir* = "src/migrations"
+
+let databasePath* = getEnv("DATABASE_PATH", "database.db")
+
+proc appPort*(): uint16 =
+  ## Returns the HTTP port configured through ``PORT``.
+  uint16(getEnv("PORT", "8000").parseInt())
 """
 
-proc apiUsersRoutes(): string =
-  """## Users API. Mounted by main.nim at /v1/users.
-##
-## The in-memory `store` below is demo state so the scaffold runs without a
-## database. Swap it for a pool behind `ctx` (see `app.onLoad`) as the app grows.
+proc manageSource(): string =
+  """## Project management entrypoint used by the ``fastnim`` CLI.
 
-import std/[json, strutils]
+import fastnim/orm
+import settings
+import models/index
+import migrations/all
+
+when isMainModule:
+  quit runCli(
+    defaultDbPath = databasePath,
+    defaultMigrationsDir = migrationsDir,
+  )
+"""
+
+proc modelSource(): string =
+  """## Author database model.
+
+import fastnim/orm
+
+model Author:
+  name:
+    CharField(maxLength: 120, minLength: 1, unique: true)
+"""
+
+proc modelIndexSource(): string =
+  """## Public model namespace. Import every model here so migrations see it.
+
+import ./author
+
+export author
+"""
+
+proc serviceSource(): string =
+  """## Database operations for authors.
+
+import fastnim/orm
+import ../models/author
+
+proc listAuthors*(): Future[seq[Author]] {.async.} =
+  ## Returns all authors ordered by name.
+  await Author.objects.orderBy("name").all()
+
+proc createAuthor*(author: Author): Future[Author] {.async.} =
+  ## Validates and stores an author supplied by the request body.
+  await author.save()
+  author
+"""
+
+proc routerSource(): string =
+  """## Author JSON endpoints.
 
 import fastnim
-import ../models
+import fastnim/orm
+import ../models/author
+import ../services/authors_service
 
-let userRouter* = initRouter(prefix = "/users", tags = @["users"])
+let authorRouter* = initRouter(prefix = "/authors", tags = @["authors"])
 
-var store = @[User(id: 1, name: "Ada Lovelace", email: "ada@example.com")]
+authorRouter.get("/", responses = @[(200, seq[Author])]):
+  ok await listAuthors()
 
-proc findUser(id: int): int =
-  for i, user in store:
-    if user.id == id:
-      return i
-  -1
-
-userRouter.get("/", responses = @[(200, seq[User])]):
-  ok store
-
-userRouter.get("/{id}", responses = @[(200, User), (404, ApiError)]):
-  let id =
-    try:
-      parseInt(request.pathParam("id"))
-    except ValueError:
-      -1
-  let ix = findUser(id)
-  if ix < 0:
-    notFound initApiError("user_not_found", "user not found")
-  else:
-    ok store[ix]
-
-userRouter.post("/", body = CreateUser, responses = @[(201, User)]):
-  let user = User(id: store.len + 1, name: body.name, email: body.email)
-  {.gcsafe.}:
-    store.add(user)
-  created user
-
-userRouter.delete("/{id}", responses = @[(204, void), (404, ApiError)]):
-  let id =
-    try:
-      parseInt(request.pathParam("id"))
-    except ValueError:
-      -1
-  let ix = findUser(id)
-  if ix < 0:
-    notFound initApiError("user_not_found", "user not found")
-  else:
-    {.gcsafe.}:
-      store.del(ix)
-    noContent void
+authorRouter.post("/", body = Author.ignore(id), responses = @[(201, Author)]):
+  created await createAuthor(body)
 """
 
-proc apiMain(name: string, auth: bool): string =
-  let authImports = if auth: "import auth\nimport routes/auth as auth_routes\n" else: ""
+proc mainSource(name: string, auth: bool): string =
+  let authImports = if auth: "import auth\nimport routers/auth as auth_routes\n" else: ""
   let authSetup =
     if auth:
-      "api.installPlugin(authentication())\napi.addRouter(auth_routes.authRouter, prefix = \"/v1\")\n"
+      "app.installPlugin(authentication())\napp.addRouter(auth_routes.authRouter, prefix = \"/api\")\n"
     else:
       ""
-  """## """ & name & """ - FastNim JSON API.
-##
-## Run with: nim c -r --path:src src/main.nim
-## Interactive docs at http://127.0.0.1:8000/docs once running.
+  """## """ & name & """ application entrypoint.
 
 import chronos
-
 import fastnim
-""" &
-    authImports & """
-import routes/users
+import fastnim/orm
 
-let api = initFastNim()
-""" & authSetup & """
-api.addRouter(userRouter, prefix = "/v1")
+import settings
+""" & authImports & """import routers/authors
 
-let server = api.serve(port = 8000)
-echo "Listening at http://127.0.0.1:8000"
-waitFor server.join()
+let app = initFastNim()
+""" & authSetup & """app.addRouter(authorRouter, prefix = "/api")
+
+proc openApp(ctx: Context) =
+  let database = waitFor openDatabase(databasePath)
+  ctx.setContext("database", database)
+
+proc closeApp(ctx: Context) =
+  waitFor ctx.get("database", Database).close()
+
+app.onLoad openApp
+app.onUnload closeApp
+
+when isMainModule:
+  let server = app.serve(port = appPort())
+  echo "Listening at http://127.0.0.1:" & $appPort()
+  waitFor server.join()
 """
 
-proc apiAuthRoutes(): string =
-  """## Public endpoint that exchanges credentials for a bearer JWT.
-
-import std/json
+proc authRoutesSource(): string =
+  """## JWT login route.
 
 import fastnim
 import ../auth
@@ -141,122 +165,91 @@ import ../auth
 let authRouter* = initRouter(prefix = "/auth", tags = @["auth"])
 
 authRouter.post(
-  "/login", body = LoginInput, responses = @[(200, TokenOutput), (401, ApiError)]
+  "/login", body = LoginInput,
+  responses = @[(200, TokenOutput), (401, ApiError)],
 ):
   if not credentialsValid(body):
     unauthorized initApiError("invalid_credentials", "invalid credentials")
   else:
     ok issueToken(body.username)
-
-authRouter.get("/me"):
-  ok %*{"user": request.authSubject(), "scheme": request.authScheme()}
 """
 
-proc apiTests(): string =
-  """import std/[json, strutils, unittest]
+proc testSource(name: string): string =
+  """import std/unittest
 
 import fastnim
-import fastnim/testing
-import routes/users
+import routers/authors
 
-let api = initFastNim(logs = false)
-api.addRouter(userRouter)
-
-let client = initTestClient(api)
-
-suite "users":
-  test "lists users":
-    let response = client.get("/users/")
-    check response.status == 200
-    check "Ada Lovelace" in response.body
-
-  test "gets a missing user":
-    let response = client.get("/users/999")
-    check response.status == 404
-    check response.json() == %*{
-      "code": "user_not_found", "message": "user not found", "fields": {}
-    }
-
-  test "creates a user":
-    let response = client.post(
-      "/users/", $ %*{"name": "Grace", "email": "g@example.com"}
-    )
-    check response.status == 201
-    check response.json() ==
-      %*{"id": 2, "name": "Grace", "email": "g@example.com"}
-
-  test "deletes a user":
-    let deleted = client.delete("/users/1")
-    check deleted.status == 204
-    check client.get("/users/1").status == 404
+suite """" & name & """ routes":
+  test "author router is mountable":
+    let app = initFastNim(logs = false)
+    app.addRouter(authorRouter, prefix = "/api")
+    check app != nil
 """
 
-proc apiReadme(name: string, auth: bool): string =
+proc readmeSource(name, templateName: string, auth: bool): string =
   let authDocs =
     if auth:
       """
+
 ## Authentication
 
-`/v1/*` uses HS256 bearer JWT authentication. The generated development
-account is `ada` / `s3cret`; replace it and set `JWT_SECRET` before deploying.
-
-```sh
-TOKEN=$(curl -s -X POST http://127.0.0.1:8000/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"ada","password":"s3cret"}' | jq -r .token)
-curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/v1/users/
-```
+The API starter uses bearer JWTs. Replace the demo credentials and set a
+strong `JWT_SECRET` before deployment.
 """
     else:
       ""
-  """# """ & name & "\n" & """
+  """# """ & name & """
 
-FastNim JSON API with versioned routes (`/v1/users`).
-
-## Run
+FastNim """ & templateName & """ project with explicit database migrations.
 
 ```sh
-nim c -r --path:src src/main.nim
+nimble setup
+nimble bootstrap
+nimble run
 ```
 
-- API: http://127.0.0.1:8000/v1/users
-- Docs: http://127.0.0.1:8000/docs
+`makemigrations` only writes migration modules. The server never applies them
+automatically; run `nimble migrate` during deployment before starting it.
 
-```sh
-curl http://127.0.0.1:8000/v1/users/
-curl -X POST http://127.0.0.1:8000/v1/users/ \
-  -d '{"name":"Grace","email":"g@example.com"}'
-```
-""" &
-    authDocs & """
+- Settings: `src/settings.nim`
+- Models: `src/models/`
+- Routers: `src/routers/`
+- Services: `src/services/`
+- Migrations: `src/migrations/`
+""" & authDocs
 
-## Test
-
-```sh
-nimble test
-```
-
-## Grow
-
-- New domain? Copy `src/routes/users.nim` to `src/routes/items.nim`,
-  export its router, and mount it in `src/main.nim`.
-- New version? Mount the same routers under `prefix = "/v2"`.
-- Real database? Replace the in-memory `store` with a pool opened in
-  `api.onLoad` and exposed through `ctx`.
-"""
+proc scaffoldStructuredProject*(dir, name: string, auth = false, ssr = false) =
+  ## Writes the common settings, ORM, management, and application structure.
+  writeApiFile(dir / name & ".nimble", projectNimble(name))
+  writeApiFile(dir / "config.nims", "switch(\"path\", \"src\")\n")
+  writeApiFile(dir / ".gitignore", "database.db*\n/.fastnim/\n/" & name & "\n")
+  writeApiFile(dir / "src" / "settings.nim", settingsSource(name))
+  writeApiFile(dir / "src" / "manage.nim", manageSource())
+  writeApiFile(
+    dir / "src" / "migrations" / "all.nim", "## Compiled migrations.\n\ndiscard\n"
+  )
+  writeApiFile(dir / "src" / "models" / "author.nim", modelSource())
+  writeApiFile(dir / "src" / "models" / "index.nim", modelIndexSource())
+  createDir(dir / "src" / "services")
+  createDir(dir / "src" / "routers")
+  createDir(dir / "src" / "templates")
+  if not ssr:
+    writeApiFile(dir / "src" / "services" / "authors_service.nim", serviceSource())
+    writeApiFile(dir / "src" / "routers" / "authors.nim", routerSource())
+    writeApiFile(dir / "src" / name & ".nim", mainSource(name, auth))
+  if auth:
+    writeApiFile(
+      dir / "src" / "auth.nim", jwtAuthSource(["/api/*"], ["/api/auth/login"])
+    )
+    writeApiFile(dir / "src" / "routers" / "auth.nim", authRoutesSource())
+  if not ssr:
+    writeApiFile(dir / "tests" / "test_app.nim", testSource(name))
+  writeApiFile(
+    dir / "README.md",
+    readmeSource(name, if ssr: "SSR + HTMX" else: "JSON API", auth),
+  )
 
 proc scaffoldApi*(dir, name: string, auth = false) =
-  ## Writes a JSON API project into ``dir``.
-  ##
-  ## ``dir`` should be the empty project root; ``name`` is the project and
-  ## Nimble package name.
-  writeApiFile(dir / name & ".nimble", apiNimble(name))
-  writeApiFile(dir / "config.nims", "switch(\"path\", \"src\")\n")
-  writeApiFile(dir / "src" / "main.nim", apiMain(name, auth))
-  writeApiFile(dir / "src" / "models.nim", apiModels())
-  writeApiFile(dir / "src" / "routes" / "users.nim", apiUsersRoutes())
-  if auth:
-    writeApiFile(dir / "src" / "auth.nim", jwtAuthSource(["/v1/*"], ["/v1/auth/login"]))
-    writeApiFile(dir / "src" / "routes" / "auth.nim", apiAuthRoutes())
-  writeApiFile(dir / "tests" / "test_users.nim", apiTests())
-  writeApiFile(dir / "README.md", apiReadme(name, auth))
+  ## Writes a structured JSON API project into ``dir``.
+  scaffoldStructuredProject(dir, name, auth)

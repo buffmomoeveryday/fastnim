@@ -302,6 +302,11 @@ suite "command line":
     let db = "--db:" & dir / "db.sqlite3"
     let mdir = "--dir:" & dir / "m"
     check runCli(@["showmigrations", db, mdir]) == 0
+    check runCli(
+      @["showmigrations"],
+      defaultDbPath = dir / "configured.sqlite3",
+      defaultMigrationsDir = dir / "m",
+    ) == 0
     check runCli(@["migrate", db, mdir]) == 0
     check runCli(@["sqlmigrate", "0001", mdir]) == 0
     check runCli(@["sqlmigrate", "9999", mdir]) == 1

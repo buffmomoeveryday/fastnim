@@ -1,7 +1,7 @@
 ## Command-line interface for FastNim project scaffolding.
 ##
 ## Build the binary with ``nimble build`` (``bin = @["fastnim"]``) and run
-## ``fastnim init myapp --template:inertiajs``. This module is intentionally
+## ``fastnim init myapp --template:ssr``. This module is intentionally
 ## not re-exported from ``fastnim`` so CLI dependencies stay out of
 ## library builds.
 
@@ -18,12 +18,17 @@ const
   NimblePkgVersion {.strdefine.} = "0.1.0"
   FastNimVersion* = NimblePkgVersion
     ## FastNim package version reported by the command-line interface.
-  Templates* = ["api", "karax_ssr", "karax_csr", "inertiajs"]
+  Templates* = ["api", "ssr", "karax_ssr", "karax_csr", "inertiajs"]
     ## Project templates accepted by ``fastnim init``.
   Frontends* = ["svelte", "react"] ## Client frameworks accepted by ``--frontend``.
   DefaultTemplate = "api"
+  ProjectCommands = ["makemigrations", "migrate", "showmigrations", "sqlmigrate"]
   CliUsage = """Usage:
   $command init [name] [options]
+  $command makemigrations [options]
+  $command migrate [options]
+  $command showmigrations [options]
+  $command sqlmigrate NAME [options]
   $command --version
 $doc
 Options:
@@ -110,7 +115,7 @@ proc runInit(
     case templateName
     of "api":
       scaffoldApi(target, name, auth)
-    of "karax_ssr":
+    of "ssr", "karax_ssr":
       scaffoldKaraxSsr(target, name, auth)
     of "karax_csr":
       scaffoldKaraxCsr(target, name, auth)
@@ -269,6 +274,32 @@ proc initCliConfig(): ClCfg =
 
 let CliConfig = initCliConfig()
 
+proc runProjectCommand*(params: seq[string]): int =
+  ## Compiles the project's management entrypoint and forwards an ORM command.
+  ##
+  ## Models and migrations must be compiled with the application, so the
+  ## installed framework binary delegates to ``src/manage.nim`` rather than
+  ## trying to load project modules dynamically.
+  let manage = "src" / "manage.nim"
+  if not fileExists(manage):
+    stderr.writeLine(
+      "fastnim: error: cannot find src/manage.nim. Run this command from a " &
+        "FastNim project root."
+    )
+    return 1
+  try:
+    createDir(".fastnim")
+    let binary = ".fastnim" / addFileExt("manage", ExeExt)
+    var command = "nim c -r --hints:off --verbosity:0 --nimcache:" &
+      quoteShell(".fastnim" / "nimcache") & " -o:" & quoteShell(binary) & " " &
+      quoteShell(manage)
+    for param in params:
+      command.add " " & quoteShell(param)
+    execShellCmd(command)
+  except OSError as exc:
+    stderr.writeLine("fastnim: error: cannot run project command: " & exc.msg)
+    1
+
 dispatchGen(
   fastNimCommand,
   cmdName = "fastnim",
@@ -277,7 +308,7 @@ dispatchGen(
   dispatchName = "dispatchFastNim",
   help = {
     "args": "the init command followed by an optional project name",
-    "template": "project template: api, karax_ssr, karax_csr, or inertiajs",
+    "template": "project template: api or ssr (legacy templates remain available)",
     "frontend": "Inertia client framework: svelte or react",
     "pkg-manager": "Inertia package manager: pnpm, bun, npm, or deno",
     "package-manager": "alias for --pkg-manager",
@@ -306,6 +337,8 @@ proc cliMain*(params: seq[string], interactive = true): int =
   ##
   ## Pass ``interactive = false`` (as tests do) to never prompt or install:
   ## missing choices silently fall back to defaults.
+  if params.len > 0 and params[0].toLowerAscii() in ProjectCommands:
+    return runProjectCommand(params)
   cliInteractive = interactive
   let effectiveParams =
     if params.len == 0:

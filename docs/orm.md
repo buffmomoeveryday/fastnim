@@ -677,7 +677,28 @@ migration "0001_initial", "Create the post table":
 ```
 
 `makemigrations` needs the models, and every later command needs the
-migrations, compiled into the same program. Add a `manage.nim`:
+migrations, compiled into the same program. Projects created by `fastnim init`
+already have `src/manage.nim`, `src/settings.nim`, and an empty
+`src/migrations/all.nim`, so use the main CLI directly:
+
+```sh
+nimble setup
+nimble bootstrap
+fastnim makemigrations --name:add_slug
+nimble migrate
+fastnim showmigrations
+fastnim sqlmigrate 0002
+```
+
+The generated `.nimble` file provides `nimble bootstrap` for first-time
+generation and application, plus separate `nimble makemigrations` and
+`nimble migrate` tasks. `nimble setup` remains Nimble's built-in command for
+creating `nimble.paths`.
+
+Migration application is deliberately separate from server startup. Running
+the application never modifies its schema automatically.
+
+For a hand-built project, the equivalent management entrypoint is:
 
 ```nim
 import fastnim/orm
@@ -688,10 +709,10 @@ when isMainModule:
   quit runCli()
 ```
 
-The first `makemigrations` runs before `migrations/all.nim` exists, so leave
-that import out, generate the initial migration, add the import, and rebuild.
-A migration file that is not imported is refused: `migrate` would otherwise
-skip it.
+Create `migrations/all.nim` containing `discard` before the first command.
+`makemigrations` rewrites that index with imports for every migration. A
+migration file that is not imported is refused: `migrate` would otherwise skip
+it.
 
 ```sh
 nim c -r manage.nim makemigrations                 # writes the next migration
