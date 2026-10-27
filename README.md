@@ -589,8 +589,8 @@ type ProductImageForm = object
   image* {.upload(
     contentTypes = ["image/jpeg", "image/png"],
     uploadDir = "product-images",
-    maxRequestSize = 6 * 1024 * 1024,
-    maxFileSize = 5 * 1024 * 1024,
+    maxRequestSize = 6.MB,
+    maxFileSize = 5.MB,
   ).}: UploadedFile
 
 app.post("/products/{id}/image"):
@@ -603,6 +603,34 @@ app.post("/products/{id}/image"):
     "path": image.path,
   }
 ```
+
+Typed routes can combine ordinary fields and files with
+`multipart = Model`. The decoded model is available as `multipart`, receives
+the same pragma validation as JSON bodies, and is included in OpenAPI as
+`multipart/form-data`. Size limits use binary helpers such as `5.MB` or
+`200.KiB` (`1.MB == 1_048_576`):
+
+```nim
+type CreateBook = object
+  title {.nonEmpty.}: string
+  category: CategoryInput
+  cover* {.
+    upload(
+      contentTypes = ["image/jpeg", "image/png"],
+      maxRequestSize = 6.MB,
+      maxFileSize = 5.MB,
+    )
+  .}: UploadedFile
+
+app.post("/books", multipart = CreateBook, responses = @[(201, Book)]):
+  created saveBook(multipart)
+```
+
+Send strings, numbers, booleans, and enums as ordinary form parts. Send nested
+objects and collections, such as `category`, as JSON-valued parts. Every field
+must occur once except `Option[T]` fields, which may be omitted. File parts use
+the field's `upload` limits and MIME allowlist. Parsing or validation failures
+remove files already written by the request.
 
 Declare multiple file fields in the same object. A metadata-aware S3 key
 builder can route each field to a different prefix:
@@ -644,7 +672,7 @@ In-memory files require explicit opt-in and a mandatory aggregate cap:
 ```nim
 let options = initMultipartOptions(
   storage = UploadStorage.Memory,
-  memorySizeCap = 1024 * 1024,
+  memorySizeCap = 1.MB,
 )
 ```
 
@@ -655,7 +683,9 @@ outer cap: a `Content-Length` or buffered body above it returns `413` before
 `maxRequestSize`. `serve(maxRequestBodySize = ...)` overrides that cap for the
 server. A handler timeout cancels parsing and deletes partial uploads. See
 [`examples/product_image_upload.nim`](examples/product_image_upload.nim) for a
-complete product-image endpoint and `curl -F` command.
+complete product-image endpoint and `curl -F` command. See
+[`examples/mixed_multipart.nim`](examples/mixed_multipart.nim) for metadata and
+a file in one typed request.
 
 ### External and S3 storage
 
@@ -821,8 +851,10 @@ Run [`examples/openapi.nim`](examples/openapi.nim) with
 
 An untyped route such as `app.get("/health"):` has no model information, so it
 is documented only as a generic `200 Successful Response`. Declare
-`responses = @[(200, Model)]` (and `body = Model` for JSON input) to generate
-the request and response schemas automatically.
+`responses = @[(200, Model)]` (and `body = Model`, `form = Model`, or
+`multipart = Model` for typed input) to generate the request and response
+schemas automatically. Mixed multipart routes document nested object parts with
+`encoding` metadata; see [`examples/mixed_multipart.nim`](examples/mixed_multipart.nim).
 
 ## Plugins
 

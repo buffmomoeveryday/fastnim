@@ -397,6 +397,67 @@ macro openApiSchema*(model: typedesc): untyped =
   let schema = typeSchema(model.getTypeImpl)
   result = newCall(ident("openApiSchemaJson"), newLit($schema))
 
+proc multipartUploadPragma(node: NimNode): NimNode {.compileTime.} =
+  if node.kind != nnkPragmaExpr:
+    return nil
+  for pragma in node[1]:
+    if pragma.kind in {nnkCall, nnkCommand} and pragma.len >= 1 and
+        pragma[0].kind in {nnkIdent, nnkSym} and eqIdent(pragma[0], "upload"):
+      return pragma
+
+proc multipartFieldName(field: JsonFieldInfo): string {.compileTime.} =
+  result = field.nimName
+  let pragma = multipartUploadPragma(field.source)
+  if pragma.isNil or pragma.len < 2:
+    return
+  let configured = pragma[1]
+  if configured.kind in {nnkStrLit, nnkRStrLit, nnkTripleStrLit} and
+      configured.strVal.len > 0:
+    result = configured.strVal
+
+proc multipartModelSchema(
+    model: NimNode
+): tuple[schema, encoding: JsonNode] {.compileTime.} =
+  let implementation = objectType(model.getTypeImpl)
+  if implementation.kind != nnkObjectTy:
+    error("multipart route models must be object types", model)
+
+  result.schema = newObjectSchema()
+  result.encoding = newJObject()
+  var names: seq[string]
+  for field in jsonFields(implementation):
+    let uploaded =
+      field.fieldType.kind in {nnkIdent, nnkSym} and
+      eqIdent(field.fieldType, "UploadedFile")
+    let name = if uploaded: multipartFieldName(field) else: field.jsonName
+    if name in names:
+      error("duplicate multipart field name '" & name & "'", field.source)
+    names.add(name)
+
+    var schema =
+      if uploaded:
+        %*{"type": "string", "format": "binary"}
+      else:
+        typeSchema(field.fieldType)
+    if not uploaded:
+      schema.applyValidationSchema(field.source)
+    result.schema["properties"][name] = schema
+    if uploaded or not field.fieldType.isOptionType():
+      result.schema["required"].add(newJString(name))
+    if not uploaded and schema.kind == JObject and
+        schema.getOrDefault("type").getStr() in ["object", "array"]:
+      result.encoding[name] = %*{"contentType": "application/json"}
+
+macro openApiMultipartSchema*(model: typedesc): untyped =
+  ## Produces an OpenAPI schema for a mixed multipart request model.
+  let schema = multipartModelSchema(model).schema
+  result = newCall(ident("openApiSchemaJson"), newLit($schema))
+
+macro openApiMultipartEncoding*(model: typedesc): untyped =
+  ## Produces multipart encoding metadata for JSON-valued nested fields.
+  let encoding = multipartModelSchema(model).encoding
+  result = newCall(ident("openApiSchemaJson"), newLit($encoding))
+
 macro openApiResponseSchema*(
     model: typedesc, ignoredFields, includedFields: untyped
 ): untyped =

@@ -38,8 +38,8 @@ type
     image* {.
       upload(
         contentTypes = ["image/jpeg", "image/png"],
-        maxRequestSize = 11 * 1024 * 1024,
-        maxFileSize = 10 * 1024 * 1024,
+        maxRequestSize = 11.MB,
+        maxFileSize = 10.MB,
       )
     .}: UploadedFile
 
@@ -47,15 +47,15 @@ type
     image* {.
       upload(
         contentTypes = ["image/jpeg", "image/png"],
-        maxRequestSize = 16 * 1024 * 1024,
-        maxFileSize = 10 * 1024 * 1024,
+        maxRequestSize = 16.MB,
+        maxFileSize = 10.MB,
       )
     .}: UploadedFile
     manual* {.
       upload(
         contentTypes = ["application/pdf"],
-        maxRequestSize = 16 * 1024 * 1024,
-        maxFileSize = 5 * 1024 * 1024,
+        maxRequestSize = 16.MB,
+        maxFileSize = 5.MB,
       )
     .}: UploadedFile
 
@@ -106,5 +106,5 @@ app.post("/products/{productId}/assets"):
   )
 
 when isMainModule:
-  let server = app.serve(maxRequestBodySize = 16 * 1024 * 1024)
+  let server = app.serve(maxRequestBodySize = 16.MB)
   waitFor server.join()

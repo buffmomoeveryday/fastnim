@@ -44,6 +44,16 @@ type ProductAssetsForm = object
     )
   .}: UploadedFile
 
+type MixedProductForm = object
+  title*: string
+  image* {.
+    upload(
+      contentTypes = ["image/png"],
+      maxRequestSize = 4096,
+      maxFileSize = 1024,
+    )
+  .}: UploadedFile
+
 proc newFakeUploadStore(state: FakeUploadState): UploadStore =
   let begin: UploadBeginProc = proc(
       metadata: UploadMetadata
@@ -266,6 +276,20 @@ block parsesTypedMultipleUploads:
   doAssert form.image.data == "image bytes"
   doAssert form.manual.filename == "guide.pdf"
   doAssert form.manual.data == "pdf bytes"
+
+block rollsBackTypedMultipartAfterFieldFailure:
+  let state = FakeUploadState()
+  let body =
+    multipartBody([filePart("image", "product.png", "image/png", "image bytes")])
+  try:
+    discard waitFor multipartRequest(body).parseMultipartModel(
+      MixedProductForm, newFakeUploadStore(state)
+    )
+    doAssert false
+  except MultipartError as exc:
+    doAssert exc.status == 400
+    doAssert state.completed == 1
+    doAssert state.removed == 1
 
 block enforcesPerFieldSizeForMultipleUploads:
   let configs = @[

@@ -180,6 +180,47 @@ Malformed values or missing required fields return `400`; successfully parsed
 values that fail constraints return `422` with locations beginning in
 `"form"`.
 
+## Typed multipart
+
+Use `multipart = Model` for `multipart/form-data` requests that mix ordinary
+fields with file uploads. The decoded model is available as `multipart` and
+receives the same field-pragma validation as JSON bodies:
+
+```nim
+type
+  CategoryInput = object
+    name {.nonEmpty.}: string
+
+  CreateBook = object
+    title {.nonEmpty.}: string
+    category: CategoryInput
+    cover* {.
+      upload(
+        contentTypes = ["image/jpeg", "image/png"],
+        maxRequestSize = 6.MB,
+        maxFileSize = 5.MB,
+      )
+    .}: UploadedFile
+
+app.post("/books", multipart = CreateBook, responses = @[(201, Book)]):
+  created saveBook(multipart)
+```
+
+Size limits accept binary helpers such as `200.KB`, `5.MB`, or `1.GiB`
+(`1.MB == 1_048_576`). `KiB` / `MiB` / `GiB` are the IEC names; `KB` / `MB` /
+`GB` are aliases for the same values.
+
+Send scalars and enums as ordinary form parts. Send nested objects and
+collections as JSON-valued parts. Direct `UploadedFile` fields use their
+`upload` pragma for MIME allowlists and size limits. JSON `body = Model`
+routes reject models that contain `UploadedFile` fields at compile time; use
+`multipart = Model` instead.
+
+Parsing failures return `400` (or `413`/`415` for size and content-type
+limits). Constraint failures return `422` with locations beginning in
+`"multipart"`. Failed requests remove files already written for that upload.
+See `examples/mixed_multipart.nim` for a runnable endpoint.
+
 ## Nested values and field names
 
 `validateModel` recursively validates nested objects, non-nil references,
@@ -428,3 +469,5 @@ Typed routes also document their automatic `400` and `422` responses.
 
 See `examples/validation.nim` for a runnable example containing typed JSON
 bodies, query parameters, nested models, custom rules, and state transitions.
+See `examples/mixed_multipart.nim` for validated multipart fields plus a file
+upload, including generated OpenAPI `multipart/form-data` schemas.

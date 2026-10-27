@@ -6,6 +6,7 @@ import
   fastnim/[
     context/http,
     context/state,
+    core/bytes,
     core/limits,
     core/server,
     jsonfields,
@@ -27,7 +28,7 @@ import
   ]
 
 export
-  http, state, limits, server, jsonfields, logging, dsl, builtin, spec, extract,
+  http, state, bytes, limits, server, jsonfields, logging, dsl, builtin, spec, extract,
   multipart, uploadsink, validate, plugin, plugins, router, embed, files, testing,
   websocket, chronos, jsonutils
 

@@ -19,8 +19,8 @@ let productImage = initUploadConfig(
   fieldName = "image",
   contentTypes = ["image/jpeg", "image/png"],
   uploadDir = ProductImageDir,
-  maxRequestSize = 6 * 1024 * 1024,
-  maxFileSize = 5 * 1024 * 1024,
+  maxRequestSize = 6.MB,
+  maxFileSize = 5.MB,
 )
 
 let app = initFastNim()
@@ -38,5 +38,5 @@ app.post("/products/{productId}/image"):
   )
 
 when isMainModule:
-  let server = app.serve(maxRequestBodySize = 6 * 1024 * 1024)
+  let server = app.serve(maxRequestBodySize = 6.MB)
   waitFor server.join()

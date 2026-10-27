@@ -3,16 +3,18 @@
 ## File parts stream to temporary files by default. In-memory storage must be
 ## selected explicitly and is always guarded by ``memorySizeCap``.
 
-import std/[macros, os, parseutils, strutils, tables, tempfiles]
+import std/[json, macros, options, os, parseutils, strutils, tables, tempfiles]
 
 import chronos
 
 import ../context/http
+import ../core/bytes
 import ../params/uploadsink
+import ../private/jsonconversion
 
 const
-  DefaultChunkSize = 64 * 1024
-  DefaultPartHeadersSize = 8 * 1024
+  DefaultChunkSize = 64.KB
+  DefaultPartHeadersSize = 8.KB
 
 type
   UploadStorage* {.pure.} = enum
@@ -50,6 +52,10 @@ type
     partHeadersSize*: int ## Maximum bytes in one part's headers.
     chunkSize*: int ## Maximum body chunk requested from the transport.
     limits*: UploadLimits ## Request, file, field, count, and type limits.
+    uploadFieldNames*: seq[string]
+      ## When non-empty, only these named parts count as file uploads.
+      ## Clients such as Swagger UI often attach ``filename`` to JSON-valued
+      ## nested parts; those must still parse as ordinary fields.
 
   UploadConfig* = object
     ## Declarative settings for one required uploaded file field.
@@ -112,24 +118,25 @@ type
 template upload*(
   fieldName: static[string] = "",
   contentTypes: untyped = [],
-  maxFileSize: static[int64] = 10'i64 * 1024 * 1024,
-  maxRequestSize: static[int64] = 32'i64 * 1024 * 1024,
+  maxFileSize: static[int64] = 10.MB,
+  maxRequestSize: static[int64] = 32.MB,
   uploadDir: static[string] = "",
   storage: static[UploadStorage] = UploadStorage.Disk,
-  memorySizeCap: static[int64] = 0'i64,
-  maxFieldSize: static[int64] = 64'i64 * 1024,
+  memorySizeCap: static[int64] = 0,
+  maxFieldSize: static[int64] = 64.KB,
   partHeadersSize: static[int] = DefaultPartHeadersSize,
   chunkSize: static[int] = DefaultChunkSize,
 ) {.pragma.}
   ## Configures an ``UploadedFile`` field for typed ``parseUpload``.
   ##
   ## The multipart field name defaults to the Nim object field name.
+  ## Size limits accept byte helpers such as ``5.MB`` and ``200.KiB``.
 
 proc initUploadLimits*(
-    maxRequestSize = 32'i64 * 1024 * 1024,
-    maxFileSize = 10'i64 * 1024 * 1024,
+    maxRequestSize = 32.MB,
+    maxFileSize = 10.MB,
     maxFiles = 8,
-    maxFieldSize = 64'i64 * 1024,
+    maxFieldSize = 64.KB,
     allowContentType: UploadContentTypeHook = nil,
     fileSizeLimit: UploadFileSizeHook = nil,
 ): UploadLimits =
@@ -152,10 +159,13 @@ proc initMultipartOptions*(
     limits = initUploadLimits(),
     partHeadersSize = DefaultPartHeadersSize,
     chunkSize = DefaultChunkSize,
+    uploadFieldNames: openArray[string] = [],
 ): MultipartOptions =
   ## Creates multipart options.
   ##
   ## ``UploadStorage.Memory`` is rejected unless ``memorySizeCap`` is positive.
+  ## When ``uploadFieldNames`` is non-empty, only matching parts with a
+  ## ``filename`` parameter are stored as files.
   if storage == UploadStorage.Memory and memorySizeCap <= 0:
     raise newException(ValueError, "memory multipart storage requires a size cap")
   if partHeadersSize < 256:
@@ -169,17 +179,26 @@ proc initMultipartOptions*(
     partHeadersSize: partHeadersSize,
     chunkSize: chunkSize,
     limits: limits,
+    uploadFieldNames: @uploadFieldNames,
   )
+
+proc isUploadPart(info: PartInfo, options: MultipartOptions): bool =
+  ## True when this part should be stored as an uploaded file.
+  if not info.hasFilename:
+    return false
+  if options.uploadFieldNames.len == 0:
+    return true
+  info.name in options.uploadFieldNames
 
 proc initUploadConfig*(
     fieldName: string,
     contentTypes: openArray[string] = [],
-    maxFileSize = 10'i64 * 1024 * 1024,
-    maxRequestSize = 32'i64 * 1024 * 1024,
+    maxFileSize = 10.MB,
+    maxRequestSize = 32.MB,
     uploadDir = "",
     storage = UploadStorage.Disk,
     memorySizeCap = 0'i64,
-    maxFieldSize = 64'i64 * 1024,
+    maxFieldSize = 64.KB,
     partHeadersSize = DefaultPartHeadersSize,
     chunkSize = DefaultChunkSize,
 ): UploadConfig =
@@ -363,11 +382,12 @@ proc writePartChunk(
     sink: UploadSink,
     output: PartOutput,
     fileSizeLimit: int64,
+    asFile: bool,
 ): Future[void] {.async: (raises: [CatchableError]).} =
   if chunk.len == 0:
     return
   output.size += chunk.len.int64
-  if info.hasFilename:
+  if asFile:
     if output.size > fileSizeLimit:
       raiseMultipart(413, "uploaded file exceeds its size limit")
     if not sink.isNil:
@@ -393,7 +413,8 @@ proc consumePart(
 ): Future[tuple[file: UploadedFile, fieldValue: string, finished: bool]] {.
     async: (raises: [CatchableError])
 .} =
-  if info.hasFilename:
+  let asFile = isUploadPart(info, state.options)
+  if asFile:
     if not state.options.limits.allowContentType.isNil and
         not state.options.limits.allowContentType(
           info.name, info.filename, info.contentType
@@ -401,7 +422,7 @@ proc consumePart(
       raiseMultipart(415, "uploaded file content type is not allowed")
 
   var fileSizeLimit = state.options.limits.maxFileSize
-  if info.hasFilename and not state.options.limits.fileSizeLimit.isNil:
+  if asFile and not state.options.limits.fileSizeLimit.isNil:
     let configuredLimit =
       state.options.limits.fileSizeLimit(info.name, info.filename, info.contentType)
     if configuredLimit > 0:
@@ -411,13 +432,13 @@ proc consumePart(
   var sink: UploadSink
   var stored: StoredUpload
   var sinkCompleted = false
-  if info.hasFilename and not state.store.isNil:
+  if asFile and not state.store.isNil:
     sink = await state.store.begin(
       UploadMetadata(
         fieldName: info.name, filename: info.filename, contentType: info.contentType
       )
     )
-  elif info.hasFilename and state.options.storage == UploadStorage.Disk:
+  elif asFile and state.options.storage == UploadStorage.Disk:
     try:
       (output.file, output.path) =
         createTempFile("fastnim-upload-", ".tmp", state.options.uploadDir)
@@ -431,7 +452,7 @@ proc consumePart(
       let delimiterAt = state.buffer.find(delimiter)
       if delimiterAt >= 0:
         await state.writePartChunk(
-          info, state.buffer[0 ..< delimiterAt], sink, output, fileSizeLimit
+          info, state.buffer[0 ..< delimiterAt], sink, output, fileSizeLimit, asFile
         )
         state.buffer = state.buffer[delimiterAt + delimiter.len ..^ 1]
         while state.buffer.len < 2 and not state.eof:
@@ -453,13 +474,13 @@ proc consumePart(
       if state.buffer.len > keep:
         let writable = state.buffer.len - keep
         await state.writePartChunk(
-          info, state.buffer[0 ..< writable], sink, output, fileSizeLimit
+          info, state.buffer[0 ..< writable], sink, output, fileSizeLimit, asFile
         )
         state.buffer = state.buffer[writable ..^ 1]
       if state.eof:
         raiseMultipart(400, "multipart request ended before its final boundary")
       await state.readMore()
-    if info.hasFilename and not sink.isNil:
+    if asFile and not sink.isNil:
       stored = await sink.complete()
       sinkCompleted = true
       state.completedUploads.add(stored)
@@ -476,7 +497,7 @@ proc consumePart(
       close(output.file)
 
   result.fieldValue = output.fieldValue
-  if info.hasFilename:
+  if asFile:
     result.file = UploadedFile(
       fieldName: info.name,
       filename: info.filename,
@@ -533,10 +554,11 @@ proc parseMultipart*(
     while not finished:
       let rawHeaders = await state.takeUntil("\r\n\r\n", options.partHeadersSize)
       let info = parsePartInfo(parseHeaders(rawHeaders))
-      if info.hasFilename and result.files.len >= options.limits.maxFiles:
+      let asFile = isUploadPart(info, options)
+      if asFile and result.files.len >= options.limits.maxFiles:
         raiseMultipart(413, "multipart request contains too many files")
       let part = await state.consumePart(info)
-      if info.hasFilename:
+      if asFile:
         result.files.add(part.file)
       else:
         result.fields.mgetOrPut(info.name, @[]).add(part.fieldValue)
@@ -552,20 +574,20 @@ proc parseMultipart*(
       await upload.remove()
     raise
 
-proc removeUploads(files: seq[UploadedFile]): Future[void] {.async: (raises: []).} =
+proc removeUploads*(files: seq[UploadedFile]): Future[void] {.async: (raises: []).} =
+  ## Removes uploaded files from their disk or external storage.
+  ##
+  ## Call this when a successfully parsed upload will not be retained. Memory
+  ## uploads need no explicit cleanup.
   for file in files:
     if file.storage == UploadStorage.External:
       await file.stored.remove()
     elif file.path.len > 0:
       removeCreatedFiles(@[file.path])
 
-proc parseUploads*(
+proc parseConfiguredMultipart(
     request: Request, configs: seq[UploadConfig], store: UploadStore = nil
-): Future[seq[UploadedFile]] {.async: (raises: [CatchableError]).} =
-  ## Parses every required file declared by ``configs`` exactly once.
-  ##
-  ## Each configuration may set its own field name, MIME allowlist, and file
-  ## size. Parser storage and request-level settings must match across fields.
+): Future[MultipartForm] {.async: (raises: [CatchableError]).} =
   if configs.len == 0:
     raise newException(ValueError, "at least one upload configuration is required")
   let configuredUploads = configs
@@ -607,6 +629,9 @@ proc parseUploads*(
       if config.fieldName == fieldName:
         return config.maxFileSize
     0
+  var uploadFieldNames = newSeq[string](configuredUploads.len)
+  for index, config in configuredUploads:
+    uploadFieldNames[index] = config.fieldName
   let options = initMultipartOptions(
     uploadDir = shared.uploadDir,
     storage = shared.storage,
@@ -621,19 +646,28 @@ proc parseUploads*(
     ),
     partHeadersSize = shared.partHeadersSize,
     chunkSize = shared.chunkSize,
+    uploadFieldNames = uploadFieldNames,
   )
-  let form = await request.parseMultipart(options, store)
+  result = await request.parseMultipart(options, store)
   for config in configuredUploads:
     var matches = 0
-    for file in form.files:
+    for file in result.files:
       if file.fieldName == config.fieldName:
         inc(matches)
     if matches != 1:
-      await removeUploads(form.files)
+      await removeUploads(result.files)
       raiseMultipart(
         400, "required upload field '" & config.fieldName & "' must occur exactly once"
       )
-  result = form.files
+
+proc parseUploads*(
+    request: Request, configs: seq[UploadConfig], store: UploadStore = nil
+): Future[seq[UploadedFile]] {.async: (raises: [CatchableError]).} =
+  ## Parses every required file declared by ``configs`` exactly once.
+  ##
+  ## Each configuration may set its own field name, MIME allowlist, and file
+  ## size. Parser storage and request-level settings must match across fields.
+  result = (await request.parseConfiguredMultipart(configs, store)).files
 
 proc parseUpload*(
     request: Request, config: UploadConfig, store: UploadStore = nil
@@ -656,6 +690,97 @@ proc parseTypedUpload[T](
           break
       inc(configIndex)
 
+proc parseMultipartValue[T](raw: string, value: var T): bool {.raises: [].} =
+  try:
+    when T is Option:
+      type Item = typeof(value.get())
+      var item: Item
+      if not parseMultipartValue(raw, item):
+        return false
+      value = some(item)
+    elif T is string:
+      value = raw
+    elif T is char:
+      if raw.len != 1:
+        return false
+      value = raw[0]
+    elif T is bool:
+      value = parseBool(raw)
+    elif T is SomeInteger:
+      value = T(parseBiggestInt(raw))
+    elif T is SomeFloat:
+      value = T(parseFloat(raw))
+    elif T is enum:
+      value = parseEnum[T](raw)
+    else:
+      value = jsonToValue(parseJson(raw), T)
+    true
+  except CatchableError:
+    false
+
+proc parseTypedMultipart[T](
+    request: Request,
+    configs: seq[UploadConfig],
+    inputNames: seq[string],
+    _: typedesc[T],
+    store: UploadStore = nil,
+): Future[T] {.async: (raises: [CatchableError]).} =
+  let form = await request.parseConfiguredMultipart(configs, store)
+  try:
+    for submittedName, submittedValues in form.fields:
+      discard submittedValues
+      var known = false
+      var inputIndex = 0
+      for nimName, field in fieldPairs(result):
+        discard nimName
+        when not (field is UploadedFile):
+          if submittedName == inputNames[inputIndex]:
+            known = true
+            break
+          inc(inputIndex)
+      if not known:
+        raiseMultipart(400, "unexpected multipart field '" & submittedName & "'")
+
+    var configIndex = 0
+    var inputIndex = 0
+    for nimName, field in fieldPairs(result):
+      discard nimName
+      when field is UploadedFile:
+        let expectedName = configs[configIndex].fieldName
+        for file in form.files:
+          if file.fieldName == expectedName:
+            field = file
+            break
+        inc(configIndex)
+      else:
+        let inputName = inputNames[inputIndex]
+        inc(inputIndex)
+        let values = form.fields.getOrDefault(inputName)
+        if values.len == 0:
+          when field is Option:
+            type Item = typeof(field.get())
+            field = none(Item)
+          else:
+            raiseMultipart(400, "required multipart field '" & inputName & "' is missing")
+        elif values.len != 1:
+          raiseMultipart(
+            400, "multipart field '" & inputName & "' must occur exactly once"
+          )
+        elif not parseMultipartValue(values[0], field):
+          raiseMultipart(400, "invalid multipart field '" & inputName & "'")
+  except CatchableError:
+    await removeUploads(form.files)
+    raise
+
+proc removeTypedUploads*[T](value: T): Future[void] {.async: (raises: []).} =
+  ## Removes every direct ``UploadedFile`` field in a typed multipart model.
+  var files: seq[UploadedFile]
+  for nimName, field in fieldPairs(value):
+    discard nimName
+    when field is UploadedFile:
+      files.add(field)
+  await removeUploads(files)
+
 proc bareUploadField(node: NimNode): NimNode {.compileTime.} =
   result = node
   if result.kind == nnkPragmaExpr:
@@ -668,7 +793,7 @@ proc uploadPragma(node: NimNode): NimNode {.compileTime.} =
     return nil
   for pragma in node[1]:
     if pragma.kind in {nnkCall, nnkCommand} and pragma.len >= 1 and
-        eqIdent(pragma[0], "upload"):
+        pragma[0].kind in {nnkIdent, nnkSym} and eqIdent(pragma[0], "upload"):
       return pragma
 
 proc uploadConfigNode(source: NimNode): NimNode {.compileTime.} =
@@ -689,13 +814,15 @@ proc uploadConfigNode(source: NimNode): NimNode {.compileTime.} =
     for index in 2 .. 10:
       result.add(pragma[index])
 
-proc buildTypedUpload(request, model, store: NimNode): NimNode {.compileTime.} =
+proc uploadConfigsNode(
+    model: NimNode, requireOnlyUploads: bool
+): NimNode {.compileTime.} =
   let typeDefinition = model.getImpl
   if typeDefinition.kind != nnkTypeDef or typeDefinition.len != 3:
-    error("typed parseUpload expects an object type", model)
+    error("typed multipart parsing expects an object type", model)
   let objectType = typeDefinition[2]
   if objectType.kind != nnkObjectTy:
-    error("typed parseUpload expects an object type", model)
+    error("typed multipart parsing expects an object type", model)
 
   let fields = objectType[^1]
   if fields.kind != nnkRecList or fields.len == 0:
@@ -703,13 +830,66 @@ proc buildTypedUpload(request, model, store: NimNode): NimNode {.compileTime.} =
   var configs = newNimNode(nnkBracket)
   for definition in fields:
     if definition.kind != nnkIdentDefs or definition.len != 3:
-      error("typed upload fields must be declared one per line", definition)
-    if not eqIdent(definition[^2], "UploadedFile"):
+      error("typed multipart fields must be declared one per line", definition)
+    if definition[^2].kind in {nnkIdent, nnkSym} and
+        eqIdent(definition[^2], "UploadedFile"):
+      configs.add(uploadConfigNode(definition[0]))
+    elif requireOnlyUploads:
       error("typed upload fields must have type UploadedFile", definition)
-    configs.add(uploadConfigNode(definition[0]))
 
-  let configSequence = newTree(nnkPrefix, ident("@"), configs)
+  if configs.len == 0:
+    error("typed multipart objects must contain at least one UploadedFile field", model)
+
+  newTree(nnkPrefix, ident("@"), configs)
+
+proc multipartInputName(source: NimNode): string {.compileTime.} =
+  let field = bareUploadField(source)
+  result = $field
+  if source.kind != nnkPragmaExpr:
+    return
+  for pragma in source[1]:
+    if pragma.kind in {nnkCall, nnkCommand, nnkExprColonExpr} and pragma.len >= 2 and
+        pragma[0].kind in {nnkIdent, nnkSym} and eqIdent(pragma[0], "jsonName"):
+      if pragma[1].kind notin {nnkStrLit, nnkRStrLit, nnkTripleStrLit}:
+        error("jsonName must be a string literal", pragma)
+      result = pragma[1].strVal
+      if result.len == 0:
+        error("jsonName cannot be empty", pragma)
+
+proc multipartInputNamesNode(model: NimNode): NimNode {.compileTime.} =
+  let typeDefinition = model.getImpl
+  let fields = typeDefinition[2][^1]
+  var names = newNimNode(nnkBracket)
+  for definition in fields:
+    if definition[^2].kind notin {nnkIdent, nnkSym} or
+        not eqIdent(definition[^2], "UploadedFile"):
+      names.add(newLit(multipartInputName(definition[0])))
+  newTree(nnkPrefix, ident("@"), names)
+
+proc buildTypedUpload(request, model, store: NimNode): NimNode {.compileTime.} =
+  let configSequence = uploadConfigsNode(model, true)
   result = newCall(bindSym"parseTypedUpload", request, configSequence, store, model)
+
+macro parseMultipartModel*(request: typed, model: typedesc): untyped =
+  ## Parses mixed multipart fields and files into ``model``.
+  ##
+  ## Direct ``UploadedFile`` fields use their ``upload`` pragma. Scalars use
+  ## plain form values, while nested objects and collections use JSON values.
+  let configSequence = uploadConfigsNode(model, false)
+  let inputNames = multipartInputNamesNode(model)
+  newCall(
+    bindSym"parseTypedMultipart", request, configSequence, inputNames, model
+  )
+
+macro parseMultipartModel*(
+    request: typed, model: typedesc, store: typed
+): untyped =
+  ## Parses a mixed multipart model directly into ``store``.
+  let configSequence = uploadConfigsNode(model, false)
+  let inputNames = multipartInputNamesNode(model)
+  newCall(
+    bindSym"parseTypedMultipart", request, configSequence, inputNames, model, store
+  )
 
 macro parseUpload*(request: typed, model: typedesc): untyped =
   ## Parses a typed upload object.

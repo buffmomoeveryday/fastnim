@@ -1182,13 +1182,29 @@ proc typedOpenApiOperation(
       )
   if bodyType.kind != nnkEmpty:
     let mediaType = newLit(contentType)
-    result[^1].add(
-      quote do:
-        `operation`.requestBody = %*{
-          "required": true,
-          "content": {`mediaType`: {"schema": openApiSchema(`bodyType`)}},
-        }
-    )
+    if contentType == "multipart/form-data":
+      result[^1].add(
+        quote do:
+          block:
+            let encoding = openApiMultipartEncoding(`bodyType`)
+            var multipartContent = %*{
+              "schema": openApiMultipartSchema(`bodyType`)
+            }
+            if encoding.len > 0:
+              multipartContent["encoding"] = encoding
+            `operation`.requestBody = %*{
+              "required": true,
+              "content": {`mediaType`: multipartContent},
+            }
+      )
+    else:
+      result[^1].add(
+        quote do:
+          `operation`.requestBody = %*{
+            "required": true,
+            "content": {`mediaType`: {"schema": openApiSchema(`bodyType`)}},
+          }
+      )
     result[^1].add(
       quote do:
         if not `operation`.responses.hasKey("400"):
@@ -1290,6 +1306,34 @@ proc modelIgnoreBody(
   inc ormInputCount
   let inputType = ident("FastnimOrmInput" & $ormInputCount)
   (model, inputType, newCall(ident("typeFrom"), inputType, node))
+
+proc directUploadedField(model: NimNode): NimNode {.compileTime.} =
+  var node = model
+  if node.kind == nnkBracketExpr and node.len == 2 and
+      eqIdent(node[0], "typedesc"):
+    node = node[1]
+  if node.kind != nnkSym:
+    return nil
+  let definition = node.getImpl
+  if definition.kind != nnkTypeDef or definition.len != 3 or
+      definition[2].kind != nnkObjectTy:
+    return nil
+  for field in definition[2][^1]:
+    if field.kind == nnkIdentDefs and field.len == 3 and
+        field[^2].kind in {nnkIdent, nnkSym} and
+        eqIdent(field[^2], "UploadedFile"):
+      return field[0]
+
+macro rejectUploadedFileInJsonBody*(model: typedesc): untyped =
+  ## Compile-time guard: JSON ``body = Model`` must not carry UploadedFile fields.
+  let uploaded = directUploadedField(model)
+  if not uploaded.isNil:
+    error(
+      "JSON body models cannot contain UploadedFile fields; use `multipart = " &
+        model.repr & "` instead",
+      uploaded,
+    )
+  newStmtList()
 
 proc buildTypedRoute(
     app, path, responses, body, `method`, bodyType: NimNode,
@@ -1400,7 +1444,12 @@ proc buildTypedRoute(
     additionalBoundNames,
   )
   let contentType =
-    if inputName == "form": "application/x-www-form-urlencoded" else: "application/json"
+    if inputName == "form":
+      "application/x-www-form-urlencoded"
+    elif inputName == "multipart":
+      "multipart/form-data"
+    else:
+      "application/json"
   let documentation = typedOpenApiOperation(
     `method`, path, normalizedResponses, bodyType, queryType, routeDocs, body,
     contentType,
@@ -1444,6 +1493,37 @@ proc buildTypedRoute(
           `customValidation`
           if not `validation`.isValid():
             return validationResponse(`validation`, source = "query")
+          {.cast(gcsafe).}:
+            `boundBody`,
+        `documentation`,
+      )
+  elif inputName == "multipart":
+    let validation = genSym(nskVar, "validation")
+    let customValidation =
+      if validator.kind == nnkEmpty:
+        newStmtList()
+      else:
+        quote:
+          `validation`.mergeErrors(`validator`(`parsedBody`))
+    result = quote:
+      addRoute(
+        `app`,
+        `method`,
+        `path`,
+        proc(
+            `request`: Request
+        ): Future[Response] {.async: (raises: [CatchableError]).} =
+          var `parsedBody`: `bodyType`
+          `parsedBody` = await parseMultipartModel(`request`, `bodyType`)
+          try:
+            var `validation` = validateModel(`parsedBody`)
+            `customValidation`
+            if not `validation`.isValid():
+              await removeTypedUploads(`parsedBody`)
+              return validationResponse(`validation`, source = "multipart")
+          except CatchableError:
+            await removeTypedUploads(`parsedBody`)
+            raise
           {.cast(gcsafe).}:
             `boundBody`,
         `documentation`,
@@ -1684,6 +1764,11 @@ proc buildBodyRoute(
         inputName = "form"
         parser = ident("parseFormBody")
         invalidMessage = "invalid form request body"
+      of "multipart":
+        bodyType = argument[1]
+        inputName = "multipart"
+        parser = ident("parseMultipartModel")
+        invalidMessage = "invalid multipart request body"
       of "validator":
         validator = argument[1]
       of "tags":
@@ -1725,6 +1810,8 @@ proc buildBodyRoute(
 
   let ignored = modelIgnoreBody(bodyType)
   if ignored.declaration.kind != nnkEmpty:
+    if inputName == "multipart":
+      error("multipart routes do not support model field filtering", bodyType)
     bodyType = ignored.inputType
   result = buildTypedRoute(
     app,
@@ -1740,8 +1827,16 @@ proc buildBodyRoute(
     docs,
     modelType = ignored.model,
   )
+  var prelude = newStmtList()
   if ignored.declaration.kind != nnkEmpty:
-    result = newStmtList(ignored.declaration, result)
+    prelude.add(ignored.declaration)
+  if inputName == "body":
+    let guardModel =
+      if ignored.model.kind != nnkEmpty: ignored.model else: bodyType
+    prelude.add(newCall(ident"rejectUploadedFileInJsonBody", guardModel))
+  if prelude.len > 0:
+    prelude.add(result)
+    result = prelude
 
 proc buildBlockRoute(app, path, body, `method`: NimNode): NimNode {.compileTime.} =
   if body.kind != nnkStmtList:
@@ -1765,8 +1860,10 @@ proc buildBlockRoute(app, path, body, `method`: NimNode): NimNode {.compileTime.
 macro post*(app: Application | Router, path: typed, args: varargs[untyped]): untyped =
   ## Registers a typed POST route with inline OpenAPI metadata.
   ##
-  ## A ``body = Model`` or ``form = Model`` is decoded and automatically
-  ## validated from its field pragmas before the handler runs.
+  ## A ``body = Model``, ``form = Model``, or ``multipart = Model`` is decoded
+  ## and automatically validated from its field pragmas before the handler
+  ## runs. Multipart models combine direct ``UploadedFile`` fields with scalar
+  ## parts and JSON-encoded nested object or collection parts.
   ## ``body = Author.ignore(id)`` decodes the remaining JSON fields and binds
   ## ``body`` as an ``Author``. Supply
   ## ``validator = validateModelBusinessRules`` to merge cross-field or
