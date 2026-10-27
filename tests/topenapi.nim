@@ -1,6 +1,7 @@
 import std/[assertions, json, options, strutils, tables]
 
 import fastnim
+import fastnim/orm
 
 type
   Item = object
@@ -18,6 +19,10 @@ type
 
   ReferencedItem = object
     details: ItemDetails
+
+  BookRef = object
+    authorId: UUID
+    publisherId: Option[UUID]
 
 let app = initFastNim(
   logs = false, openApi = initOpenApiSettings(title = "Inventory", version = "2.0.0")
@@ -82,6 +87,13 @@ block generatedDocument:
   let detailsSchema = referencedSchema["properties"]["details"]
   doAssert detailsSchema["type"].getStr == "object"
   doAssert detailsSchema["properties"]["display_label"]["minLength"].getInt == 1
+  let bookSchema = openApiSchema(BookRef)
+  doAssert bookSchema["properties"]["authorId"]["type"].getStr == "string"
+  doAssert bookSchema["properties"]["authorId"]["format"].getStr == "uuid"
+  doAssert bookSchema["properties"]["publisherId"]["type"].getStr == "string"
+  doAssert bookSchema["properties"]["publisherId"]["format"].getStr == "uuid"
+  doAssert bookSchema["properties"]["publisherId"]["nullable"].getBool()
+  doAssert "bytes" notin bookSchema["properties"]
   doAssert "400" in document["paths"]["/items"]["post"]["responses"]
   doAssert "422" in document["paths"]["/items"]["post"]["responses"]
   doAssert "put" in document["paths"]["/items/{itemId}"]

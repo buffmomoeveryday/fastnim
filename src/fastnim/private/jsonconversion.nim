@@ -222,7 +222,10 @@ proc readObject[T](node: JsonNode, value: var T) =
   readFields(node, value)
 
 proc readJson[T](node: JsonNode, value: var T) =
-  when T is JsonNode:
+  mixin fromJsonHook
+  when compiles(fromJsonHook(value, node)):
+    fromJsonHook(value, node)
+  elif T is JsonNode:
     value = node
   elif T is Option:
     if node.isNil or node.kind == JNull:

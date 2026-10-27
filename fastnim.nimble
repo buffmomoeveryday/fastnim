@@ -1,6 +1,6 @@
 # Package
 
-version = "1.0.3"
+version = "1.0.4"
 author = "Siddhartha Khanal"
 description = "A small FastNim API-inspired web framework for Chronos"
 license = "MIT"

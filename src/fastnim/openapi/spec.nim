@@ -206,6 +206,19 @@ proc namedTypeSchema(name: string): JsonNode {.compileTime.} =
   of "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32",
       "uint64":
     %*{"type": "integer"}
+  of "UUID":
+    ## ORM ``UUIDField`` and foreign-key UUIDs serialize as RFC 4122 strings.
+    %*{"type": "string", "format": "uuid"}
+  of "Time":
+    %*{"type": "string", "format": "date-time"}
+  of "Date":
+    %*{"type": "string", "format": "date"}
+  of "TimeOfDay":
+    %*{"type": "string", "format": "time"}
+  of "Decimal":
+    %*{"type": "string"}
+  of "TimeSpan":
+    %*{"type": "integer", "description": "Duration in microseconds"}
   of "JsonNode":
     newJObject()
   else:

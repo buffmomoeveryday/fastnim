@@ -1,6 +1,6 @@
 ## Minimal RFC 4122 UUID type used by `UUIDField`.
 
-import std/[sysrand, strutils, hashes]
+import std/[hashes, json, strutils, sysrand]
 
 type UUID* = object
   bytes*: array[16, uint8]
@@ -34,3 +34,13 @@ proc parseUUID*(s: string): UUID {.raises: [ValueError].} =
 
 proc hash*(u: UUID): Hash =
   hash(u.bytes)
+
+proc toJsonHook*(u: UUID): JsonNode =
+  ## Encodes a UUID as an RFC 4122 string for JSON responses and OpenAPI examples.
+  newJString($u)
+
+proc fromJsonHook*(u: var UUID, node: JsonNode) {.raises: [ValueError].} =
+  ## Decodes a UUID from a JSON string.
+  if node.isNil or node.kind != JString:
+    raise newException(ValueError, "UUID expects a JSON string")
+  u = parseUUID(node.str)
