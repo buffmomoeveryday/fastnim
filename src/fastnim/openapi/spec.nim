@@ -530,6 +530,8 @@ proc addPathParameters(operation: var JsonNode) =
           %*{"type": "boolean"}
         of PathParamKind.Csv:
           %*{"type": "array", "items": {"type": "string"}}
+        of PathParamKind.Uuid:
+          %*{"type": "string", "format": "uuid"}
         of PathParamKind.String:
           %*{"type": "string"}
       parameters.add(

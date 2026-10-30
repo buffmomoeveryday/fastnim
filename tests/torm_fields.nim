@@ -21,6 +21,8 @@ model Product:
     JSONField(default: """{"ok":true}""")
   blob:
     BinaryField(maxLength: 8, null: true)
+  cover:
+    FileField(uploadToDir: "covers/books", maxLength: 300)
   email:
     EmailField(null: true)
   site:
@@ -54,6 +56,13 @@ suite "field types":
     expect ValueError:
       discard initTimeOfDay(24, 0, 0)
     check timeSpanSeconds(2) == timeSpan(2_000_000)
+    check FileField(uploadToDir = "covers/books/").uploadToDir == "covers/books"
+    expect ValueError:
+      discard FileField(maxLength = 0)
+    expect ValueError:
+      discard FileField(uploadToDir = "/absolute")
+    expect ValueError:
+      discard FileField(uploadToDir = "covers/../private")
 
   test "metadata records kinds, formats, and choices":
     let m = modelMeta(Product)
@@ -62,6 +71,9 @@ suite "field types":
     check m.fields[m.findField("email")].format == ffEmail
     check m.fields[m.findField("email")].kind == fkChar
     check m.fields[m.findField("blob")].kind == fkBinary
+    check m.fields[m.findField("cover")].kind == fkFile
+    check m.fields[m.findField("cover")].uploadToDir == "covers/books"
+    check m.fields[m.findField("cover")].maxLength == 300
     check m.fields[m.findField("level")].choices.len == 3
     let made = newProduct()
     check made.price == decimal("0.00")
@@ -89,6 +101,7 @@ suite "field types":
     item.warranty = timeSpanSeconds(2)
     item.extra = parseJson("""{"n":1}""")
     item.blob = some(@[byte 1, byte 2, byte 3])
+    item.cover = "covers/books/ada.jpg"
     item.email = some("ada@example.com")
     item.site = "https://example.com/a"
     item.slug = "ada-book"
@@ -102,6 +115,7 @@ suite "field types":
     check loaded.warranty == timeSpanSeconds(2)
     check loaded.extra["n"].getInt == 1
     check loaded.blob.get == @[byte 1, byte 2, byte 3]
+    check loaded.cover == "covers/books/ada.jpg"
     check loaded.email.get == "ada@example.com"
     check loaded.status == statusPublished
     let found = await Product.objects.filter(status = statusPublished).all()
@@ -110,6 +124,7 @@ suite "field types":
     check encoded["price"].getStr == "12.50"
     check encoded["extra"]["n"].getInt == 1
     check encoded["warranty"].getInt == 2_000_000
+    check encoded["cover"].getStr == "covers/books/ada.jpg"
     await cleanup(db, dir)
 
   asyncTest "validation rejects bad field values before writing":

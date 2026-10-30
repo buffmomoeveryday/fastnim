@@ -67,6 +67,7 @@ validation and migrations.
 | `BinaryField(maxLength = 0)` | `seq[byte]` | `BLOB` |
 | `EmailField(maxLength = 254)` | `string` | `VARCHAR(n)` |
 | `URLField(maxLength = 200)` | `string` | `VARCHAR(n)` |
+| `FileField(uploadToDir = "", maxLength = 255)` | `string` | `VARCHAR(n)` |
 | `SlugField(maxLength = 50)` | `string` | `VARCHAR(n)` |
 | `ForeignKey(Model, onDelete = Cascade)` | key type of `Model` | key column + `REFERENCES` |
 | `ManyToManyField(Model, relatedName = "")` | relation manager | implicit junction table |
@@ -89,6 +90,11 @@ one `@` and a dotted domain, an `http://` or `https://` prefix, or letters,
 digits, hyphens and underscores. Build a slug from a title with Django-style
 `slugify("Joel is a slug")` (`"joel-is-a-slug"`), also available from
 `import fastnim` / `fastnim/orm`.
+
+`FileField` stores a storage-relative key or path rather than requiring an HTTP URL.
+`uploadToDir` records the relative destination prefix (for example, `"covers/books"`)
+for local or external storage integrations. The multipart layer still owns receiving
+the file; assign the retained local path or an external `StoredUpload.key` to the field.
 
 `choices` limits a string, integer or float field to a list of literals.
 On `CharField`, `EmailField`, `URLField` or `SlugField` it can instead name

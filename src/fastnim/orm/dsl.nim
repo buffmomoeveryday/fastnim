@@ -20,8 +20,8 @@ const indexCache = CacheTable"fastorm.indexes" ## index name -> owning model
 const fieldCtors = [
   "UUIDField", "CharField", "TextField", "IntegerField", "FloatField", "BooleanField",
   "DateTimeField", "DateField", "TimeField", "DurationField", "DecimalField",
-  "JSONField", "BinaryField", "EmailField", "URLField", "SlugField", "ForeignKey",
-  "ManyToManyField",
+  "JSONField", "BinaryField", "FileField", "EmailField", "URLField", "SlugField",
+  "ForeignKey", "ManyToManyField",
 ]
 const choiceFields =
   ["CharField", "EmailField", "URLField", "SlugField", "IntegerField", "FloatField"]
@@ -216,7 +216,7 @@ proc scalarType(ctor: string): NimNode =
   case ctor
   of "UUIDField":
     ident"UUID"
-  of "CharField", "TextField", "EmailField", "URLField", "SlugField":
+  of "CharField", "TextField", "FileField", "EmailField", "URLField", "SlugField":
     ident"string"
   of "IntegerField":
     ident"int"
@@ -280,6 +280,8 @@ proc kindIdent(ctor: string): NimNode =
     ident"fkJson"
   of "BinaryField":
     ident"fkBinary"
+  of "FileField":
+    ident"fkFile"
   else:
     error("fastorm: unsupported field type " & ctor)
 
@@ -298,6 +300,7 @@ proc fieldKind(ctor: string): FieldKind =
   of "DecimalField": fkDecimal
   of "JSONField": fkJson
   of "BinaryField": fkBinary
+  of "FileField": fkFile
   else:
     error("fastorm: unsupported field type " & ctor)
 
@@ -1559,9 +1562,10 @@ proc buildPredicate(
       $lookupNode
   for tl in textLookups:
     if lookupNode != nil and lookupNode.eqIdent(tl):
-      if f.ctor notin ["CharField", "TextField"]:
+      if f.ctor notin ["CharField", "TextField", "FileField"]:
         error(
-          "fastorm: lookup `" & tl & "` needs a CharField or TextField, but " &
+          "fastorm: lookup `" & tl &
+            "` needs a CharField, TextField or FileField, but " &
             targetSpec.name & "." & f.name & " is a " & f.ctor,
           lookupNode,
         )

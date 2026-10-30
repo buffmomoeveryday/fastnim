@@ -2,6 +2,8 @@
 
 import std/[options, strutils]
 
+import ../orm/uuids
+
 type
   PathParamKind* {.pure.} = enum
     ## Supported converters in ``{name:type}`` route segments.
@@ -10,6 +12,7 @@ type
     PositiveInt
     Bool
     Csv
+    Uuid
 
   PathParamSpec* = object ## Parsed name and converter for one path-parameter segment.
     name*: string ## Name exposed to the route handler.
@@ -28,6 +31,8 @@ proc parsePathParamKind*(name: string): Option[PathParamKind] {.raises: [].} =
     some(PathParamKind.Bool)
   of "csv":
     some(PathParamKind.Csv)
+  of "uuid":
+    some(PathParamKind.Uuid)
   else:
     none(PathParamKind)
 
@@ -55,7 +60,7 @@ proc parsePathParamSegment*(segment: string, spec: var PathParamSpec): bool =
     raise newException(
       ValueError,
       "unsupported path parameter type '" & converterName &
-        "'; expected string, int, positiveInt, bool, or csv",
+        "'; expected string, int, positiveInt, bool, csv, or uuid",
     )
   spec = PathParamSpec(name: declaration[0 ..< separator], kind: kind.get())
   true
@@ -86,6 +91,12 @@ proc matchesPathParam*(kind: PathParamKind, raw: string): bool {.raises: [].} =
   of PathParamKind.Bool:
     var value: bool
     parsePathBool(raw, value)
+  of PathParamKind.Uuid:
+    try:
+      discard parseUUID(raw)
+      true
+    except ValueError:
+      false
 
 proc normalizedPath*(path: string): string =
   ## Removes converter suffixes from a route path for OpenAPI output.

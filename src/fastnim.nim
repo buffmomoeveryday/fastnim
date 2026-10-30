@@ -14,6 +14,7 @@ import
     middleware/dsl,
     middleware/builtin,
     openapi/spec,
+    orm/uuids,
     params/extract,
     params/multipart,
     params/uploadsink,
@@ -29,9 +30,9 @@ import
   ]
 
 export
-  http, state, bytes, limits, server, jsonfields, logging, dsl, builtin, spec, extract,
-  multipart, uploadsink, validate, plugin, plugins, router, shortcuts, embed, files,
-  testing, websocket, chronos, jsonutils
+  http, state, bytes, limits, server, jsonfields, logging, dsl, builtin, spec, uuids,
+  extract, multipart, uploadsink, validate, plugin, plugins, router, shortcuts, embed,
+  files, testing, websocket, chronos, jsonutils
 
 when isMainModule:
   import std/os
