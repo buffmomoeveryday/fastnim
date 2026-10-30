@@ -22,6 +22,7 @@ type
     fkDecimal
     fkJson
     fkBinary
+    fkFile
     fkForeignKey
 
   FieldFormat* = enum
@@ -61,6 +62,8 @@ type
     targetKind*: FieldKind ## kind of the referenced primary key
     onDelete*: OnDelete
     relatedName*: string ## reverse accessor; empty when none was set
+    uploadToDir*: string
+      ## Storage-relative directory for file fields; empty means the storage root.
 
   ManyToManyDef* = object
     ## Metadata for an implicit many-to-many junction table. Unlike a
@@ -241,6 +244,29 @@ proc BinaryField*(
     invalid("maxLength must not be negative")
   result = base(fkBinary, false, null, unique, index, column)
   result.maxLength = maxLength
+
+proc FileField*(
+    uploadToDir = "",
+    maxLength = 255,
+    null = false,
+    unique = false,
+    index = false,
+    column = "",
+): FieldDef =
+  ## A storage-relative file key or path stored as text.
+  ##
+  ## ``uploadToDir`` is declarative storage metadata. Local and external
+  ## storage integrations prepend it when choosing the final object key.
+  if maxLength < 1:
+    invalid("FileField maxLength must be at least 1")
+  if uploadToDir.startsWith('/') or uploadToDir.startsWith('\\'):
+    invalid("FileField uploadToDir must be relative")
+  for part in uploadToDir.replace('\\', '/').split('/'):
+    if part == "..":
+      invalid("FileField uploadToDir cannot contain '..'")
+  result = base(fkFile, false, null, unique, index, column)
+  result.maxLength = maxLength
+  result.uploadToDir = uploadToDir.strip(chars = {'/', '\\'})
 
 proc shaped(
     format: FieldFormat,

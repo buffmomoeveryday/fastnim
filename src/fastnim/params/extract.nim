@@ -13,6 +13,7 @@ import std/[json, macros, options, strutils, tables]
 
 import ../context/http
 import ../jsonfields
+import ../orm/uuids
 import ../params/path
 import ../params/validationtypes
 import ../private/jsonconversion
@@ -40,7 +41,8 @@ proc typedPathParam*[T](request: Request, name: string): T =
   ##
   ## Route blocks declare this conversion with ``{name:type}`` and receive a
   ## local named ``name``. Supported result types are ``string``, ``int``,
-  ## ``Positive``, ``bool``, and ``seq[string]`` (the ``csv`` converter).
+  ## ``Positive``, ``bool``, ``seq[string]`` (the ``csv`` converter), and
+  ## ``UUID``.
   ## Callback handlers can call this procedure explicitly; conversion failure
   ## raises ``ValueError``. Typed route matching validates the value first.
   let raw = request.pathParam(name)
@@ -55,10 +57,12 @@ proc typedPathParam*[T](request: Request, name: string): T =
       raise newException(ValueError, "invalid boolean path parameter: " & name)
   elif T is seq[string]:
     result = raw.split(',')
+  elif T is UUID:
+    result = parseUUID(raw)
   else:
     {.
       error:
-        "typed path parameters support string, int, Positive, bool, and seq[string]"
+        "typed path parameters support string, int, Positive, bool, seq[string], and UUID"
     .}
 
 proc queryParam*(

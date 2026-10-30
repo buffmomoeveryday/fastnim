@@ -80,7 +80,7 @@ type
 
 proc sqlType(kind: FieldKind, maxLength: int): string =
   case kind
-  of fkChar:
+  of fkChar, fkFile:
     (if maxLength > 0: "VARCHAR(" & $maxLength & ")" else: "TEXT")
   of fkUUID, fkText, fkDateTime, fkDate, fkTime, fkDecimal, fkJson:
     "TEXT"

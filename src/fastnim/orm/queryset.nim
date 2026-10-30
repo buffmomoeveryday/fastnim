@@ -159,7 +159,7 @@ proc dbToJson(value: DbValue, kind: FieldKind): JsonNode =
       newJString(value.s)
     else:
       newJNull()
-  of fkUUID, fkChar, fkText, fkDateTime, fkDate, fkTime, fkDecimal:
+  of fkUUID, fkChar, fkText, fkDateTime, fkDate, fkTime, fkDecimal, fkFile:
     if value.kind == dvText:
       newJString(value.s)
     else:

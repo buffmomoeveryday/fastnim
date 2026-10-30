@@ -12,6 +12,7 @@ import ../context/state
 import ../core/limits
 import ../logging
 import ../openapi/spec
+import ../orm/uuids
 import ../params/extract
 import ../params/multipart
 import ../params/path
@@ -421,6 +422,8 @@ proc withTypedPathBindings(
               ident("bool")
             of PathParamKind.Csv:
               newTree(nnkBracketExpr, ident("seq"), ident("string"))
+            of PathParamKind.Uuid:
+              bindSym("UUID")
           let extractor = newTree(nnkBracketExpr, bindSym("typedPathParam"), valueType)
           let value = newCall(extractor, request, newLit(spec.name))
           result.add(

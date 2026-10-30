@@ -12,6 +12,8 @@ suite "Typed path parameters":
       %*{"id": id, "raw": request.pathParam("id")}
     router.get("/{page:positiveInt}/{enabled:bool}/{format:string}/{tags:csv}"):
       %*{"page": page, "enabled": enabled, "format": format, "tags": tags}
+    router.post("/upload/cover/{bookId:uuid}"):
+      %*{"bookId": $bookId}
 
     let app = initFastNim(logs = false)
     app.addRouter(router)
@@ -26,6 +28,16 @@ suite "Typed path parameters":
     check converted.json() ==
       %*{"page": 3, "enabled": true, "format": "json", "tags": ["red", "green", "blue"]}
 
+    let uploaded = app.handleSync(
+      initRequest(
+        HttpMethod.Post,
+        "/orders/upload/cover/00112233-4455-6677-8899-aabbccddeeff",
+      )
+    )
+    check uploaded.status == 200
+    check uploaded.json() ==
+      %*{"bookId": "00112233-4455-6677-8899-aabbccddeeff"}
+
   test "does not invoke handlers for invalid converted values":
     var calls = 0
     let app = initFastNim(logs = false)
@@ -38,11 +50,15 @@ suite "Typed path parameters":
     app.get("/flags/{enabled:bool}"):
       inc calls
       %*{"enabled": enabled}
+    app.get("/books/{bookId:uuid}"):
+      inc calls
+      %*{"bookId": $bookId}
 
     check app.handleSync(initRequest(HttpMethod.Get, "/items/nope")).status == 404
     check app.handleSync(initRequest(HttpMethod.Get, "/pages/0")).status == 404
     check app.handleSync(initRequest(HttpMethod.Get, "/pages/-1")).status == 404
     check app.handleSync(initRequest(HttpMethod.Get, "/flags/maybe")).status == 404
+    check app.handleSync(initRequest(HttpMethod.Get, "/books/not-a-uuid")).status == 404
     check calls == 0
 
   test "preserves legacy string path parameters":
@@ -91,6 +107,8 @@ suite "Typed path parameters":
       %*{"enabled": enabled}
     app.get("/tags/{values:csv}"):
       %*{"values": values}
+    app.get("/books/{bookId:uuid}"):
+      %*{"bookId": $bookId}
 
     let document = app.openApiDocument()
     check "/items/{id}" in document["paths"]
@@ -107,3 +125,7 @@ suite "Typed path parameters":
       document["paths"]["/tags/{values}"]["get"]["parameters"][0]["schema"]
     check csvSchema["type"].getStr() == "array"
     check csvSchema["items"]["type"].getStr() == "string"
+    let uuidSchema =
+      document["paths"]["/books/{bookId}"]["get"]["parameters"][0]["schema"]
+    check uuidSchema["type"].getStr() == "string"
+    check uuidSchema["format"].getStr() == "uuid"
